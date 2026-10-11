@@ -1,0 +1,15 @@
+name: domain
+description: Pure Dart domain entities and repository contracts
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  core:
+    path: ../core
+  equatable: ^2.0.5
+
+dev_dependencies:
+  test: ^1.24.0

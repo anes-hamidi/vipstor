@@ -1,0 +1,49 @@
+name: staff_app
+description: Staff application for Moderator, Manager, Cashier, and Driver
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  core:
+    path: ../../packages/core
+  domain:
+    path: ../../packages/domain
+  data:
+    path: ../../packages/data
+  ui_kit:
+    path: ../../packages/ui_kit
+  l10n:
+    path: ../../packages/l10n
+  flutter_riverpod: ^2.5.1
+  go_router: ^14.0.0
+  mobile_scanner: ^5.1.0
+  printing: ^5.13.0
+  pdf: ^3.10.8
+  uuid: ^4.4.0
+  pinput: ^5.0.0
+  flutter_thermal_printer: ^2.3.0
+  geolocator: ^12.0.0
+  geocoding: ^3.0.0
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  flutter_background_service: ^5.0.5
+  wakelock_plus: ^1.2.8
+  signature: ^5.4.1
+  image_picker: ^1.1.2
+  flutter_image_compress: ^2.3.0
+  battery_plus: ^6.0.2
+  url_launcher: ^6.3.0
+  maps_launcher: ^3.0.0+1
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

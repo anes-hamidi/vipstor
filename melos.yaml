@@ -1,0 +1,10 @@
+name: wholesale_monorepo
+repository: https://github.com/wholesale/shop_system
+
+packages:
+  - packages/**
+  - apps/**
+
+command:
+  bootstrap:
+    usePubspecOverrides: true

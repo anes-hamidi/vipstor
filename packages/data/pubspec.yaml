@@ -1,0 +1,24 @@
+name: data
+description: Data access layer, Supabase remote datasources and Drift local offline sync database
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  core:
+    path: ../core
+  domain:
+    path: ../domain
+  supabase_flutter: ^2.5.0
+  drift: ^2.18.0
+  sqlite3_flutter_libs: ^0.5.24
+  path_provider: ^2.1.2
+  path: ^1.9.0
+  uuid: ^4.4.0
+
+dev_dependencies:
+  drift_dev: ^2.18.0
+  build_runner: ^2.4.9
+  test: ^1.24.0

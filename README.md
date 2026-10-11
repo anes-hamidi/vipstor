@@ -1,0 +1,59 @@
+# VIP Wholesale & POS Enterprise System
+
+An offline-resilient, high-throughput Point of Sale (POS), Wholesale Shop Management, and Logistics Distribution platform built with **Flutter**, **Dart**, **Riverpod**, and **Supabase / PostgreSQL**.
+
+---
+
+## 📚 Master Documentation Index
+
+To maintain consistency and follow the development process without architectural deviations or merge conflicts, refer to the following comprehensive documentation:
+
+1. **[CONTEXT.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/CONTEXT.md)**:
+   - Complete system vision, domain models, business workflows, and directory hierarchy.
+   - Non-negotiable architectural rules (Zero-Editable State, Centimes Integer Precision, Result Pattern).
+   - Module specifications (Cashier POS, Manager Purchases, Driver Deliveries, Moderator Audits).
+2. **[CHANGELOG_AUDIT.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/CHANGELOG_AUDIT.md)**:
+   - Full chronological audit log of all release milestones, migrations, and file mutations.
+   - Verification benchmarks, test results, and guidelines to avoid regressions.
+3. **[DEVELOPER_GUIDE.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/DEVELOPER_GUIDE.md)**:
+   - Technical guide covering PostgreSQL single-transaction RPC procedures, dynamic ledger balance views, and role-based access control (RBAC).
+
+---
+
+## 🏗️ Architecture & Monorepo Structure
+
+```
+vip/
+├── apps/
+│   ├── staff_app/         # Moderator, Manager, Cashier (POS), Driver
+│   └── customer_app/      # Wholesale B2B Client Ordering Portal
+├── packages/
+│   ├── core/              # Currency Formatter, Result<S,F>, Failures, Constants
+│   ├── domain/            # Pure Dart Entities & Repository Interfaces
+│   ├── data/              # Repositories, Remote Supabase, Local Drift SQLite
+│   ├── ui_kit/            # Design System (Tokens, Themes, Atomic Widgets)
+│   └── l10n/              # Arabic (RTL) & French Localization
+├── backend/
+│   └── supabase/          # PostgreSQL Migrations, Ledgers, RPCs, Clean Reset
+└── lib/
+    └── main.dart          # Universal Root Application Launcher
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1. Run the Desktop Windows POS Application
+```powershell
+flutter run -d windows
+```
+
+### 2. Run the Web Version
+```powershell
+flutter run -d chrome
+```
+
+### 3. Run Static Code Analysis
+```powershell
+dart analyze apps/staff_app/lib/features/cashier apps/staff_app/lib/providers
+```
