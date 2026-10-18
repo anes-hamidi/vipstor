@@ -88,8 +88,20 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
     if (pin == validPin || pin == '0000' || pin == '1111' || pin == '2222') {
       if (!mounted) return;
       final selected = _selectedStaff;
-      Navigator.of(context, rootNavigator: true).pop(true);
+      final nav = Navigator.of(context);
+      if (nav.canPop()) {
+        nav.pop(true);
+      }
       if (widget.mode == CashierPinMode.switchCashier && selected != null) {
+        final currentAuth = ref.read(authStateProvider);
+        if (currentAuth != null) {
+          ref.read(staffAuditLoggerProvider).logCashierSwitch(
+                previousCashier: currentAuth,
+                newCashier: selected,
+              );
+        } else {
+          ref.read(staffAuditLoggerProvider).logLogin(user: selected);
+        }
         ref.read(authStateProvider.notifier).state = selected;
       }
     } else {
@@ -108,16 +120,17 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final isLockMode = widget.mode == CashierPinMode.unlockTerminal;
-
-    final defaultPinTheme = PinTheme(
-      width: 56,
-      height: 60,
+    final colors = context.appColors;
+       final defaultPinTheme = PinTheme(
+      width: 60,
+      height: 64,
       textStyle: theme.textTheme.headlineMedium?.copyWith(
         fontWeight: FontWeight.bold,
-        color: colorScheme.primary,
+        color: colors.gold,
+        letterSpacing: 2,
       ),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color: colors.obsidianSurface,
         borderRadius: AppRadius.mdAll,
         border: Border.all(color: colorScheme.outlineVariant, width: 1.5),
       ),
@@ -125,8 +138,9 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
 
     final focusedPinTheme = defaultPinTheme.copyWith(
       decoration: defaultPinTheme.decoration!.copyWith(
-        border: Border.all(color: colorScheme.primary, width: 2.5),
-        color: colorScheme.primaryContainer.withValues(alpha: 0.2),
+        border: Border.all(color: colors.gold, width: 2.5),
+        color: colors.gold.withValues(alpha: 0.12),
+        boxShadow: [AppShadows.goldRim],
       ),
     );
 
@@ -139,6 +153,7 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
 
     return Dialog(
       shape: const RoundedRectangleBorder(borderRadius: AppRadius.xlAll),
+      backgroundColor: colors.obsidianCard,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 480),
         child: Padding(
@@ -147,23 +162,23 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Header Icon
+              // Header Icon — gold gradient circle
               Container(
-                padding: const EdgeInsetsDirectional.all(14),
+                width: 72,
+                height: 72,
                 decoration: BoxDecoration(
-                  color: isLockMode
-                      ? colorScheme.errorContainer
-                      : colorScheme.primaryContainer,
+                  gradient: isLockMode
+                      ? LinearGradient(colors: [colorScheme.error, colorScheme.errorContainer])
+                      : AppGradients.goldFoil,
                   shape: BoxShape.circle,
+                  boxShadow: const [AppShadows.goldRim],
                 ),
                 child: Icon(
                   isLockMode
                       ? Icons.lock_outline_rounded
                       : Icons.lock_person_outlined,
-                  size: 32,
-                  color: isLockMode
-                      ? colorScheme.onErrorContainer
-                      : colorScheme.onPrimaryContainer,
+                  size: 34,
+                  color: isLockMode ? Colors.white : colors.obsidian,
                 ),
               ),
               AppSpacing.gapMd,
@@ -202,9 +217,9 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
                   padding: const EdgeInsetsDirectional.symmetric(
                       horizontal: AppSpacing.md),
                   decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainer,
+                    color: colors.obsidianSurface,
                     borderRadius: AppRadius.mdAll,
-                    border: Border.all(color: colorScheme.outlineVariant),
+                    border: Border.all(color: colors.gold.withValues(alpha: 0.3)),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
@@ -365,10 +380,10 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
                   if (_isVerifying)
                     const CircularProgressIndicator.adaptive()
                   else
-                    FilledButton.icon(
+                    GoldButton.icon(
                       onPressed: () => _verifyPin(_pinController.text),
-                      icon: const Icon(Icons.check, size: 18),
-                      label: Text(isLockMode ? 'فتح القفل' : 'تأكيد التبديل'),
+                      icon: Icons.check_rounded,
+                      label: isLockMode ? 'فتح القفل' : 'تأكيد',
                     ),
                 ],
               ),

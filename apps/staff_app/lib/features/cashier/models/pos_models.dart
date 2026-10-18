@@ -2,14 +2,57 @@ import 'package:equatable/equatable.dart';
 import 'package:domain/domain.dart';
 
 enum PosItemUnit {
-  piece('قطعة', 1),
-  pack('حزمة', 6),
-  carton('كرتون', 12),
-  box('صندوق', 24);
+  box('علبة (Boîte)', 1, 'علبة', 'Boîte', 'Bte'),
+  carton('كرتون (Carton)', 12, 'كرتون', 'Carton', 'Ctn'),
+  pack('طرد (Pack)', 6, 'طرد', 'Pack', 'Pk'),
+  kg('كغ (Kg)', 1, 'كغ', 'Kg', 'Kg'),
+  g('غرام (g)', 1, 'غ', 'g', 'g'),
+  piece('قطعة (Pièce)', 1, 'قطعة', 'Pièce', 'Pc'),
+  l('لتر (L)', 1, 'لتر', 'L', 'L');
 
   final String label;
   final int defaultFactor;
-  const PosItemUnit(this.label, this.defaultFactor);
+  final String arabicName;
+  final String frenchName;
+  final String shortCode;
+
+  const PosItemUnit(
+    this.label,
+    this.defaultFactor,
+    this.arabicName,
+    this.frenchName,
+    this.shortCode,
+  );
+
+  /// Formatted string for thermal/paper invoices and receipts, e.g. "علبة (Boîte)" or "كغ (Kg)"
+  String get invoiceLabel => '$arabicName ($frenchName)';
+
+  /// Compact unit string for narrow receipts (e.g. "كرتون", "علبة", "كغ")
+  String get receiptLabel => arabicName;
+
+  static PosItemUnit fromString(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return PosItemUnit.piece;
+    final s = raw.trim().toLowerCase();
+    if (s.contains('boit') || s.contains('box') || s.contains('علب') || s.contains('صندوق')) {
+      return PosItemUnit.box;
+    }
+    if (s.contains('carton') || s.contains('كرتون')) {
+      return PosItemUnit.carton;
+    }
+    if (s.contains('pack') || s.contains('طرد') || s.contains('حزم')) {
+      return PosItemUnit.pack;
+    }
+    if (s == 'kg' || s.contains('كغ') || s.contains('كيلو')) {
+      return PosItemUnit.kg;
+    }
+    if (s == 'g' || s.contains('غرام') || s == 'غ' || s.contains('gram')) {
+      return PosItemUnit.g;
+    }
+    if (s == 'l' || s.contains('لتر') || s.contains('litre')) {
+      return PosItemUnit.l;
+    }
+    return PosItemUnit.piece;
+  }
 }
 
 class PosCartItem extends Equatable {
@@ -27,6 +70,11 @@ class PosCartItem extends Equatable {
   final double discountPercent; // e.g. 5.0 for 5%
   final int manualDiscountCentimes; // fixed discount in centimes
   final bool isCustomItem;
+  /// The active pricing tier for this line. Null for custom items.
+  final PriceTier? activeTier;
+  /// All price tiers from the source product, so the cashier can switch tier
+  /// without going back to the product list.
+  final List<ProductPriceTier> availableTiers;
 
   const PosCartItem({
     required this.id,
@@ -43,22 +91,27 @@ class PosCartItem extends Equatable {
     this.discountPercent = 0.0,
     this.manualDiscountCentimes = 0,
     this.isCustomItem = false,
+    this.activeTier,
+    this.availableTiers = const [],
   });
 
   factory PosCartItem.fromProduct(ProductEntity product, {int qty = 1, PriceTier tier = PriceTier.wholesale}) {
     final price = product.getPriceForQuantity(tier, qty);
+    final parsedUnit = PosItemUnit.fromString(product.unit);
     return PosCartItem(
       id: product.id,
       productId: product.id,
       nameAr: product.nameAr,
       nameFr: product.nameFr,
       barcode: product.barcodes.isNotEmpty ? product.barcodes.first : '',
-      unit: PosItemUnit.piece,
-      unitsPerPack: product.packSize > 0 ? product.packSize : 1,
+      unit: parsedUnit,
+      unitsPerPack: product.packSize > 0 ? product.packSize : (parsedUnit.defaultFactor > 1 ? parsedUnit.defaultFactor : 1),
       quantity: qty,
       baseUnitPriceCentimes: price,
       unitCostCentimes: product.lastUnitCostCentimes,
       availableStock: product.availableQty,
+      activeTier: tier,
+      availableTiers: product.prices,
     );
   }
 
@@ -88,6 +141,9 @@ class PosCartItem extends Equatable {
   int get unitMultiplier {
     switch (unit) {
       case PosItemUnit.piece:
+      case PosItemUnit.kg:
+      case PosItemUnit.g:
+      case PosItemUnit.l:
         return 1;
       case PosItemUnit.pack:
       case PosItemUnit.carton:
@@ -114,6 +170,8 @@ class PosCartItem extends Equatable {
     int? baseUnitPriceCentimes,
     double? discountPercent,
     int? manualDiscountCentimes,
+    PriceTier? activeTier,
+    List<ProductPriceTier>? availableTiers,
   }) {
     return PosCartItem(
       id: id,
@@ -130,6 +188,8 @@ class PosCartItem extends Equatable {
       discountPercent: discountPercent ?? this.discountPercent,
       manualDiscountCentimes: manualDiscountCentimes ?? this.manualDiscountCentimes,
       isCustomItem: isCustomItem,
+      activeTier: activeTier ?? this.activeTier,
+      availableTiers: availableTiers ?? this.availableTiers,
     );
   }
 
@@ -143,6 +203,7 @@ class PosCartItem extends Equatable {
         baseUnitPriceCentimes,
         discountPercent,
         manualDiscountCentimes,
+        activeTier,
       ];
 }
 
@@ -177,6 +238,8 @@ class PosShiftSession extends Equatable {
   final int creditSalesCentimes;
   final int returnsCentimes;
   final int collectedDebtCashCentimes;
+  final int supplierPaymentsCashCentimes;
+  final int driverSettlementCashCentimes;
   final DateTime openedAt;
   final bool isOpen;
 
@@ -190,18 +253,27 @@ class PosShiftSession extends Equatable {
     this.creditSalesCentimes = 0,
     this.returnsCentimes = 0,
     this.collectedDebtCashCentimes = 0,
+    this.supplierPaymentsCashCentimes = 0,
+    this.driverSettlementCashCentimes = 0,
     required this.openedAt,
     this.isOpen = true,
   });
 
   int get expectedCashInDrawerCentimes =>
-      openingFloatCentimes + cashSalesCentimes + collectedDebtCashCentimes - returnsCentimes;
+      openingFloatCentimes +
+      cashSalesCentimes +
+      collectedDebtCashCentimes +
+      driverSettlementCashCentimes -
+      returnsCentimes -
+      supplierPaymentsCashCentimes;
 
   PosShiftSession copyWith({
     int? cashSalesCentimes,
     int? creditSalesCentimes,
     int? returnsCentimes,
     int? collectedDebtCashCentimes,
+    int? supplierPaymentsCashCentimes,
+    int? driverSettlementCashCentimes,
     bool? isOpen,
   }) {
     return PosShiftSession(
@@ -214,6 +286,8 @@ class PosShiftSession extends Equatable {
       creditSalesCentimes: creditSalesCentimes ?? this.creditSalesCentimes,
       returnsCentimes: returnsCentimes ?? this.returnsCentimes,
       collectedDebtCashCentimes: collectedDebtCashCentimes ?? this.collectedDebtCashCentimes,
+      supplierPaymentsCashCentimes: supplierPaymentsCashCentimes ?? this.supplierPaymentsCashCentimes,
+      driverSettlementCashCentimes: driverSettlementCashCentimes ?? this.driverSettlementCashCentimes,
       openedAt: openedAt,
       isOpen: isOpen ?? this.isOpen,
     );
@@ -229,6 +303,8 @@ class PosShiftSession extends Equatable {
         creditSalesCentimes,
         returnsCentimes,
         collectedDebtCashCentimes,
+        supplierPaymentsCashCentimes,
+        driverSettlementCashCentimes,
         isOpen,
       ];
 }
@@ -242,6 +318,8 @@ class ZReportSummary extends Equatable {
   final int cashSalesCentimes;
   final int creditSalesCentimes;
   final int collectedDebtCashCentimes;
+  final int supplierPaymentsCashCentimes;
+  final int driverSettlementCashCentimes;
   final int totalSalesCentimes;
   final int returnsCentimes;
   final int expectedCashCentimes;
@@ -258,6 +336,8 @@ class ZReportSummary extends Equatable {
     required this.cashSalesCentimes,
     required this.creditSalesCentimes,
     this.collectedDebtCashCentimes = 0,
+    this.supplierPaymentsCashCentimes = 0,
+    this.driverSettlementCashCentimes = 0,
     required this.totalSalesCentimes,
     required this.returnsCentimes,
     required this.expectedCashCentimes,
@@ -274,6 +354,9 @@ class ZReportSummary extends Equatable {
         closedAt,
         totalSalesCentimes,
         collectedDebtCashCentimes,
+        supplierPaymentsCashCentimes,
+        driverSettlementCashCentimes,
         varianceCentimes,
       ];
 }
+

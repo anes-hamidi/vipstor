@@ -8,72 +8,126 @@ import '../features/moderator/moderator_dashboard_screen.dart';
 import '../features/manager/purchase_receiving_screen.dart';
 import '../features/cashier/counter_pos_screen.dart';
 import '../features/driver/driver_deliveries_screen.dart';
+import '../providers/staff_providers.dart';
 
+// ── Auth state ─────────────────────────────────────────────────────────────────
+// Holds the resolved user after both Supabase session check AND PIN verify.
 final authStateProvider = StateProvider<UserEntity?>((ref) => null);
 
-class AuthNotifierListenable extends ChangeNotifier {
-  final Ref ref;
-  AuthNotifierListenable(this.ref) {
-    ref.listen<UserEntity?>(authStateProvider, (_, __) {
+// Tracks whether session restore has been attempted on boot.
+final sessionRestoredProvider = StateProvider<bool>((ref) => false);
+
+// ── Router refresh listenable ──────────────────────────────────────────────────
+class _AuthChangeNotifier extends ChangeNotifier {
+  _AuthChangeNotifier(Ref ref) {
+    ref.listen<UserEntity?>(authStateProvider, (prev, next) {
+      if (prev != null && next == null) {
+        // Staff logged out
+        ref.read(staffAuditLoggerProvider).logLogout(user: prev);
+      }
       notifyListeners();
     });
+    ref.listen<bool>(sessionRestoredProvider, (_, __) => notifyListeners());
   }
 }
 
-final authListenableProvider = Provider<AuthNotifierListenable>((ref) {
-  return AuthNotifierListenable(ref);
+final _authListenableProvider = Provider<_AuthChangeNotifier>((ref) {
+  return _AuthChangeNotifier(ref);
 });
 
+// ── Session restore on boot ────────────────────────────────────────────────────
+// Attempts to rehydrate from an existing Supabase session (survives app restart).
+final _sessionRestoreProvider = FutureProvider<void>((ref) async {
+  try {
+    final repo = ref.read(authRepositoryProvider);
+    final user = await repo.getCurrentUser();
+    if (user != null && user.active && user.role != UserRole.customer) {
+      ref.read(authStateProvider.notifier).state = user;
+    }
+  } catch (_) {
+    // No valid session — stays on login screen
+  } finally {
+    ref.read(sessionRestoredProvider.notifier).state = true;
+  }
+});
+
+// ── Router ────────────────────────────────────────────────────────────────────
 final staffRouterProvider = Provider<GoRouter>((ref) {
-  final authListenable = ref.watch(authListenableProvider);
+  // Trigger session restore once
+  ref.watch(_sessionRestoreProvider);
+  final listenable = ref.watch(_authListenableProvider);
 
   return GoRouter(
     initialLocation: '/login',
-    refreshListenable: authListenable,
+    refreshListenable: listenable,
     routes: [
       GoRoute(
         path: '/login',
-        builder: (context, state) => const LoginScreen(),
+        builder: (_, __) => const LoginScreen(),
       ),
       GoRoute(
         path: '/moderator',
-        builder: (context, state) => const ModeratorDashboardScreen(),
+        builder: (_, __) => const ModeratorDashboardScreen(),
       ),
       GoRoute(
         path: '/manager',
-        builder: (context, state) => const PurchaseReceivingScreen(),
+        builder: (_, __) => const PurchaseReceivingScreen(),
       ),
       GoRoute(
         path: '/cashier',
-        builder: (context, state) => const CounterPosScreen(),
+        builder: (_, __) => const CounterPosScreen(),
       ),
       GoRoute(
         path: '/driver',
-        builder: (context, state) => const DriverDeliveriesScreen(),
+        builder: (_, __) => const DriverDeliveriesScreen(),
       ),
     ],
     redirect: (context, state) {
+      final restored = ref.read(sessionRestoredProvider);
+      // While session restore is in flight, stay on splash/login — no redirect
+      if (!restored) return state.matchedLocation == '/login' ? null : '/login';
+
       final authUser = ref.read(authStateProvider);
       final isLoggingIn = state.matchedLocation == '/login';
+
+      // Not authenticated → login
       if (authUser == null) {
         return isLoggingIn ? null : '/login';
       }
 
-      if (isLoggingIn) {
-        switch (authUser.role) {
-          case UserRole.moderator:
-            return '/moderator';
-          case UserRole.manager:
-            return '/manager';
-          case UserRole.cashier:
-            return '/cashier';
-          case UserRole.driver:
-            return '/driver';
-          case UserRole.customer:
-            return '/login';
-        }
+      // Inactive account → back to login (cleared below)
+      if (!authUser.active) {
+        ref.read(authStateProvider.notifier).state = null;
+        return '/login';
       }
+
+      // Authenticated + on login page → redirect to role dashboard
+      if (isLoggingIn) {
+        return _dashboardFor(authUser.role);
+      }
+
+      // Role guard: ensure current route matches the user's role
+      final expected = _dashboardFor(authUser.role);
+      if (state.matchedLocation != expected) {
+        return expected;
+      }
+
       return null;
     },
   );
 });
+
+String _dashboardFor(UserRole role) {
+  switch (role) {
+    case UserRole.moderator:
+      return '/moderator';
+    case UserRole.manager:
+      return '/manager';
+    case UserRole.cashier:
+      return '/cashier';
+    case UserRole.driver:
+      return '/driver';
+    case UserRole.customer:
+      return '/login'; // customers use the customer app
+  }
+}

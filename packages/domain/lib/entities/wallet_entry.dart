@@ -69,3 +69,31 @@ class SettlementEntity extends Equatable {
         createdAt,
       ];
 }
+
+class DriverSettlementSummaryEntity extends Equatable {
+  final String driverId;
+  final String driverName;
+  final String driverPhone;
+  final int pendingCashCentimes;
+  final int unsettledOrdersCount;
+  final DateTime? lastDeliveredAt;
+
+  const DriverSettlementSummaryEntity({
+    required this.driverId,
+    required this.driverName,
+    required this.driverPhone,
+    required this.pendingCashCentimes,
+    required this.unsettledOrdersCount,
+    this.lastDeliveredAt,
+  });
+
+  @override
+  List<Object?> get props => [
+        driverId,
+        driverName,
+        driverPhone,
+        pendingCashCentimes,
+        unsettledOrdersCount,
+        lastDeliveredAt,
+      ];
+}

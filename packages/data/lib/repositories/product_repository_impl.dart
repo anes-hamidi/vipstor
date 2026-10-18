@@ -1,12 +1,37 @@
+import 'dart:convert';
 import 'package:domain/domain.dart';
+import 'package:drift/drift.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../datasources/remote/supabase_service.dart';
+import '../datasources/local/app_database.dart';
+import '../datasources/local/connectivity_service.dart';
 
+/// Offline-first product repository.
+///
+/// Read path:
+///   1. Return cached data from SQLite immediately.
+///   2. If online AND the cache is stale (> 5 min) OR empty, refresh from
+///      Supabase in the background and update the cache.
+///
+/// Write path (saveProduct / adjustStock):
+///   Requires connectivity — these are manager operations that need
+///   immediate DB confirmation for stock accuracy.
 class ProductRepositoryImpl implements IProductRepository {
   final SupabaseClient client;
   final SupabaseService service;
+  final AppDatabase db;
+  final bool isCustomerPortal;
 
-  ProductRepositoryImpl({required this.client, required this.service});
+  static const _staleDuration = Duration(minutes: 5);
+
+  ProductRepositoryImpl({
+    required this.client,
+    required this.service,
+    required this.db,
+    this.isCustomerPortal = false,
+  });
+
+  // ── Public API ────────────────────────────────────────────────────────────
 
   @override
   Future<List<ProductEntity>> getProducts({
@@ -14,184 +39,76 @@ class ProductRepositoryImpl implements IProductRepository {
     String? category,
     bool? onlyActive,
   }) async {
-    var query = client.from('products').select('''
-      id,
-      name_ar,
-      name_fr,
-      category,
-      unit,
-      pack_size,
-      photo_url,
-      last_unit_cost,
-      active,
-      product_prices ( id, tier, min_qty, price ),
-      product_barcodes ( barcode, units_per_scan )
-    ''');
+    // 1. Trigger background sync if stale / online
+    _maybeRefreshCache();
 
-    if (onlyActive ?? true) {
-      query = query.eq('active', true);
-    }
-    if (category != null && category.isNotEmpty) {
-      query = query.eq('category', category);
+    // 2. Read from local cache
+    final cached = await db.getAllProducts();
+    if (cached.isEmpty && ConnectivityService.instance.isOnline) {
+      // Cold start with connectivity — wait for the first sync before returning
+      await _syncProductsFromRemote();
+      return _buildEntitiesFromCache(search, category, onlyActive);
     }
 
-    final productRows = await query.order('created_at', ascending: false);
-
-    // Fetch live stock from view_product_stock
-    final stockRows = await client.from('view_product_stock').select('product_id, on_hand_qty, available_qty');
-    final stockMap = <String, Map<String, int>>{};
-    for (final s in stockRows as List) {
-      stockMap[s['product_id'] as String] = {
-        'on_hand': (s['on_hand_qty'] as num?)?.toInt() ?? 0,
-        'available': (s['available_qty'] as num?)?.toInt() ?? 0,
-      };
-    }
-
-    final List<ProductEntity> result = [];
-    for (final row in productRows as List) {
-      final pid = row['id'] as String;
-      final stock = stockMap[pid] ?? {'on_hand': 0, 'available': 0};
-
-      final pricesList = (row['product_prices'] as List? ?? []).map((p) {
-        return ProductPriceTier(
-          id: p['id'] as String,
-          tier: PriceTier.fromString(p['tier'] as String),
-          minQty: (p['min_qty'] as num).toInt(),
-          priceCentimes: (p['price'] as num).toInt(),
-        );
-      }).toList();
-
-      final barcodesList = (row['product_barcodes'] as List? ?? [])
-          .map((b) => b['barcode'] as String)
-          .toList();
-
-      final product = ProductEntity(
-        id: pid,
-        nameAr: row['name_ar'] as String,
-        nameFr: row['name_fr'] as String,
-        category: row['category'] as String,
-        unit: row['unit'] as String? ?? 'piece',
-        packSize: (row['pack_size'] as num?)?.toInt() ?? 1,
-        photoUrl: row['photo_url'] as String?,
-        lastUnitCostCentimes: (row['last_unit_cost'] as num?)?.toInt() ?? 0,
-        onHandQty: stock['on_hand'] ?? 0,
-        availableQty: stock['available'] ?? 0,
-        active: row['active'] as bool? ?? true,
-        barcodes: barcodesList,
-        prices: pricesList,
-      );
-
-      if (search != null && search.trim().isNotEmpty) {
-        final q = search.trim().toLowerCase();
-        final match = product.nameAr.toLowerCase().contains(q) ||
-            product.nameFr.toLowerCase().contains(q) ||
-            product.barcodes.any((b) => b.contains(q));
-        if (match) {
-          result.add(product);
-        }
-      } else {
-        result.add(product);
-      }
-    }
-
-    return result;
+    return _buildEntitiesFromCache(search, category, onlyActive,
+        cached: cached);
   }
 
   @override
   Future<ProductEntity?> getProductByBarcode(String barcode) async {
+    // Try local first
+    final local = await db.getProductByBarcode(barcode.trim());
+    if (local != null) return _cachedToEntity(local);
+
+    // Fallback: remote lookup
+    if (!ConnectivityService.instance.isOnline) return null;
     final barcodeRows = await client
         .from('product_barcodes')
         .select('product_id')
         .eq('barcode', barcode.trim())
         .limit(1);
-
-    if ((barcodeRows as List).isEmpty) {
-      return null;
-    }
+    if ((barcodeRows as List).isEmpty) return null;
 
     final productId = barcodeRows.first['product_id'] as String;
-    final products = await getProducts(onlyActive: false);
-    return products.where((p) => p.id == productId).firstOrNull;
-  }
-
-  Future<String> _resolveValidUserId(String? candidateId) async {
-    if (candidateId != null && candidateId.isNotEmpty && candidateId != '22222222-2222-2222-2222-222222222222') {
-      try {
-        final rows = await client.from('users').select('id').eq('id', candidateId).limit(1);
-        if ((rows as List).isNotEmpty) {
-          return candidateId;
-        }
-      } catch (_) {}
-    }
-
-    try {
-      final rows = await client.from('users').select('id').limit(1);
-      if ((rows as List).isNotEmpty) {
-        return rows.first['id'] as String;
-      }
-    } catch (_) {}
-
-    return '11111111-1111-1111-1111-111111111111';
+    final all = await getProducts(onlyActive: false);
+    return all.where((p) => p.id == productId).firstOrNull;
   }
 
   @override
-  Future<void> saveProduct(ProductEntity product, {int initialOpeningStock = 0, String? userId}) async {
-    await client.from('products').upsert({
-      'id': product.id,
-      'name_ar': product.nameAr,
-      'name_fr': product.nameFr,
-      'category': product.category,
-      'unit': product.unit,
-      'pack_size': product.packSize,
-      'photo_url': product.photoUrl,
-      'last_unit_cost': product.lastUnitCostCentimes,
-      'active': product.active,
+  Future<void> saveProduct(ProductEntity product,
+      {int initialOpeningStock = 0, String? userId}) async {
+    final effectiveUserId = await _resolveValidUserId(
+        userId ?? client.auth.currentUser?.id);
+    final openingQty =
+        initialOpeningStock > 0 ? initialOpeningStock : product.onHandQty;
+
+    await client.rpc('rpc_create_product', params: {
+      'p_product': {
+        'id': product.id,
+        'name_ar': product.nameAr,
+        'name_fr': product.nameFr,
+        'category': product.category,
+        'unit': product.unit,
+        'pack_size': product.packSize,
+        'photo_url': product.photoUrl,
+        'last_unit_cost': product.lastUnitCostCentimes,
+        'active': product.active,
+      },
+      'p_barcodes': product.barcodes,
+      'p_prices': product.prices
+          .map((p) => {
+                'id': p.id,
+                'tier': p.tier.name,
+                'min_qty': p.minQty,
+                'price': p.priceCentimes,
+              })
+          .toList(),
+      'p_opening_stock': openingQty,
+      'p_user_id': effectiveUserId,
     });
 
-    if (product.barcodes.isNotEmpty) {
-      for (final barcode in product.barcodes) {
-        await client.from('product_barcodes').upsert({
-          'barcode': barcode,
-          'product_id': product.id,
-          'units_per_scan': 1,
-        });
-      }
-    }
-
-    if (product.prices.isNotEmpty) {
-      for (final price in product.prices) {
-        await client.from('product_prices').upsert({
-          'id': price.id,
-          'product_id': product.id,
-          'tier': price.tier.name,
-          'min_qty': price.minQty,
-          'price': price.priceCentimes,
-        });
-      }
-    }
-
-    // If opening stock was specified, write opening stock_ledger record
-    final openingQty = initialOpeningStock > 0 ? initialOpeningStock : product.onHandQty;
-    if (openingQty > 0) {
-      final existingLedger = await client
-          .from('stock_ledger')
-          .select('id')
-          .eq('product_id', product.id)
-          .limit(1);
-
-      if ((existingLedger as List).isEmpty) {
-        final effectiveUserId = await _resolveValidUserId(userId ?? client.auth.currentUser?.id);
-        await client.from('stock_ledger').insert({
-          'product_id': product.id,
-          'qty_change': openingQty,
-          'reason': 'adjustment',
-          'ref_type': 'initial_opening_stock',
-          'ref_id': product.id,
-          'user_id': effectiveUserId,
-          'notes': 'المخزون الافتتاحي الأولي عند إنشاء المنتج',
-        });
-      }
-    }
+    // Refresh cache after successful write
+    await _syncProductsFromRemote();
   }
 
   @override
@@ -208,5 +125,225 @@ class ProductRepositoryImpl implements IProductRepository {
       qtyChange: qtyChange,
       reason: reason,
     );
+    // Refresh cache after stock adjustment
+    await _syncProductsFromRemote();
+  }
+
+  // ── Cache management ──────────────────────────────────────────────────────
+
+  Future<void> _maybeRefreshCache() async {
+    if (!ConnectivityService.instance.isOnline) return;
+    final lastSync = await db.getLastSync('products');
+    final isStale =
+        lastSync == null || DateTime.now().difference(lastSync) > _staleDuration;
+    if (isStale) {
+      // Fire-and-forget; don't await so UI gets cached data immediately
+      _syncProductsFromRemote().ignore();
+    }
+  }
+
+  Future<void> _syncProductsFromRemote() async {
+    try {
+      if (isCustomerPortal) {
+        await _syncCustomerPortalProducts();
+      } else {
+        await _syncStaffProducts();
+      }
+      await db.setLastSync('products', DateTime.now());
+    } catch (_) {
+      // Sync failure is silent — cached data remains available
+    }
+  }
+
+  Future<void> _syncStaffProducts() async {
+    final productRows = await client.from('products').select('''
+      id, name_ar, name_fr, category, unit, pack_size,
+      photo_url, last_unit_cost, active,
+      product_prices ( id, tier, min_qty, price ),
+      product_barcodes ( barcode )
+    ''');
+
+    final stockRows = await client
+        .from('view_product_stock')
+        .select('product_id, on_hand_qty, available_qty');
+    final stockMap = <String, Map<String, int>>{};
+    for (final s in stockRows as List) {
+      stockMap[s['product_id'] as String] = {
+        'on_hand': (s['on_hand_qty'] as num?)?.toInt() ?? 0,
+        'available': (s['available_qty'] as num?)?.toInt() ?? 0,
+      };
+    }
+
+    final companions = (productRows as List).map<CachedProductsCompanion>((r) {
+      final pid = r['id'] as String;
+      final stock = stockMap[pid] ?? {'on_hand': 0, 'available': 0};
+      final prices = (r['product_prices'] as List? ?? []);
+      final barcodes = (r['product_barcodes'] as List? ?? [])
+          .map((b) => b['barcode'] as String)
+          .toList();
+      return CachedProductsCompanion.insert(
+        id: pid,
+        nameAr: r['name_ar'] as String? ?? '',
+        nameFr: r['name_fr'] as String? ?? '',
+        category: r['category'] as String? ?? '',
+        unit: r['unit'] as String? ?? 'piece',
+        packSize: (r['pack_size'] as num?)?.toInt() ?? 1,
+        lastUnitCostCentimes:
+            (r['last_unit_cost'] as num?)?.toInt() ?? 0,
+        onHandQty: stock['on_hand'] ?? 0,
+        availableQty: stock['available'] ?? 0,
+        active: r['active'] as bool? ?? true,
+        photoUrl: Value(r['photo_url'] as String?),
+        pricesJson: jsonEncode(prices),
+        barcodesJson: jsonEncode(barcodes),
+        syncedAt: DateTime.now(),
+      );
+    }).toList();
+
+    await db.upsertProducts(companions);
+  }
+
+  Future<void> _syncCustomerPortalProducts() async {
+    final viewRows = await client
+        .from('view_customer_products')
+        .select(
+            'product_id, name_ar, name_fr, category, unit, pack_size, photo_url, active, available_qty')
+        .eq('active', true);
+
+    if ((viewRows as List).isEmpty) return;
+    final ids = viewRows.map((r) => r['product_id'] as String).toList();
+
+    final priceRows = await client
+        .from('product_prices')
+        .select('id, product_id, tier, min_qty, price')
+        .inFilter('product_id', ids);
+
+    final barcodeRows = await client
+        .from('product_barcodes')
+        .select('product_id, barcode')
+        .inFilter('product_id', ids);
+
+    final pricesMap = <String, List<Map<String, dynamic>>>{};
+    for (final p in priceRows as List) {
+      pricesMap.putIfAbsent(p['product_id'] as String, () => [])
+        .add(Map<String, dynamic>.from(p));
+    }
+    final barcodesMap = <String, List<String>>{};
+    for (final b in barcodeRows as List) {
+      barcodesMap.putIfAbsent(b['product_id'] as String, () => [])
+        .add(b['barcode'] as String);
+    }
+
+    final companions = viewRows.map<CachedProductsCompanion>((r) {
+      final pid = r['product_id'] as String;
+      return CachedProductsCompanion.insert(
+        id: pid,
+        nameAr: r['name_ar'] as String? ?? '',
+        nameFr: r['name_fr'] as String? ?? '',
+        category: r['category'] as String? ?? '',
+        unit: r['unit'] as String? ?? 'piece',
+        packSize: (r['pack_size'] as num?)?.toInt() ?? 1,
+        lastUnitCostCentimes: 0,
+        onHandQty: (r['available_qty'] as num?)?.toInt() ?? 0,
+        availableQty: (r['available_qty'] as num?)?.toInt() ?? 0,
+        active: r['active'] as bool? ?? true,
+        photoUrl: Value(r['photo_url'] as String?),
+        pricesJson: jsonEncode(pricesMap[pid] ?? []),
+        barcodesJson: jsonEncode(barcodesMap[pid] ?? []),
+        syncedAt: DateTime.now(),
+      );
+    }).toList();
+
+    await db.upsertProducts(companions);
+  }
+
+  // ── Entity assembly ───────────────────────────────────────────────────────
+
+  Future<List<ProductEntity>> _buildEntitiesFromCache(
+    String? search,
+    String? category,
+    bool? onlyActive, {
+    List<CachedProduct>? cached,
+  }) async {
+    final rows = cached ?? await db.getAllProducts();
+    final result = <ProductEntity>[];
+
+    for (final row in rows) {
+      if ((onlyActive ?? true) && !row.active) continue;
+      if (category != null &&
+          category.isNotEmpty &&
+          row.category != category) {
+        continue;
+      }
+
+      final entity = _cachedToEntity(row);
+
+      if (search != null && search.trim().isNotEmpty) {
+        final q = search.trim().toLowerCase();
+        final match = entity.nameAr.toLowerCase().contains(q) ||
+            entity.nameFr.toLowerCase().contains(q) ||
+            entity.barcodes.any((b) => b.contains(q));
+        if (match) result.add(entity);
+      } else {
+        result.add(entity);
+      }
+    }
+    return result;
+  }
+
+  ProductEntity _cachedToEntity(CachedProduct row) {
+    List<ProductPriceTier> prices = [];
+    List<String> barcodes = [];
+    try {
+      final rawPrices = jsonDecode(row.pricesJson) as List;
+      prices = rawPrices.map((p) {
+        final m = p as Map<String, dynamic>;
+        return ProductPriceTier(
+          id: m['id'] as String? ?? '',
+          tier: PriceTier.fromString(m['tier'] as String? ?? 'retail'),
+          minQty: (m['min_qty'] as num?)?.toInt() ?? 1,
+          priceCentimes: (m['price'] as num?)?.toInt() ?? 0,
+        );
+      }).toList();
+    } catch (_) {}
+    try {
+      barcodes = List<String>.from(jsonDecode(row.barcodesJson) as List);
+    } catch (_) {}
+
+    return ProductEntity(
+      id: row.id,
+      nameAr: row.nameAr,
+      nameFr: row.nameFr,
+      category: row.category,
+      unit: row.unit,
+      packSize: row.packSize,
+      photoUrl: row.photoUrl,
+      lastUnitCostCentimes: row.lastUnitCostCentimes,
+      onHandQty: row.onHandQty,
+      availableQty: row.availableQty,
+      active: row.active,
+      barcodes: barcodes,
+      prices: prices,
+    );
+  }
+
+  Future<String> _resolveValidUserId(String? candidateId) async {
+    if (candidateId != null &&
+        candidateId.isNotEmpty &&
+        candidateId != '22222222-2222-2222-2222-222222222222') {
+      try {
+        final rows = await client
+            .from('users')
+            .select('id')
+            .eq('id', candidateId)
+            .limit(1);
+        if ((rows as List).isNotEmpty) return candidateId;
+      } catch (_) {}
+    }
+    try {
+      final rows = await client.from('users').select('id').limit(1);
+      if ((rows as List).isNotEmpty) return rows.first['id'] as String;
+    } catch (_) {}
+    return '11111111-1111-1111-1111-111111111111';
   }
 }

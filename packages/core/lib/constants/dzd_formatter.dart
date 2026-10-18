@@ -11,7 +11,7 @@ class DzdFormatter {
     final formatted = showDecimals
         ? _formatterWithDecimals.format(dinars)
         : _formatterWhole.format(dinars.round());
-    return '$formatted DZD';
+    return formatted;
   }
 
   /// Parses human-entered dinar string (e.g. "1250.50") into integer centimes (125050)

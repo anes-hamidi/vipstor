@@ -86,15 +86,20 @@ class _CustomerSelectDialogState extends ConsumerState<CustomerSelectDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.person_search_rounded, size: 28),
-                      const SizedBox(width: AppSpacing.sm),
-                      Text(
-                        _isCreatingNew ? 'إضافة زبون جديد' : 'تحديد حساب الزبون والديون',
-                        style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                    ],
+                  Flexible(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person_search_rounded, size: 28),
+                        const SizedBox(width: AppSpacing.sm),
+                        Flexible(
+                          child: Text(
+                            _isCreatingNew ? 'إضافة زبون جديد' : 'تحديد حساب الزبون والديون',
+                            style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   TextButton.icon(
                     onPressed: () => setState(() => _isCreatingNew = !_isCreatingNew),
@@ -286,15 +291,19 @@ class _CustomerSelectDialogState extends ConsumerState<CustomerSelectDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('إلغاء'),
+                  Flexible(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('إلغاء'),
+                    ),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: () => Navigator.pop(context, null),
-                    icon: const Icon(Icons.person_outline),
+                  Flexible(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(context, null),
+                      icon: const Icon(Icons.person_outline),
                     label: const Text('متابعة كزبون غير مسجل (مباشر)'),
                   ),
+                  )
                 ],
               ),
             ],

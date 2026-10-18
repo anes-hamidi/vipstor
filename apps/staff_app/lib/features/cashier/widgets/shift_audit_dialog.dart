@@ -52,11 +52,24 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
     final floatDzd = double.tryParse(_openingFloatController.text.trim()) ?? 0.0;
     final floatCentimes = (floatDzd * 100).round();
 
+    final cashierId = user?.id ?? '';
+    final cashierName = user?.name ?? 'أمين الصندوق';
+
     ref.read(posActiveShiftProvider.notifier).openShift(
-          cashierId: user?.id ?? '11111111-1111-1111-1111-111111111111',
-          cashierName: user?.name ?? 'أمين الصندوق',
+          cashierId: cashierId,
+          cashierName: cashierName,
           openingFloatCentimes: floatCentimes,
         );
+
+    final currentShift = ref.read(posActiveShiftProvider);
+    if (currentShift != null) {
+      ref.read(staffAuditLoggerProvider).logShiftOpened(
+            cashierId: cashierId,
+            cashierName: cashierName,
+            openingFloatCentimes: floatCentimes,
+            zReportNumber: currentShift.zReportNumber,
+          );
+    }
 
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
@@ -77,6 +90,20 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
     final zReport = ref.read(posActiveShiftProvider.notifier).closeShift(
           countedCashCentimes: counted,
           denominations: denomCounts,
+        );
+
+    // Audit log shift close
+    ref.read(staffAuditLoggerProvider).logShiftClosed(
+          cashierId: shift.cashierId,
+          cashierName: shift.cashierName,
+          zNumber: zReport.zNumber,
+          expectedCentimes: zReport.expectedCashCentimes,
+          countedCentimes: zReport.countedCashCentimes,
+          varianceCentimes: zReport.varianceCentimes,
+          cashSalesCentimes: zReport.cashSalesCentimes,
+          creditSalesCentimes: zReport.creditSalesCentimes,
+          debtCollectedCentimes: zReport.collectedDebtCashCentimes,
+          supplierPaymentsCentimes: zReport.supplierPaymentsCashCentimes,
         );
 
     Navigator.pop(context);
@@ -112,15 +139,32 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.point_of_sale_sharp, size: 28),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        const DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: AppGradients.gold,
+                          borderRadius: AppRadius.smAll,
+                          boxShadow: [AppShadows.goldGlowSm],
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(6),
+                          child: Icon(Icons.point_of_sale_rounded,
+                              size: 18, color: Color(0xFF1A1400)),
+                        ),
+                      ),
                       const SizedBox(width: AppSpacing.sm),
-                      Text(
-                        shift == null ? 'فتح وردية صندوق جديدة' : 'جرد الصندوق وإغلاق الوردية (Z-Report) [F10]',
-                        style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                      Flexible(
+                        child: Text(
+                          shift == null ? 'فتح وردية صندوق جديدة' : 'جرد الصندوق وإغلاق الوردية (Z-Report)',
+                          style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
+                        ),
                       ),
                     ],
+                  ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close),
@@ -160,10 +204,10 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
                         ),
                       ),
                       AppSpacing.gapXl,
-                      FilledButton.icon(
+                      GoldButton.icon(
+                        icon: Icons.login_rounded,
+                        label: 'فتح الوردية وبدء البيع',
                         onPressed: _handleOpenShift,
-                        icon: const Icon(Icons.login),
-                        label: const Text('فتح الوردية وبدء البيع'),
                       ),
                     ],
                   ),
@@ -175,30 +219,34 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         // Shift Summary Card
-                        Container(
+                        LuxuryCard(
+                          goldAccent: true,
                           padding: const EdgeInsets.all(AppSpacing.md),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainer,
-                            borderRadius: AppRadius.mdAll,
-                          ),
                           child: Column(
                             children: [
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text('رقم تقرير Z المرتقب: #${shift.zReportNumber}',
-                                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  Flexible(child: Text('رقم تقرير Z المرتقب: #${shift.zReportNumber}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis)),
                                   Text('افتتحت في: ${shift.openedAt.toString().substring(11, 16)}',
                                       style: theme.textTheme.bodySmall),
                                 ],
                               ),
                               const Divider(height: 16),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              Wrap(
+                                spacing: AppSpacing.md,
+                                runSpacing: AppSpacing.sm,
                                 children: [
                                   _summaryMetric('الرصيد الافتتاحي', shift.openingFloatCentimes),
                                   _summaryMetric('المبيعات النقدية', shift.cashSalesCentimes),
                                   _summaryMetric('مبيعات الدين', shift.creditSalesCentimes),
+                                  if (shift.collectedDebtCashCentimes > 0)
+                                    _summaryMetric('سداد ديون الزبائن (+)', shift.collectedDebtCashCentimes),
+                                  if (shift.driverSettlementCashCentimes > 0)
+                                    _summaryMetric('تسويات عهدة السائقين (+)', shift.driverSettlementCashCentimes),
+                                  if (shift.supplierPaymentsCashCentimes > 0)
+                                    _summaryMetric('مدفوعات الموردين (-)', -shift.supplierPaymentsCashCentimes, isNegative: true),
                                   _summaryMetric('المسترجعات', -shift.returnsCentimes, isNegative: true),
                                 ],
                               ),
@@ -207,7 +255,7 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
                         ),
                         AppSpacing.gapMd,
                         Text(
-                          'جدول جرد وعد الفئات النقدية في الدرج (Denominations Counter):',
+                          'جدول جرد وعد الفئات النقدية في الدرج:',
                           style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         AppSpacing.gapSm,
@@ -254,11 +302,11 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
                                     ),
                                   ),
                                   const SizedBox(width: AppSpacing.sm),
-                                  SizedBox(
-                                    width: 80,
+                                  Flexible(
                                     child: Text(
                                       '${((int.tryParse(controller.text.trim()) ?? 0) * denom)} دج',
                                       textAlign: TextAlign.end,
+                                      overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                                     ),
                                   ),
@@ -288,17 +336,21 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('المتوقع بالدرج: ${DzdFormatter.formatCentimes(expected)}',
-                                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                                      Text('المحسوب فعليًا: ${DzdFormatter.formatCentimes(counted)}',
-                                          style: const TextStyle(fontWeight: FontWeight.bold)),
-                                    ],
+                                  Flexible(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('المتوقع بالدرج: ${DzdFormatter.formatCentimes(expected)}',
+                                            style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                                        Text('المحسوب فعليًا: ${DzdFormatter.formatCentimes(counted)}',
+                                            style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                                      ],
+                                    ),
                                   ),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                  const SizedBox(width: AppSpacing.sm),
+                                  Flexible(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
                                       Text(
                                         isMatch ? 'الدرج متطابق تمامًا (0 دج)' : (isOver ? 'فائض نقدي بالدرج' : 'عجز نقدي بالدرج'),
@@ -318,6 +370,7 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
                                       ),
                                     ],
                                   ),
+                                  )
                                 ],
                               ),
                             );
@@ -332,17 +385,19 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text('إلغاء والعودة للبيع'),
+                    Flexible(
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('إلغاء والعودة للبيع'),
+                      ),
                     ),
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: theme.colorScheme.error),
-                      onPressed: () => _handleCloseShiftAndZReport(shift),
-                      icon: const Icon(Icons.lock_rounded),
-                      label: const Text('تأكيد الإغلاق وطباعة Z-Report'),
-                    ),
-                  ],
+                    Flexible(
+                      child: GoldButton.icon(
+                        onPressed: () => _handleCloseShiftAndZReport(shift),
+                        icon: Icons.lock_rounded,
+                        label: 'تأكيد الإغلاق وطباعة Z-Report',
+                      ),
+                    ),                  ],
                 ),
               ],
             ],

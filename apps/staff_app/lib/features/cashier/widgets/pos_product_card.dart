@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
 
-class PosProductCard extends StatelessWidget {
+/// Premium POS product tile with:
+/// - Gold border on in-cart state with glow shadow
+/// - Glassmorphic price footer
+/// - Animated add-to-cart button with gold gradient
+/// - Compact stock badge
+class PosProductCard extends StatefulWidget {
   final ProductEntity product;
   final int cartQuantity;
   final VoidCallback? onAddToCart;
@@ -15,191 +20,405 @@ class PosProductCard extends StatelessWidget {
   });
 
   @override
+  State<PosProductCard> createState() => _PosProductCardState();
+}
+
+class _PosProductCardState extends State<PosProductCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scaleAnim;
+  late final Animation<double> _glowAnim;
+  bool _hovered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _scaleAnim = Tween<double>(begin: 1.0, end: 1.02).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic),
+    );
+    _glowAnim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final colors = context.appColors;
-    final wholesalePrice = product.getPriceForQuantity(PriceTier.wholesale, 1);
-    final isAvailable = product.availableQty > 0;
-    final isLowStock = isAvailable && product.availableQty <= 5;
-    final inCart = cartQuantity > 0;
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
-    return Card(
-      elevation: inCart ? 2 : 0,
-      color: inCart ? colorScheme.primaryContainer.withValues(alpha: 0.18) : colorScheme.surfaceContainerLow,
-      shape: RoundedRectangleBorder(
-        borderRadius: AppRadius.lgAll,
-        side: BorderSide(
-          color: inCart
-              ? colorScheme.primary
-              : (isAvailable ? colorScheme.outlineVariant.withValues(alpha: 0.7) : colorScheme.outlineVariant),
-          width: inCart ? 1.5 : 1,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: isAvailable ? onAddToCart : null,
-        borderRadius: AppRadius.lgAll,
-        child: Padding(
-          padding: const EdgeInsetsDirectional.all(AppSpacing.md),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // Header: Stock Pill + In-Cart Quantity Badge
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Stock status
-                  Flexible(
-                    child: Container(
-                      padding: const EdgeInsetsDirectional.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: !isAvailable
-                            ? colorScheme.errorContainer
-                            : (isLowStock ? colors.warningContainer : colors.successContainer),
-                        borderRadius: AppRadius.pillAll,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
+    final retailePrice =
+        widget.product.getPriceForQuantity(PriceTier.retail, 1);
+    final isAvailable = widget.product.availableQty > 0;
+    final inCart = widget.cartQuantity > 0;
+
+    Color bgColor;
+    Color borderColor;
+    List<BoxShadow> shadows;
+
+    if (inCart) {
+      bgColor = isDark ? const Color(0xFF241F10) : const Color(0xFFFAF2DC);
+      borderColor = const Color(0xFFD4AF37);
+      shadows = [
+        ...AppShadows.cardElevatedLight,
+        AppShadows.goldGlow,
+      ];
+    } else if (!isAvailable) {
+      bgColor = isDark ? const Color(0xFF141210) : const Color(0xFFF7F4EE);
+      borderColor = isDark ? const Color(0xFF2D271B) : const Color(0xFFE9E2D2);
+      shadows = [];
+    } else {
+      bgColor = isDark ? const Color(0xFF1A1815) : const Color(0xFFFFFFFF);
+      borderColor = isDark
+          ? const Color(0xFFD4AF37).withValues(alpha: 0.15)
+          : const Color(0xFFE6DECA);
+      shadows = isDark ? AppShadows.cardSoftDark : AppShadows.cardSoftLight;
+    }
+
+    if (_hovered && isAvailable && !inCart) {
+      borderColor = const Color(0xFFD4AF37).withValues(alpha: 0.60);
+    }
+
+    return MouseRegion(
+      onEnter: (_) {
+        setState(() => _hovered = true);
+        if (isAvailable) _ctrl.forward();
+      },
+      onExit: (_) {
+        setState(() => _hovered = false);
+        _ctrl.reverse();
+      },
+      child: ScaleTransition(
+        scale: _scaleAnim,
+        child: AnimatedBuilder(
+          animation: _glowAnim,
+          builder: (ctx, child) => DecoratedBox(
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: AppRadius.xl2All,
+              border: Border.all(
+                color: Color.lerp(
+                  borderColor,
+                  const Color(0xFFD4AF37),
+                  inCart ? 1.0 : _glowAnim.value * 0.4,
+                )!,
+                width: inCart ? 1.5 : 1.0,
+              ),
+              boxShadow: shadows,
+            ),
+            child: child,
+          ),
+          child: ClipRRect(
+            borderRadius: AppRadius.xl2All,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: isAvailable ? widget.onAddToCart : null,
+                borderRadius: AppRadius.xl2All,
+                highlightColor: const Color(0xFFD4AF37).withValues(alpha: 0.08),
+                splashColor: const Color(0xFFD4AF37).withValues(alpha: 0.12),
+                child: Padding(
+                  padding: const EdgeInsetsDirectional.all(AppSpacing.sm),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Short cards: drop the French name, tighten the footer.
+                      final compact = constraints.maxHeight < 190;
+                      final type = widget.product.unit;
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Icon(
-                            !isAvailable
-                                ? Icons.cancel_outlined
-                                : (isLowStock ? Icons.warning_amber_rounded : Icons.check_circle_outline),
-                            size: 11,
-                            color: !isAvailable
-                                ? colorScheme.onErrorContainer
-                                : (isLowStock ? colors.onWarningContainer : colors.onSuccessContainer),
+                          // ── Image with overlaid badges ─────
+                          Expanded(
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                _ProductImage(
+                                  url: widget.product.photoUrl,
+                                  isAvailable: isAvailable,
+                                  isDark: isDark,
+                                ),
+                                // Stock badge + cart pill
+                                PositionedDirectional(
+                                  top: 4,
+                                  start: 4,
+                                  end: 4,
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      if (inCart) ...[
+                                        TweenAnimationBuilder<double>(
+                                          tween: Tween(begin: 0.8, end: 1.0),
+                                          duration:
+                                              const Duration(milliseconds: 250),
+                                          curve: Curves.elasticOut,
+                                          builder: (context, val, child) =>
+                                              Transform.scale(
+                                                  scale: val, child: child),
+                                          child: DecoratedBox(
+                                            decoration: const BoxDecoration(
+                                              gradient: AppGradients.gold,
+                                              borderRadius: AppRadius.pillAll,
+                                              boxShadow: [
+                                                AppShadows.goldGlowSm
+                                              ],
+                                            ),
+                                            child: Padding(
+                                              padding: const EdgeInsetsDirectional
+                                                  .symmetric(
+                                                horizontal: AppSpacing.sm,
+                                                vertical: 3,
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                      Icons
+                                                          .shopping_cart_rounded,
+                                                      size: 10,
+                                                      color: Color(0xFF1A1400)),
+                                                  const SizedBox(width: 3),
+                                                  Text(
+                                                    '${widget.cartQuantity}',
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: Color(0xFF1A1400),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                // Pack size chip
+                                if (widget.product.packSize > 1)
+                                  PositionedDirectional(
+                                    bottom: 4,
+                                    start: 4,
+                                    end: 4,
+                                    child: Align(
+                                      alignment:
+                                          AlignmentDirectional.bottomStart,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: isDark
+                                              ? const Color(0xE61A1815)
+                                              : const Color(0xE6FFFFFF),
+                                          borderRadius: AppRadius.smAll,
+                                        ),
+                                        child: Text( type,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: isDark
+                                                ? const Color(0xFFF7DC8B)
+                                                : const Color(0xFF8B6B15),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(width: 3),
-                          Flexible(
-                            child: Text(
-                              !isAvailable
-                                  ? 'نفذ'
-                                  : (isLowStock ? 'قليل: ${product.availableQty}' : '${product.availableQty} ${product.unit}'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: !isAvailable
-                                    ? colorScheme.onErrorContainer
-                                    : (isLowStock ? colors.onWarningContainer : colors.onSuccessContainer),
+
+                          const SizedBox(height: AppSpacing.sm),
+
+                          // ── Names ─────
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                widget.product.nameAr,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  height: 1.2,
+                                  color: isAvailable
+                                      ? (isDark
+                                          ? const Color(0xFFFFFDF9)
+                                          : const Color(0xFF181510))
+                                      : cs.onSurface.withValues(alpha: 0.40),
+                                ),
                               ),
+                              if (!compact &&
+                                  widget.product.nameFr.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  widget.product.nameFr,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 11,
+                                    color: cs.onSurfaceVariant
+                                        .withValues(alpha: 0.70),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+
+                          const SizedBox(height: AppSpacing.xs + 2),
+
+                          // ── Footer: Wholesale Price & Action Button ─────
+                          Container(
+                            padding: EdgeInsetsDirectional.symmetric(
+                              horizontal: AppSpacing.sm,
+                              vertical: compact
+                                  ? AppSpacing.xs
+                                  : AppSpacing.xs + 2,
+                            ),
+                            decoration: BoxDecoration(
+                              gradient: isDark
+                                  ? AppGradients.darkGlass
+                                  : AppGradients.lightGlass,
+                              borderRadius: AppRadius.mdAll,
+                              border: Border.all(
+                                color: const Color(0xFFD4AF37).withValues(
+                                  alpha: isDark ? 0.20 : 0.15,
+                                ),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Flexible(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: AlignmentDirectional.centerStart,
+                                    child: DzdPriceTag(
+                                      centimes: retailePrice,
+                                      gold: inCart,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: AppSpacing.xs),
+                                if (!isAvailable)
+                                
+                                  Container(
+                                    width: 30,
+                                    height: 30,
+                                    decoration: BoxDecoration(
+                                      color: cs.surfaceContainerHighest,
+                                      borderRadius: AppRadius.smAll,
+                                    ),
+                                    child: Icon(
+                                      Icons.block_rounded,
+                                      size: 14,
+                                      color: cs.onSurfaceVariant,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         ],
-                      ),
-                    ),
+                      );
+                    },
                   ),
-                  if (inCart) ...[
-                    const SizedBox(width: 4),
-                    Container(
-                      padding: const EdgeInsetsDirectional.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: colorScheme.primary,
-                        borderRadius: AppRadius.pillAll,
-                      ),
-                      child: Text(
-                        '×$cartQuantity',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: colorScheme.onPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              // Product Name & Meta
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.nameAr,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13.5,
-                        height: 1.25,
-                      ),
-                    ),
-                    if (product.nameFr.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        product.nameFr,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontSize: 11,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                    if (product.packSize > 1) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        'حزمة: ${product.packSize} ${product.unit}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: colorScheme.secondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
                 ),
               ),
-              const SizedBox(height: AppSpacing.sm),
-              // Footer: Price Tag + Action Add Button
-              Container(
-                padding: const EdgeInsetsDirectional.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainer,
-                  borderRadius: AppRadius.mdAll,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'سعر الجملة',
-                          style: theme.textTheme.bodySmall?.copyWith(fontSize: 9.5, color: colorScheme.onSurfaceVariant),
-                        ),
-                        DzdPriceTag(
-                          centimes: wholesalePrice,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: colorScheme.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    IconButton.filled(
-                      style: IconButton.styleFrom(
-                        backgroundColor: isAvailable ? colorScheme.primary : colorScheme.surfaceContainerHighest,
-                        foregroundColor: isAvailable ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
-                        minimumSize: const Size(32, 32),
-                        padding: EdgeInsets.zero,
-                      ),
-                      icon: const Icon(Icons.add_shopping_cart_rounded, size: 16),
-                      tooltip: isAvailable ? 'إضافة إلى السلة' : 'غير متاح',
-                      onPressed: isAvailable ? onAddToCart : null,
-                    ),
-                  ],
-                ),
-              ),
-            ],
+            ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Product photo with a neutral placeholder for missing / loading / failed
+/// images. Greyed out when the product is out of stock.
+class _ProductImage extends StatelessWidget {
+  final String? url;
+  final bool isAvailable;
+  final bool isDark;
+
+  const _ProductImage({
+    required this.url,
+    required this.isAvailable,
+    required this.isDark,
+  });
+
+  static const _greyscale = ColorFilter.matrix(<double>[
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0, 0, 0, 1, 0,
+  ]);
+
+  @override
+  Widget build(BuildContext context) {
+    final placeholderColor =
+        isDark ? const Color(0xFF221E16) : const Color(0xFFF6F1E4);
+    final iconColor =
+        isDark ? const Color(0xFF8A7A50) : const Color(0xFFB8A060);
+
+    final placeholder = Center(
+      child: Icon(Icons.inventory_2_outlined, size: 28, color: iconColor),
+    );
+
+    final hasUrl = url != null && url!.isNotEmpty;
+
+    Widget content = hasUrl
+        ? Image.network(
+            url!,
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: double.infinity,
+            cacheWidth: 400,
+            gaplessPlayback: true,
+            frameBuilder: (context, child, frame, wasSyncLoaded) {
+              if (wasSyncLoaded) return child;
+              return AnimatedOpacity(
+                opacity: frame == null ? 0 : 1,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+                child: child,
+              );
+            },
+            errorBuilder: (_, __, ___) => placeholder,
+          )
+        : placeholder;
+
+    if (!isAvailable && hasUrl) {
+      content = Opacity(
+        opacity: 0.55,
+        child: ColorFiltered(colorFilter: _greyscale, child: content),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: placeholderColor,
+        borderRadius: AppRadius.mdAll,
+      ),
+      child: ClipRRect(
+        borderRadius: AppRadius.mdAll,
+        child: SizedBox.expand(child: content),
       ),
     );
   }

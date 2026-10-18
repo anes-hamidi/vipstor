@@ -31,6 +31,7 @@ class _SalesHistoryDialogState extends ConsumerState<SalesHistoryDialog> {
         nameAr: i.productName,
         nameFr: i.productName,
         barcode: '',
+        unit: PosItemUnit.fromString(i.unit),
         quantity: i.quantity,
         baseUnitPriceCentimes: i.unitPriceCentimes,
         unitCostCentimes: i.unitCostCentimes,
@@ -219,7 +220,7 @@ class _SalesHistoryDialogState extends ConsumerState<SalesHistoryDialog> {
                                         child: Row(
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
-                                            Text('${it.quantity}x ${it.productName}'),
+                                            Text('${it.formattedQuantityWithUnit} x ${it.productName}'),
                                             DzdPriceTag(centimes: it.lineTotalCentimes),
                                           ],
                                         ),

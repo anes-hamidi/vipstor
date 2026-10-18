@@ -12,6 +12,7 @@ abstract class IAuthRepository {
   });
   Future<bool> resetStaffPinByModerator({
     required String adminId,
+    required String adminPin,
     required String targetUserId,
     required String newPin,
   });

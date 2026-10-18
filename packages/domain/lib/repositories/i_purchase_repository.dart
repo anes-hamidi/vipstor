@@ -8,6 +8,18 @@ abstract class IPurchaseRepository {
     String? companyRegister,
     String? notes,
   });
+  Future<List<SupplierProfileEntity>> getSuppliersWithBalances();
+  Future<SupplierProfileEntity?> getSupplierById(String supplierId);
+  Future<List<PurchaseEntity>> getUnpaidPurchasesBySupplier(String supplierId);
+  Future<SupplierPaymentResult> recordSupplierPayment({
+    required String supplierId,
+    required int amountCentimes,
+    required String payerUserId,
+    required String payerName,
+    required String payerRole,
+    String? purchaseId,
+    String? notes,
+  });
   Future<List<PurchaseEntity>> getPurchases();
   Future<String> createDraftPurchase({
     required String supplierId,
@@ -22,3 +34,4 @@ abstract class IPurchaseRepository {
     List<Map<String, dynamic>> items = const [],
   });
 }
+

@@ -1,14 +1,25 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 import 'package:data/data.dart';
 import 'package:domain/domain.dart';
 import 'package:core/core.dart';
+import 'package:staff_app/router/staff_router.dart';
 import '../features/cashier/models/pos_models.dart';
 
+import '../services/staff_audit_logger.dart';
+import '../services/app_update_service.dart';
+
 export '../features/cashier/models/pos_models.dart';
+export '../services/staff_audit_logger.dart';
+export '../services/app_update_service.dart';
+export '../features/common/widgets/app_update_dialog.dart';
 
 final supabaseClientProvider = Provider<SupabaseClient>((ref) {
   return Supabase.instance.client;
+});
+
+final staffAuditLoggerProvider = Provider<StaffAuditLogger>((ref) {
+  final client = ref.watch(supabaseClientProvider);
+  return StaffAuditLogger(client);
 });
 
 final supabaseServiceProvider = Provider<SupabaseService>((ref) {
@@ -16,16 +27,51 @@ final supabaseServiceProvider = Provider<SupabaseService>((ref) {
   return SupabaseService(client);
 });
 
+final appDatabaseProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(() => db.close());
+  return db;
+});
+
+/// Offline sync worker — started once; drains queue on reconnect.
+final offlineSyncServiceProvider = Provider<OfflineSyncService>((ref) {
+  final svc = OfflineSyncService(
+    db: ref.watch(appDatabaseProvider),
+    client: ref.watch(supabaseClientProvider),
+    service: ref.watch(supabaseServiceProvider),
+  );
+  svc.start();
+  ref.onDispose(svc.dispose);
+  return svc;
+});
+
+/// Reactive pending-operations count — drives the offline indicator badge.
+final pendingOpsCountProvider = StreamProvider<int>((ref) async* {
+  final db = ref.watch(appDatabaseProvider);
+  // Poll every 5 seconds — lightweight SQLite count query.
+  while (true) {
+    yield await db.countPendingOps();
+    await Future<void>.delayed(const Duration(seconds: 5));
+  }
+});
+
+/// Connectivity state stream.
+final connectivityProvider = StreamProvider<bool>((ref) {
+  return ConnectivityService.instance.onStatusChange;
+});
+
 final productRepositoryProvider = Provider<IProductRepository>((ref) {
   final client = ref.watch(supabaseClientProvider);
   final service = ref.watch(supabaseServiceProvider);
-  return ProductRepositoryImpl(client: client, service: service);
+  final db = ref.watch(appDatabaseProvider);
+  return ProductRepositoryImpl(client: client, service: service, db: db);
 });
 
 final orderRepositoryProvider = Provider<IOrderRepository>((ref) {
   final client = ref.watch(supabaseClientProvider);
   final service = ref.watch(supabaseServiceProvider);
-  return OrderRepositoryImpl(client: client, service: service);
+  final db = ref.watch(appDatabaseProvider);
+  return OrderRepositoryImpl(client: client, service: service, db: db);
 });
 
 final purchaseRepositoryProvider = Provider<IPurchaseRepository>((ref) {
@@ -33,6 +79,19 @@ final purchaseRepositoryProvider = Provider<IPurchaseRepository>((ref) {
   final service = ref.watch(supabaseServiceProvider);
   return PurchaseRepositoryImpl(client: client, service: service);
 });
+
+final purchasesListProvider = FutureProvider<List<PurchaseEntity>>((ref) async {
+  final repo = ref.watch(purchaseRepositoryProvider);
+  return repo.getPurchases();
+});
+
+final suppliersProvider =
+    FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final repo = ref.watch(purchaseRepositoryProvider);
+  return repo.getSuppliers();
+});
+
+
 
 final settlementRepositoryProvider = Provider<ISettlementRepository>((ref) {
   final client = ref.watch(supabaseClientProvider);
@@ -43,12 +102,29 @@ final settlementRepositoryProvider = Provider<ISettlementRepository>((ref) {
 final customerRepositoryProvider = Provider<ICustomerRepository>((ref) {
   final client = ref.watch(supabaseClientProvider);
   final service = ref.watch(supabaseServiceProvider);
-  return CustomerRepositoryImpl(client: client, service: service);
+  final db = ref.watch(appDatabaseProvider);
+  return CustomerRepositoryImpl(client: client, service: service, db: db);
 });
 
 final authRepositoryProvider = Provider<IAuthRepository>((ref) {
   final client = ref.watch(supabaseClientProvider);
   return AuthRepositoryImpl(client: client);
+});
+
+final appUpdateRepositoryProvider = Provider<IAppUpdateRepository>((ref) {
+  final client = ref.watch(supabaseClientProvider);
+  final service = ref.watch(supabaseServiceProvider);
+  return AppUpdateRepositoryImpl(client: client, service: service);
+});
+
+final appUpdateServiceProvider = Provider<AppUpdateService>((ref) {
+  final repo = ref.watch(appUpdateRepositoryProvider);
+  return AppUpdateService(repository: repo, appType: 'staff_app');
+});
+
+final appUpdateCheckProvider = FutureProvider<AppUpdateCheckResult>((ref) async {
+  final service = ref.watch(appUpdateServiceProvider);
+  return service.checkForUpdate();
 });
 
 final liveStaffUsersProvider = FutureProvider<List<UserEntity>>((ref) async {
@@ -72,6 +148,21 @@ final liveProductsProvider = FutureProvider<List<ProductEntity>>((ref) async {
   final repo = ref.watch(productRepositoryProvider);
   final query = ref.watch(productsSearchQueryProvider);
   return repo.getProducts(search: query, onlyActive: true);
+});
+
+/// Derives the distinct, sorted category list from the full product catalogue
+/// (unfiltered by search so all categories always appear in the bar).
+/// Returns an empty list while products are loading.
+final posCategoryListProvider = FutureProvider<List<String>>((ref) async {
+  final repo = ref.watch(productRepositoryProvider);
+  final all = await repo.getProducts(onlyActive: true);
+  final cats = all
+      .map((p) => p.category.trim())
+      .where((c) => c.isNotEmpty)
+      .toSet()
+      .toList()
+    ..sort();
+  return cats;
 });
 
 // Active Customer in Cart
@@ -124,6 +215,20 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     );
   }
 
+  void registerSupplierCashPayment({required int cashCentimes}) {
+    if (state == null || cashCentimes <= 0) return;
+    state = state!.copyWith(
+      supplierPaymentsCashCentimes: state!.supplierPaymentsCashCentimes + cashCentimes,
+    );
+  }
+
+  void registerDriverSettlement({required int cashCentimes}) {
+    if (state == null || cashCentimes <= 0) return;
+    state = state!.copyWith(
+      driverSettlementCashCentimes: state!.driverSettlementCashCentimes + cashCentimes,
+    );
+  }
+
   ZReportSummary closeShift({
     required int countedCashCentimes,
     required Map<int, int> denominations,
@@ -140,6 +245,8 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
       cashSalesCentimes: current.cashSalesCentimes,
       creditSalesCentimes: current.creditSalesCentimes,
       collectedDebtCashCentimes: current.collectedDebtCashCentimes,
+      supplierPaymentsCashCentimes: current.supplierPaymentsCashCentimes,
+      driverSettlementCashCentimes: current.driverSettlementCashCentimes,
       totalSalesCentimes: current.cashSalesCentimes + current.creditSalesCentimes,
       returnsCentimes: current.returnsCentimes,
       expectedCashCentimes: current.expectedCashInDrawerCentimes,
@@ -155,6 +262,40 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
 
 final posActiveShiftProvider = StateNotifierProvider<PosShiftNotifier, PosShiftSession?>((ref) {
   return PosShiftNotifier();
+});
+
+final pendingDriverSettlementsProvider = FutureProvider<List<DriverSettlementSummaryEntity>>((ref) async {
+  final repo = ref.watch(settlementRepositoryProvider);
+  return repo.getPendingDriverSettlements();
+});
+
+final driverUnsettledOrdersProvider = FutureProvider.family<List<OrderEntity>, String>((ref, driverId) async {
+  final repo = ref.watch(settlementRepositoryProvider);
+  return repo.getDriverUnsettledOrders(driverId);
+});
+
+final recentSettlementsProvider = FutureProvider.family<List<SettlementEntity>, String?>((ref, driverId) async {
+  final repo = ref.watch(settlementRepositoryProvider);
+  return repo.getRecentSettlements(driverId: driverId);
+});
+
+final driverOrdersProvider = FutureProvider<List<OrderEntity>>((ref) async {
+  final repo = ref.watch(orderRepositoryProvider);
+  final user = ref.watch(authStateProvider);
+  if (user == null) return [];
+  return repo.getOrders(driverId: user.id);
+});
+
+final driverWalletBalanceProvider = FutureProvider<int>((ref) async {
+  final repo = ref.watch(settlementRepositoryProvider);
+  final user = ref.watch(authStateProvider);
+  if (user == null) return 0;
+  return repo.getDriverExpectedWallet(user.id);
+});
+
+final suppliersWithBalancesProvider = FutureProvider<List<SupplierProfileEntity>>((ref) async {
+  final repo = ref.watch(purchaseRepositoryProvider);
+  return repo.getSuppliersWithBalances();
 });
 
 // Customer Debt & Ledger Providers
@@ -203,7 +344,8 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
     final activeCustomer = ref.read(posActiveCustomerProvider);
     final effectiveTier = tier ?? activeCustomer?.priceTier ?? PriceTier.wholesale;
 
-    final idx = state.indexWhere((it) => it.productId == product.id && it.unit == PosItemUnit.piece);
+    final initialUnit = PosItemUnit.fromString(product.unit);
+    final idx = state.indexWhere((it) => it.productId == product.id && it.unit == initialUnit);
     if (idx != -1) {
       final existing = state[idx];
       final newQty = existing.quantity + qty;
@@ -236,7 +378,18 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
 
     state = state.map((it) {
       if (it.id == itemId) {
-        return it.copyWith(quantity: quantity);
+        var updated = it.copyWith(quantity: quantity);
+        if (!it.isCustomItem && it.activeTier != null && it.availableTiers.isNotEmpty) {
+          final totalQty = updated.totalPieces;
+          final matches = it.availableTiers
+              .where((p) => p.tier == it.activeTier && totalQty >= p.minQty)
+              .toList();
+          if (matches.isNotEmpty) {
+            matches.sort((a, b) => b.minQty.compareTo(a.minQty));
+            updated = updated.copyWith(baseUnitPriceCentimes: matches.first.priceCentimes);
+          }
+        }
+        return updated;
       }
       return it;
     }).toList();
@@ -250,6 +403,31 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
         return it.copyWith(unit: unit);
       }
       return it;
+    }).toList();
+  }
+
+  // 4b. Switch Price Tier (Retail / Wholesale / Bulk)
+  void setItemTier(String itemId, PriceTier tier) {
+    state = state.map((it) {
+      if (it.id != itemId || it.isCustomItem) return it;
+      final totalQty = it.totalPieces;
+      final matches = it.availableTiers
+          .where((p) => p.tier == tier && totalQty >= p.minQty)
+          .toList();
+      int newPrice;
+      if (matches.isNotEmpty) {
+        matches.sort((a, b) => b.minQty.compareTo(a.minQty));
+        newPrice = matches.first.priceCentimes;
+      } else {
+        final tierRows = it.availableTiers.where((p) => p.tier == tier).toList();
+        if (tierRows.isNotEmpty) {
+          tierRows.sort((a, b) => a.minQty.compareTo(b.minQty));
+          newPrice = tierRows.first.priceCentimes;
+        } else {
+          newPrice = it.baseUnitPriceCentimes;
+        }
+      }
+      return it.copyWith(activeTier: tier, baseUnitPriceCentimes: newPrice);
     }).toList();
   }
 

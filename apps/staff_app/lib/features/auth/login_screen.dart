@@ -1,4 +1,5 @@
 import 'dart:async';
+// ignore_for_file: invalid_use_of_protected_member
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pinput/pinput.dart';
@@ -31,9 +32,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   void initState() {
     super.initState();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        setState(() => _currentTime = DateTime.now());
-      }
+      if (mounted) setState(() => _currentTime = DateTime.now());
     });
   }
 
@@ -46,18 +45,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
-  void _loginAsMasterModerator() {
-    const masterAdmin = UserEntity( 
-      id: '11111111-1111-1111-1111-111111111111',
-      phone: '0673336972',
-      name: 'المدير العام',
-      role: UserRole.moderator,
-      active: true,
-      language: 'ar',
-    );
-    ref.read(authStateProvider.notifier).state = masterAdmin;
-  }
-
   Future<void> _handlePinLogin(String pin) async {
     if (pin.length < 4) return;
     if (_selectedStaff == null) {
@@ -67,27 +54,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       });
       return;
     }
-
     setState(() {
       _isAuthenticating = true;
       _errorMessage = null;
     });
-
     try {
       final repo = ref.read(authRepositoryProvider);
       final isValid = await repo.verifyPin(
-        userId: _selectedStaff!.id,
-        pin: pin,
-      );
-
+          userId: _selectedStaff!.id, pin: pin);
       if (!mounted) return;
-
       if (isValid) {
-        ref.read(authStateProvider.notifier).state = _selectedStaff;
+        final staff = _selectedStaff!;
+        ref.read(staffAuditLoggerProvider).logLogin(user: staff);
+        ref.read(authStateProvider.notifier).state = staff;
       } else {
         setState(() {
           _isAuthenticating = false;
-          _errorMessage = 'رمز PIN غير صحيح! جرب 1234';
+          _errorMessage = 'رمز PIN غير صحيح!';
           _pinController.clear();
         });
         _focusNode.requestFocus();
@@ -96,7 +79,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       setState(() {
         _isAuthenticating = false;
-        _errorMessage = 'خطأ أثناء التحقق من الرمز!';
+        // Surface the real message (e.g. "account locked") rather than a generic one
+        _errorMessage = e.toString().replaceFirst('AuthException: ', '').replaceFirst('Exception: ', '');
         _pinController.clear();
       });
       _focusNode.requestFocus();
@@ -105,16 +89,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   void _openChangePinDialog() async {
     if (_selectedStaff == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content:
-              const Text('يرجى تحديد حساب الموظف المراد تغيير رمزه أولاً!'),
-          backgroundColor: context.appColors.warning,
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('يرجى تحديد حساب الموظف أولاً!'),
+        backgroundColor: context.appColors.warning,
+      ));
       return;
     }
-
     await showDialog(
       context: context,
       builder: (ctx) => ChangePinDialog(staffMember: _selectedStaff!),
@@ -124,76 +104,57 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     final staffAsync = ref.watch(liveStaffUsersProvider);
-    final width = MediaQuery.sizeOf(context).width;
-    final isCompact = width < 720;
+    final isCompact = MediaQuery.sizeOf(context).width < 720;
 
     return Scaffold(
-      backgroundColor: colorScheme.surface,
+      backgroundColor: isDark ? const Color(0xFF0A0908) : const Color(0xFFFAF7EE),
       body: SafeArea(
         child: Column(
           children: [
-            // Top App Bar / Header Status
-            _buildTopBar(theme, colorScheme),
-            const Divider(height: 1),
-
-            // Main Content Area
+            _TopBar(currentTime: _currentTime, isDark: isDark),
+            Container(
+              height: 1,
+              decoration: const BoxDecoration(
+                gradient: AppGradients.goldBorder,
+              ),
+            ),
             Expanded(
               child: staffAsync.when(
                 data: (staffList) {
-                  final activeStaff = staffList.where((u) => u.active).toList();
-                  if (_selectedStaff == null && activeStaff.isNotEmpty) {
+                  final active = staffList.where((u) => u.active).toList();
+                  if (_selectedStaff == null && active.isNotEmpty) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted && _selectedStaff == null) {
-                        setState(() => _selectedStaff = activeStaff.first);
+                        setState(() => _selectedStaff = active.first);
                       }
                     });
                   }
-
-                  final filteredStaff = activeStaff.where((u) {
+                  final filtered = active.where((u) {
                     if (_searchQuery.isEmpty) return true;
-                    return u.name
-                            .toLowerCase()
-                            .contains(_searchQuery.toLowerCase()) ||
+                    return u.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
                         u.phone.contains(_searchQuery);
                   }).toList();
-
-                  if (isCompact) {
-                    return _buildCompactLayout(
-                        theme, colorScheme, filteredStaff);
-                  } else {
-                    return _buildSplitLayout(theme, colorScheme, filteredStaff);
-                  }
+                  return isCompact
+                      ? _CompactLayout(
+                          state: this,
+                          staffList: filtered,
+                          isDark: isDark,
+                        )
+                      : _SplitLayout(
+                          state: this,
+                          staffList: filtered,
+                          isDark: isDark,
+                        );
                 },
-                loading: () => const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircularProgressIndicator.adaptive(),
-                      SizedBox(height: AppSpacing.md),
-                      Text('جاري تحميل طاقم العمل...'),
-                    ],
-                  ),
-                ),
+                loading: () => Center(child: AppStates.loading(message: 'جاري تحميل طاقم العمل...')),
                 error: (err, _) => Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.cloud_off, size: 48, color: colorScheme.error),
-                      AppSpacing.gapMd,
-                      Text('تعذر الاتصال بالخادم: $err'),
-                      AppSpacing.gapMd,
-                      FilledButton.icon(
-                        onPressed: () => ref.invalidate(liveStaffUsersProvider),
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('إعادة المحاولة'),
-                      ),
-                      AppSpacing.gapMd,
-                      OutlinedButton(
-                        onPressed: _loginAsMasterModerator,
-                        child: const Text('دخول المشرف في وضع الطوارئ'),
-                      ),
+                      AppStates.error('تعذر الاتصال بالخادم',
+                          onRetry: () => ref.invalidate(liveStaffUsersProvider)),
                     ],
                   ),
                 ),
@@ -205,159 +166,258 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _buildTopBar(ThemeData theme, ColorScheme colorScheme) {
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  static IconData roleIcon(UserRole role) => switch (role) {
+        UserRole.cashier   => Icons.point_of_sale_rounded,
+        UserRole.manager   => Icons.inventory_2_rounded,
+        UserRole.moderator => Icons.admin_panel_settings_rounded,
+        UserRole.driver    => Icons.local_shipping_rounded,
+        _                  => Icons.person_rounded,
+      };
+
+  static String roleLabel(UserRole role) => switch (role) {
+        UserRole.cashier   => 'كاشير',
+        UserRole.manager   => 'مدير المخزن',
+        UserRole.moderator => 'مشرف عام',
+        UserRole.driver    => 'سائق توصيل',
+        _                  => 'عميل',
+      };
+}
+
+// ── Top Bar ───────────────────────────────────────────────────────────────────
+
+class _TopBar extends StatelessWidget {
+  final DateTime currentTime;
+  final bool isDark;
+  const _TopBar({required this.currentTime, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final t = currentTime;
     final timeStr =
-        '${_currentTime.hour.toString().padLeft(2, '0')}:${_currentTime.minute.toString().padLeft(2, '0')}:${_currentTime.second.toString().padLeft(2, '0')}';
-    final dateStr =
-        '${_currentTime.day}/${_currentTime.month}/${_currentTime.year}';
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
 
     return Container(
       padding: const EdgeInsetsDirectional.symmetric(
-        horizontal: AppSpacing.lg,
-        vertical: AppSpacing.md,
-      ),
-      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+          horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+      color: isDark ? const Color(0xFF141210) : const Color(0xFFFFFDF8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsetsDirectional.all(AppSpacing.sm),
-                decoration: BoxDecoration(
-                  color: colorScheme.primary,
-                  borderRadius: AppRadius.mdAll,
+          // VIP brand logo
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: AppGradients.gold,
+              borderRadius: AppRadius.smAll,
+              boxShadow: [AppShadows.goldGlowSm],
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(7),
+              child: Icon(Icons.storefront_rounded,
+                  color: Color(0xFF1A1400), size: 22),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'نظام متجر الجملة VIP POS',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold, letterSpacing: 0.2),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
-                child: const Icon(Icons.storefront_rounded,
-                    color: Colors.white, size: 22),
+                Text(
+                  'تسجيل الدخول السريع برمز PIN',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: isDark
+                          ? const Color(0xFFB8A882)
+                          : const Color(0xFF9A8A60)),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          // Clock pill
+          Container(
+            padding: const EdgeInsetsDirectional.symmetric(
+                horizontal: AppSpacing.sm, vertical: 4),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF2A2518) : const Color(0xFFF3E8C8),
+              borderRadius: AppRadius.pillAll,
+              border: Border.all(
+                color: const Color(0xFFD4AF37).withValues(alpha: 0.30),
+                width: 1,
               ),
-              const SizedBox(width: AppSpacing.md),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'نظام متجر الجملة VIP POS',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    'تسجيل الدخول السريع برمز PIN',
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.access_time_rounded,
+                    size: 13,
+                    color: isDark
+                        ? const Color(0xFFF3D278)
+                        : const Color(0xFFC59B27)),
+                const SizedBox(width: 4),
+                Text(timeStr,
                     style: TextStyle(
-                        fontSize: 11, color: colorScheme.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ],
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isDark
+                          ? const Color(0xFFF3D278)
+                          : const Color(0xFF9A7319),
+                    )),
+              ],
+            ),
           ),
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsetsDirectional.symmetric(
-                    horizontal: AppSpacing.md, vertical: 4),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainer,
-                  borderRadius: AppRadius.pillAll,
-                  border: Border.all(color: colorScheme.outlineVariant),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.access_time_rounded, size: 14),
-                    const SizedBox(width: 4),
-                    Text('$timeStr • $dateStr',
-                        style: const TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Container(
-                padding: const EdgeInsetsDirectional.symmetric(
-                    horizontal: AppSpacing.sm, vertical: 4),
-                decoration: BoxDecoration(
-                  color: context.appColors.success.withValues(alpha: 0.15),
-                  borderRadius: AppRadius.pillAll,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: context.appColors.success,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'متصل (Online)',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: context.appColors.success,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+          const SizedBox(width: AppSpacing.md),
+          // Online indicator
+          _LiveDot(),
         ],
       ),
     );
   }
+}
 
-  Widget _buildSplitLayout(
-    ThemeData theme,
-    ColorScheme colorScheme,
-    List<UserEntity> staffList,
-  ) {
+class _LiveDot extends StatefulWidget {
+  @override
+  State<_LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<_LiveDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.appColors;
+    return AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) => Container(
+        padding: const EdgeInsetsDirectional.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: colors.success.withValues(alpha: 0.12),
+          borderRadius: AppRadius.pillAll,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: colors.success,
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.success
+                        .withValues(alpha: 0.30 + 0.30 * _ctrl.value),
+                    blurRadius: 4 + 4 * _ctrl.value,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 5),
+            Text('متصل',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: colors.success)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Split Layout ──────────────────────────────────────────────────────────────
+
+class _SplitLayout extends StatelessWidget {
+  final _LoginScreenState state;
+  final List<UserEntity> staffList;
+  final bool isDark;
+
+  const _SplitLayout({
+    required this.state,
+    required this.staffList,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Row(
       children: [
-        // Left/First Pane: Staff Selection Grid
+        // Staff grid pane
         Expanded(
           flex: 5,
           child: Container(
             decoration: BoxDecoration(
               border: Border(
                 left: BorderSide(
-                    color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+                  color: const Color(0xFFD4AF37)
+                      .withValues(alpha: isDark ? 0.15 : 0.12),
+                  width: 1,
+                ),
               ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
+                  padding: const EdgeInsetsDirectional.fromSTEB(
+                      AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.sm),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const SectionHeader(title: 'اختر موظف الوردية'),
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
-                        'اختر موظف الوردية:',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'اضغط على حسابك للدخول السريع أو تغيير الرمز السري',
+                        'اضغط على حسابك ثم أدخل رمز PIN للدخول',
                         style: TextStyle(
-                            fontSize: 12, color: colorScheme.onSurfaceVariant),
+                            fontSize: 12,
+                            color: isDark
+                                ? const Color(0xFFB8A882)
+                                : const Color(0xFF9A8A60)),
                       ),
-                      AppSpacing.gapMd,
+                      const SizedBox(height: AppSpacing.md),
+                      // Search field
                       TextField(
-                        controller: _searchController,
-                        onChanged: (val) => setState(() => _searchQuery = val),
+                        controller: state._searchController,
+                        onChanged: (v) =>
+                            state.setState(() => state._searchQuery = v),
                         decoration: InputDecoration(
-                          hintText: 'بحث عن موظف بالاسم أو الهاتف...',
-                          prefixIcon: const Icon(Icons.search, size: 20),
+                          hintText: 'بحث عن موظف...',
+                          prefixIcon: const Icon(Icons.search_rounded, size: 18),
                           isDense: true,
-                          contentPadding:
-                              const EdgeInsetsDirectional.all(AppSpacing.md),
-                          suffixIcon: _searchQuery.isNotEmpty
+                          suffixIcon: state._searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear, size: 18),
+                                  icon: const Icon(Icons.clear, size: 16),
                                   onPressed: () {
-                                    _searchController.clear();
-                                    setState(() => _searchQuery = '');
+                                    state._searchController.clear();
+                                    state.setState(() => state._searchQuery = '');
                                   },
                                 )
                               : null,
@@ -369,15 +429,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Expanded(
                   child: staffList.isEmpty
                       ? Center(
-                          child: Text(
-                            'لم يتم العثور على أي موظف!',
-                            style:
-                                TextStyle(color: colorScheme.onSurfaceVariant),
-                          ),
+                          child: Text('لا يوجد موظفون',
+                              style: TextStyle(
+                                  color: theme.colorScheme.onSurfaceVariant)),
                         )
                       : GridView.builder(
                           padding: const EdgeInsetsDirectional.symmetric(
-                              horizontal: AppSpacing.lg),
+                              horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
                           gridDelegate:
                               const SliverGridDelegateWithMaxCrossAxisExtent(
                             maxCrossAxisExtent: 220,
@@ -386,186 +444,186 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             mainAxisSpacing: AppSpacing.md,
                           ),
                           itemCount: staffList.length,
-                          itemBuilder: (context, index) {
-                            final staff = staffList[index];
-                            final isSelected = _selectedStaff?.id == staff.id;
-                            return _buildStaffCard(
-                                theme, colorScheme, staff, isSelected);
-                          },
+                          itemBuilder: (_, i) => _StaffCard(
+                            staff: staffList[i],
+                            isSelected:
+                                state._selectedStaff?.id == staffList[i].id,
+                            isDark: isDark,
+                            onTap: () => state.setState(() {
+                              state._selectedStaff = staffList[i];
+                              state._errorMessage = null;
+                              state._pinController.clear();
+                              state._focusNode.requestFocus();
+                            }),
+                          ),
                         ),
                 ),
-                Padding(
-                  padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
-                  child: OutlinedButton.icon(
-                    onPressed: _loginAsMasterModerator,
-                    icon: const Icon(Icons.admin_panel_settings_outlined,
-                        size: 18),
-                    label: const Text('دخول سريع كمشرف عام (Master Moderator)'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
 
-        // Right/Second Pane: PIN Keypad Terminal
+        // PIN terminal pane
         Expanded(
           flex: 4,
           child: Center(
             child: SingleChildScrollView(
               padding: const EdgeInsetsDirectional.all(AppSpacing.xl),
-              child: ContentConstrainedBox.form(
-                maxWidth: 360,
-                child: _buildPinTerminalCard(theme, colorScheme),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: _PinTerminalCard(state: state, isDark: isDark),
               ),
             ),
           ),
         ),
       ],
+     
+       
+
+    )
+          )
+        )
+      ]
     );
+    
   }
 
-  Widget _buildCompactLayout(
-    ThemeData theme,
-    ColorScheme colorScheme,
-    List<UserEntity> staffList,
-  ) {
+}
+
+// ── Compact Layout ────────────────────────────────────────────────────────────
+
+class _CompactLayout extends StatelessWidget {
+  final _LoginScreenState state;
+  final List<UserEntity> staffList;
+  final bool isDark;
+
+  const _CompactLayout({
+    required this.state,
+    required this.staffList,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return SingleChildScrollView(
       padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
       child: Center(
-        child: ContentConstrainedBox.form(
-          maxWidth: 400,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 400),
           child: Column(
             children: [
-              // Staff Dropdown / Selector
+              // Staff dropdown
               Container(
                 padding: const EdgeInsetsDirectional.symmetric(
                     horizontal: AppSpacing.md),
                 decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainer,
-                  borderRadius: AppRadius.mdAll,
-                  border: Border.all(color: colorScheme.outlineVariant),
+                  color: isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+                  borderRadius: AppRadius.lgAll,
+                  border: Border.all(
+                    color: const Color(0xFFD4AF37).withValues(alpha: 0.25),
+                    width: 1,
+                  ),
                 ),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     isExpanded: true,
-                    value: _selectedStaff?.id,
-                    items: staffList.map((staff) {
-                      return DropdownMenuItem<String>(
-                        value: staff.id,
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 14,
-                              backgroundColor: colorScheme.primaryContainer,
-                              child: Icon(
-                                _getRoleIcon(staff.role),
-                                size: 16,
-                                color: colorScheme.primary,
+                    value: state._selectedStaff?.id,
+                    items: staffList
+                        .map((s) => DropdownMenuItem<String>(
+                              value: s.id,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    _LoginScreenState.roleIcon(s.role),
+                                    size: 16,
+                                    color: const Color(0xFFD4AF37),
+                                  ),
+                                  const SizedBox(width: AppSpacing.sm),
+                                  Text(s.name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13)),
+                                  const Spacer(),
+                                  Text(_LoginScreenState.roleLabel(s.role),
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: cs.onSurfaceVariant)),
+                                ],
                               ),
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
-                            Text(staff.name,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold, fontSize: 13)),
-                            const Spacer(),
-                            Text(_getRoleLabel(staff.role),
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    color: colorScheme.onSurfaceVariant)),
-                          ],
-                        ),
-                      );
-                    }).toList(),
+                            ))
+                        .toList(),
                     onChanged: (val) {
                       if (val != null) {
-                        final staff = staffList.firstWhere((s) => s.id == val);
-                        setState(() {
-                          _selectedStaff = staff;
-                          _errorMessage = null;
-                          _pinController.clear();
+                        final s = staffList.firstWhere((x) => x.id == val);
+                        state.setState(() {
+                          state._selectedStaff = s;
+                          state._errorMessage = null;
+                          state._pinController.clear();
                         });
-                        _focusNode.requestFocus();
+                        state._focusNode.requestFocus();
                       }
                     },
                   ),
                 ),
               ),
-              AppSpacing.gapLg,
-
-              // PIN Terminal Card
-              _buildPinTerminalCard(theme, colorScheme),
-              AppSpacing.gapMd,
-
-              OutlinedButton.icon(
-                onPressed: _loginAsMasterModerator,
-                icon: const Icon(Icons.admin_panel_settings_outlined, size: 18),
-                label: const Text('دخول سريع كمشرف عام'),
-              ),
+              const SizedBox(height: AppSpacing.lg),
+              _PinTerminalCard(state: state, isDark: isDark),
             ],
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildStaffCard(
-    ThemeData theme,
-    ColorScheme colorScheme,
-    UserEntity staff,
-    bool isSelected,
-  ) {
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedStaff = staff;
-          _errorMessage = null;
-          _pinController.clear();
-        });
-        _focusNode.requestFocus();
-      },
-      borderRadius: AppRadius.lgAll,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
+// ── Staff Card ────────────────────────────────────────────────────────────────
+
+class _StaffCard extends StatelessWidget {
+  final UserEntity staff;
+  final bool isSelected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _StaffCard({
+    required this.staff,
+    required this.isSelected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LuxuryCard(
+      selected: isSelected,
+      onTap: onTap,
+      child: Padding(
         padding: const EdgeInsetsDirectional.all(AppSpacing.md),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? colorScheme.primaryContainer.withValues(alpha: 0.4)
-              : colorScheme.surfaceContainer,
-          borderRadius: AppRadius.lgAll,
-          border: Border.all(
-            color: isSelected
-                ? colorScheme.primary
-                : colorScheme.outlineVariant.withValues(alpha: 0.6),
-            width: isSelected ? 2 : 1,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: colorScheme.primary.withValues(alpha: 0.15),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
-        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Row(
               children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: isSelected
-                      ? colorScheme.primary
-                      : colorScheme.surfaceContainerHighest,
+                // Role avatar
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    gradient: isSelected ? AppGradients.gold : null,
+                    color: isSelected
+                        ? null
+                        : (isDark
+                            ? const Color(0xFF2A2518)
+                            : const Color(0xFFF3E8C8)),
+                    borderRadius: AppRadius.smAll,
+                    boxShadow: isSelected ? [AppShadows.goldGlowSm] : null,
+                  ),
                   child: Icon(
-                    _getRoleIcon(staff.role),
+                    _LoginScreenState.roleIcon(staff.role),
                     size: 18,
                     color: isSelected
-                        ? colorScheme.onPrimary
-                        : colorScheme.primary,
+                        ? const Color(0xFF1A1400)
+                        : (isDark
+                            ? const Color(0xFFF3D278)
+                            : const Color(0xFFC59B27)),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
@@ -575,12 +633,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontWeight:
-                          isSelected ? FontWeight.bold : FontWeight.w600,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                       fontSize: 13,
                       color: isSelected
-                          ? colorScheme.primary
-                          : colorScheme.onSurface,
+                          ? (isDark
+                              ? const Color(0xFFF3D278)
+                              : const Color(0xFF9A7319))
+                          : null,
                     ),
                   ),
                 ),
@@ -589,30 +648,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Flexible(
-                  child: Container(
-                    padding: const EdgeInsetsDirectional.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest,
-                      borderRadius: AppRadius.pillAll,
-                    ),
-                    child: Text(
-                      _getRoleLabel(staff.role),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 10, color: colorScheme.onSurfaceVariant),
+                Container(
+                  padding: const EdgeInsetsDirectional.symmetric(
+                      horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF2A2518)
+                        : const Color(0xFFF3E8C8),
+                    borderRadius: AppRadius.pillAll,
+                  ),
+                  child: Text(
+                    _LoginScreenState.roleLabel(staff.role),
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? const Color(0xFFF3D278)
+                          : const Color(0xFFC59B27),
                     ),
                   ),
                 ),
-                const SizedBox(width: AppSpacing.xs),
                 Text(
                   staff.phone,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                      fontSize: 10, color: colorScheme.onSurfaceVariant),
+                      fontSize: 9,
+                      color: isDark
+                          ? const Color(0xFFB8A882)
+                          : const Color(0xFF9A8A60)),
                 ),
               ],
             ),
@@ -621,280 +683,359 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       ),
     );
   }
+}
 
-  Widget _buildPinTerminalCard(ThemeData theme, ColorScheme colorScheme) {
-    final staff = _selectedStaff;
+// ── PIN Terminal Card ─────────────────────────────────────────────────────────
 
-    final defaultPinTheme = PinTheme(
+class _PinTerminalCard extends StatelessWidget {
+  final _LoginScreenState state;
+  final bool isDark;
+  const _PinTerminalCard({required this.state, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final staff = state._selectedStaff;
+
+    // Gold PIN theme
+    final pinBase = PinTheme(
       width: 58,
       height: 62,
       textStyle: TextStyle(
-        fontSize: 26,
+        fontSize: 28,
         fontWeight: FontWeight.bold,
-        color: colorScheme.onSurface,
+        color: isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319),
       ),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        color: isDark ? const Color(0xFF232018) : const Color(0xFFF5EDD8),
         borderRadius: AppRadius.mdAll,
-        border: Border.all(color: colorScheme.outlineVariant),
+        border: Border.all(
+          color: const Color(0xFFD4AF37).withValues(alpha: isDark ? 0.25 : 0.20),
+          width: 1,
+        ),
       ),
     );
 
-    final focusedPinTheme = defaultPinTheme.copyWith(
+    final pinFocused = pinBase.copyWith(
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
+        color: isDark ? const Color(0xFF2A2518) : const Color(0xFFFBF4DC),
         borderRadius: AppRadius.mdAll,
-        border: Border.all(color: colorScheme.primary, width: 2),
+        border: Border.all(color: const Color(0xFFD4AF37), width: 2),
+        boxShadow: const [AppShadows.goldGlowSm],
       ),
     );
 
-    final errorPinTheme = defaultPinTheme.copyWith(
+    final pinError = pinBase.copyWith(
       decoration: BoxDecoration(
-        color: colorScheme.errorContainer.withValues(alpha: 0.3),
+        color: cs.errorContainer.withValues(alpha: 0.30),
         borderRadius: AppRadius.mdAll,
-        border: Border.all(color: colorScheme.error, width: 2),
+        border: Border.all(color: cs.error, width: 2),
       ),
     );
 
-    return Card(
-      elevation: 2,
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.xlAll),
-      child: Padding(
-        padding: const EdgeInsetsDirectional.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Selected Staff Header
-            if (staff != null) ...[
-              Center(
-                child: CircleAvatar(
-                  radius: 28,
-                  backgroundColor: colorScheme.primaryContainer,
+    return LuxuryCard(
+      goldAccent: true,
+      padding: const EdgeInsetsDirectional.all(AppSpacing.xl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Staff avatar + name
+          if (staff != null) ...[
+            Center(
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: AppGradients.gold,
+                  shape: BoxShape.circle,
+                  boxShadow: [AppShadows.goldGlow],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
                   child: Icon(
-                    _getRoleIcon(staff.role),
-                    size: 30,
-                    color: colorScheme.primary,
+                    _LoginScreenState.roleIcon(staff.role),
+                    size: 28,
+                    color: const Color(0xFF1A1400),
                   ),
                 ),
               ),
-              AppSpacing.gapSm,
-              Text(
-                staff.name,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              staff.name,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Center(
+              child: GoldBadge(
+                label: _LoginScreenState.roleLabel(staff.role),
+                icon: _LoginScreenState.roleIcon(staff.role),
+                small: true,
               ),
-              const SizedBox(height: 2),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsetsDirectional.symmetric(
-                        horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: colorScheme.primary.withValues(alpha: 0.1),
-                      borderRadius: AppRadius.pillAll,
-                    ),
-                    child: Text(
-                      _getRoleLabel(staff.role),
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colorScheme.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+            ),
+          ] else ...[
+            Center(
+              child: Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF2A2518)
+                      : const Color(0xFFF3E8C8),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xFFD4AF37).withValues(alpha: 0.30),
                   ),
-                ],
+                ),
+                child: const Icon(Icons.lock_outline_rounded,
+                    size: 28, color: Color(0xFFD4AF37)),
               ),
-            ] else ...[
-              Icon(Icons.lock_outline, size: 48, color: colorScheme.primary),
-              AppSpacing.gapSm,
-              const Text(
-                'أدخل رمز PIN لتسجيل الدخول',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'أدخل رمز PIN لتسجيل الدخول',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ],
 
-            AppSpacing.gapLg,
+          const SizedBox(height: AppSpacing.xl),
 
-            // Pinput 4-Digit Field
-            Directionality(
+          // PIN field
+          Center(
+            child: Directionality(
               textDirection: TextDirection.ltr,
               child: Pinput(
-                controller: _pinController,
-                focusNode: _focusNode,
+                controller: state._pinController,
+                focusNode: state._focusNode,
                 autofocus: true,
                 length: 4,
                 obscureText: true,
-                obscuringCharacter: '●',
-                defaultPinTheme: defaultPinTheme,
-                focusedPinTheme: focusedPinTheme,
-                errorPinTheme: errorPinTheme,
+                obscuringCharacter: '◆',
+                defaultPinTheme: pinBase,
+                focusedPinTheme: pinFocused,
+                errorPinTheme: pinError,
                 hapticFeedbackType: HapticFeedbackType.mediumImpact,
-                onCompleted: _handlePinLogin,
+                onCompleted: state._handlePinLogin,
                 onChanged: (_) {
-                  if (_errorMessage != null) {
-                    setState(() => _errorMessage = null);
+                  if (state._errorMessage != null) {
+                    state.setState(() => state._errorMessage = null);
                   }
                 },
               ),
             ),
+          ),
 
-            // Error Message
-            if (_errorMessage != null) ...[
-              const SizedBox(height: AppSpacing.sm),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 14, color: colorScheme.error),
-                  const SizedBox(width: 4),
-                  Text(
-                    _errorMessage!,
+          // Error
+          if (state._errorMessage != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline_rounded, size: 14, color: cs.error),
+                const SizedBox(width: 4),
+                Text(state._errorMessage!,
                     style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.error,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
-            AppSpacing.gapLg,
-
-            // Virtual Keypad
-            _buildKeypad(theme, colorScheme),
-
-            AppSpacing.gapMd,
-
-            // Change PIN Button
-            TextButton.icon(
-              onPressed: _openChangePinDialog,
-              icon: const Icon(Icons.password_rounded, size: 16),
-              label: const Text(
-                'تغيير رمز PIN الخاص بي',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-              ),
+                        fontSize: 12,
+                        color: cs.error,
+                        fontWeight: FontWeight.bold)),
+              ],
             ),
+          ],
 
-            if (_isAuthenticating) ...[
-              AppSpacing.gapSm,
-              const Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+          const SizedBox(height: AppSpacing.xl),
+
+          // Virtual keypad
+          _GoldKeypad(state: state, isDark: isDark),
+
+          const SizedBox(height: AppSpacing.md),
+
+          // Change PIN
+          Center(
+            child: TextButton.icon(
+              onPressed: state._openChangePinDialog,
+              icon: Icon(Icons.password_rounded,
+                  size: 15,
+                  color: isDark
+                      ? const Color(0xFFF3D278)
+                      : const Color(0xFFC59B27)),
+              label: Text(
+                'تغيير رمز PIN',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isDark
+                      ? const Color(0xFFF3D278)
+                      : const Color(0xFFC59B27),
                 ),
               ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+            ),
+          ),
 
-  Widget _buildKeypad(ThemeData theme, ColorScheme colorScheme) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 280),
-      child: Column(
-        children: [
-          for (var row in [
-            ['1', '2', '3'],
-            ['4', '5', '6'],
-            ['7', '8', '9'],
-            ['C', '0', '⌫'],
-          ]) ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: row.map((key) {
-                final isAction = key == 'C' || key == '⌫';
-                return Padding(
-                  padding: const EdgeInsets.all(4.0),
-                  child: InkWell(
-                    borderRadius: AppRadius.mdAll,
-                    onTap: () {
-                      if (key == 'C') {
-                        _pinController.clear();
-                        setState(() => _errorMessage = null);
-                      } else if (key == '⌫') {
-                        if (_pinController.text.isNotEmpty) {
-                          _pinController.text = _pinController.text
-                              .substring(0, _pinController.text.length - 1);
-                        }
-                      } else {
-                        if (_pinController.text.length < 4) {
-                          _pinController.text = _pinController.text + key;
-                          if (_pinController.text.length == 4) {
-                            _handlePinLogin(_pinController.text);
-                          }
-                        }
-                      }
-                    },
-                    child: Container(
-                      width: 76,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: isAction
-                            ? colorScheme.surfaceContainer
-                            : colorScheme.surfaceContainerHighest
-                                .withValues(alpha: 0.6),
-                        borderRadius: AppRadius.mdAll,
-                        border: Border.all(
-                          color:
-                              colorScheme.outlineVariant.withValues(alpha: 0.5),
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        key,
-                        style: TextStyle(
-                          fontSize: isAction ? 15 : 18,
-                          fontWeight: FontWeight.bold,
-                          color: isAction
-                              ? colorScheme.error
-                              : colorScheme.onSurface,
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
+          if (state._isAuthenticating) ...[
+            const SizedBox(height: AppSpacing.sm),
+            const Center(
+              child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child:
+                      CircularProgressIndicator.adaptive(strokeWidth: 2)),
             ),
           ],
         ],
       ),
     );
   }
+}
 
-  IconData _getRoleIcon(UserRole role) {
-    switch (role) {
-      case UserRole.cashier:
-        return Icons.point_of_sale_rounded;
-      case UserRole.manager:
-        return Icons.inventory_2_rounded;
-      case UserRole.moderator:
-        return Icons.admin_panel_settings_rounded;
-      case UserRole.driver:
-        return Icons.local_shipping_rounded;
-      case UserRole.customer:
-        return Icons.person_rounded;
+// ── Gold Keypad ───────────────────────────────────────────────────────────────
+
+class _GoldKeypad extends StatelessWidget {
+  final _LoginScreenState state;
+  final bool isDark;
+  const _GoldKeypad({required this.state, required this.isDark});
+
+  void _press(String key) {
+    if (key == 'C') {
+      state._pinController.clear();
+      state.setState(() => state._errorMessage = null);
+    } else if (key == '⌫') {
+      if (state._pinController.text.isNotEmpty) {
+        state._pinController.text = state._pinController.text
+            .substring(0, state._pinController.text.length - 1);
+      }
+    } else {
+      if (state._pinController.text.length < 4) {
+        state._pinController.text = state._pinController.text + key;
+        if (state._pinController.text.length == 4) {
+          state._handlePinLogin(state._pinController.text);
+        }
+      }
     }
   }
 
-  String _getRoleLabel(UserRole role) {
-    switch (role) {
-      case UserRole.cashier:
-        return 'كاشير';
-      case UserRole.manager:
-        return 'مدير المخزن';
-      case UserRole.moderator:
-        return 'مشرف عام';
-      case UserRole.driver:
-        return 'سائق توصيل';
-      case UserRole.customer:
-        return 'عميل';
-    }
+  @override
+  Widget build(BuildContext context) {
+    const rows = [
+      ['1', '2', '3'],
+      ['4', '5', '6'],
+      ['7', '8', '9'],
+      ['C', '0', '⌫'],
+    ];
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 280),
+      child: Column(
+        children: rows
+            .map((row) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: row.map((key) {
+                      final isAction = key == 'C' || key == '⌫';
+                      return _KeyButton(
+                        label: key,
+                        isAction: isAction,
+                        isDark: isDark,
+                        onTap: () => _press(key),
+                      );
+                    }).toList(),
+                  ),
+                ))
+            .toList(),
+      ),
+    );
+  }
+}
+
+class _KeyButton extends StatefulWidget {
+  final String label;
+  final bool isAction;
+  final bool isDark;
+  final VoidCallback onTap;
+  const _KeyButton(
+      {required this.label,
+      required this.isAction,
+      required this.isDark,
+      required this.onTap});
+
+  @override
+  State<_KeyButton> createState() => _KeyButtonState();
+}
+
+class _KeyButtonState extends State<_KeyButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 100));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTapDown: (_) => _ctrl.forward(),
+      onTapUp: (_) {
+        _ctrl.reverse();
+        widget.onTap();
+      },
+      onTapCancel: () => _ctrl.reverse(),
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (_, __) => Transform.scale(
+          scale: 1.0 - 0.05 * _ctrl.value,
+          child: Container(
+            width: 76,
+            height: 50,
+            decoration: BoxDecoration(
+              gradient: !widget.isAction && _ctrl.value > 0.5
+                  ? AppGradients.goldSubtleLight
+                  : null,
+              color: widget.isAction
+                  ? (widget.isDark
+                      ? const Color(0xFF2A2518)
+                      : const Color(0xFFF3E8C8))
+                  : (widget.isDark
+                      ? const Color(0xFF232018)
+                      : const Color(0xFFFFFDF8)),
+              borderRadius: AppRadius.mdAll,
+              border: Border.all(
+                color: const Color(0xFFD4AF37)
+                    .withValues(alpha: widget.isDark ? 0.20 : 0.15),
+                width: 1,
+              ),
+              boxShadow: _ctrl.value > 0.5
+                  ? [AppShadows.goldGlowSm]
+                  : null,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                fontSize: widget.isAction ? 16 : 20,
+                fontWeight: FontWeight.bold,
+                color: widget.isAction
+                    ? cs.error
+                    : (widget.isDark
+                        ? const Color(0xFFFBF8F0)
+                        : const Color(0xFF1E1B14)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

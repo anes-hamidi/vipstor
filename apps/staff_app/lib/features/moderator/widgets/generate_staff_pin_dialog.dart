@@ -21,6 +21,7 @@ class GenerateStaffPinDialog extends ConsumerStatefulWidget {
 
 class _GenerateStaffPinDialogState extends ConsumerState<GenerateStaffPinDialog> {
   final _pinController = TextEditingController();
+  final _adminPinController = TextEditingController();
   final _focusNode = FocusNode();
   bool _isSaving = false;
   String? _errorMessage;
@@ -35,6 +36,7 @@ class _GenerateStaffPinDialogState extends ConsumerState<GenerateStaffPinDialog>
   @override
   void dispose() {
     _pinController.dispose();
+    _adminPinController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -65,8 +67,13 @@ class _GenerateStaffPinDialogState extends ConsumerState<GenerateStaffPinDialog>
 
   Future<void> _handleSavePin() async {
     final pin = _pinController.text.trim();
+    final adminPin = _adminPinController.text.trim();
     if (pin.length < 4) {
-      setState(() => _errorMessage = 'يجب أن يتكون رمز PIN من 4 أرقام!');
+      setState(() => _errorMessage = 'يجب أن يتكون رمز PIN الجديد من 4 أرقام!');
+      return;
+    }
+    if (adminPin.length < 4) {
+      setState(() => _errorMessage = 'يرجى إدخال رمز PIN الخاص بك (المشرف) لتأكيد العملية!');
       return;
     }
 
@@ -76,7 +83,8 @@ class _GenerateStaffPinDialogState extends ConsumerState<GenerateStaffPinDialog>
     });
 
     final currentAdmin = ref.read(authStateProvider);
-    final adminId = currentAdmin?.id ?? '11111111-1111-1111-1111-111111111111';
+    final adminId = currentAdmin?.id;
+    if (adminId == null) return;
     final targetUserId = widget.staffUser['id'] as String;
     final staffName = widget.staffUser['name'] as String? ?? 'الموظف';
 
@@ -84,6 +92,7 @@ class _GenerateStaffPinDialogState extends ConsumerState<GenerateStaffPinDialog>
       final repo = ref.read(authRepositoryProvider);
       final success = await repo.resetStaffPinByModerator(
         adminId: adminId,
+        adminPin: adminPin,
         targetUserId: targetUserId,
         newPin: pin,
       );
@@ -327,6 +336,21 @@ class _GenerateStaffPinDialogState extends ConsumerState<GenerateStaffPinDialog>
 
               // Virtual Touch Keypad
               _buildKeypad(theme, colorScheme),
+
+              AppSpacing.gapLg,
+
+              // Admin PIN confirmation input
+              TextField(
+                controller: _adminPinController,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                decoration: const InputDecoration(
+                  labelText: 'رمز PIN الخاص بك (المشرف) لتأكيد العملية *',
+                  prefixIcon: Icon(Icons.admin_panel_settings_outlined),
+                  counterText: '',
+                ),
+              ),
 
               AppSpacing.gapLg,
 

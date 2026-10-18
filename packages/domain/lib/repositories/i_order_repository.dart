@@ -14,6 +14,7 @@ abstract class IOrderRepository {
     required String customerId,
     required Map<String, dynamic> address,
     required List<Map<String, dynamic>> items,
+    String? clientId,
   });
   Future<void> confirmOrder({required String orderId, required String cashierId, String? driverId});
   Future<void> updateOrderStatus({required String orderId, required OrderStatus status, String? notes});

@@ -110,7 +110,7 @@ class _SalesReturnDialogState extends ConsumerState<SalesReturnDialog> {
 
       final result = await ref.read(posCartProvider.notifier).processReturn(
             originalOrderId: _fetchedOrder!.id,
-            cashierId: user?.id ?? '11111111-1111-1111-1111-111111111111',
+            cashierId: user?.id ?? '',
             returnItems: returnItemsList,
             totalRefundCentimes: _calculatedRefundTotalCentimes,
             reason: _reasons[_selectedReason] ?? _selectedReason,

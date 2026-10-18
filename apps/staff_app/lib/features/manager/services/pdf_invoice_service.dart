@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -188,11 +187,11 @@ class PdfInvoiceService {
                 pw.Table(
                   border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
                   columnWidths: {
-                    0: const pw.FlexColumnWidth(0.8), // Index
-                    1: const pw.FlexColumnWidth(4.0), // Product Name
-                    2: const pw.FlexColumnWidth(1.2), // Qty
-                    3: const pw.FlexColumnWidth(2.0), // Unit Price
-                    4: const pw.FlexColumnWidth(2.0), // Line Total
+                    0: const pw.FlexColumnWidth(0.6), // Index
+                    1: const pw.FlexColumnWidth(3.8), // Product Name
+                    2: const pw.FlexColumnWidth(2.0), // Qty + Unit
+                    3: const pw.FlexColumnWidth(1.8), // Unit Price
+                    4: const pw.FlexColumnWidth(1.8), // Line Total
                   },
                   children: [
                     // Table Header
@@ -201,7 +200,7 @@ class PdfInvoiceService {
                       children: [
                         _th('#'),
                         _th('السلعة / Désignation'),
-                        _th('الكمية'),
+                        _th('الكمية والنوع / Qté'),
                         _th('السعر (دج)'),
                         _th('المجموع (دج)'),
                       ],
@@ -216,7 +215,7 @@ class PdfInvoiceService {
                         children: [
                           _td('$idx', align: pw.TextAlign.center),
                           _td(it.productName, bold: true),
-                          _td('${it.quantity}', align: pw.TextAlign.center),
+                          _td(it.formattedQuantityWithUnit, align: pw.TextAlign.center),
                           _td(DzdFormatter.formatCentimes(it.unitPriceCentimes)),
                           _td(DzdFormatter.formatCentimes(it.lineTotalCentimes), bold: true),
                         ],
@@ -401,11 +400,11 @@ class PdfInvoiceService {
                 pw.Table(
                   border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
                   columnWidths: {
-                    0: const pw.FlexColumnWidth(0.8),
-                    1: const pw.FlexColumnWidth(4.0),
-                    2: const pw.FlexColumnWidth(1.2),
-                    3: const pw.FlexColumnWidth(2.0),
-                    4: const pw.FlexColumnWidth(2.0),
+                    0: const pw.FlexColumnWidth(0.6),
+                    1: const pw.FlexColumnWidth(3.8),
+                    2: const pw.FlexColumnWidth(1.8),
+                    3: const pw.FlexColumnWidth(1.8),
+                    4: const pw.FlexColumnWidth(1.8),
                   },
                   children: [
                     pw.TableRow(
@@ -413,7 +412,7 @@ class PdfInvoiceService {
                       children: [
                         _th('#'),
                         _th('السلعة'),
-                        _th('الكمية المستلمة'),
+                        _th('الكمية والنوع'),
                         _th('سعر الشراء (دج)'),
                         _th('المجموع (دج)'),
                       ],
@@ -424,12 +423,15 @@ class PdfInvoiceService {
                       final name = it['product_name'] ?? it['name'] ?? '';
                       final qty = (it['qty'] ?? it['quantity'] ?? 1) as int;
                       final cost = (it['unit_cost'] ?? 0) as int;
+                      final rawUnit = it['unit']?.toString();
+                      final unitLabel = formatUnit(rawUnit);
+                      final qtyDisplay = unitLabel.isNotEmpty ? '$qty $unitLabel' : '$qty';
                       final lineTotal = qty * cost;
                       return pw.TableRow(
                         children: [
                           _td('$idx', align: pw.TextAlign.center),
                           _td(name.toString(), bold: true),
-                          _td('$qty', align: pw.TextAlign.center),
+                          _td(qtyDisplay, align: pw.TextAlign.center),
                           _td(DzdFormatter.formatCentimes(cost)),
                           _td(DzdFormatter.formatCentimes(lineTotal), bold: true),
                         ],
@@ -474,6 +476,26 @@ class PdfInvoiceService {
       name: 'Reception_$invoiceNo.pdf',
       onLayout: (format) async => doc.save(),
     );
+  }
+
+  static String formatUnit(String? unit) {
+    if (unit == null || unit.trim().isEmpty) return '';
+    final u = unit.trim().toLowerCase();
+    if (u.contains('boit') || u.contains('box') || u.contains('علب') || u.contains('صندوق')) {
+      return 'علبة (Boîte)';
+    } else if (u.contains('carton') || u.contains('كرتون')) {
+      return 'كرتون (Carton)';
+    } else if (u.contains('pack') || u.contains('طرد') || u.contains('حزم')) {
+      return 'طرد (Pack)';
+    } else if (u == 'kg' || u.contains('كغ') || u.contains('كيلو')) {
+      return 'كغ (Kg)';
+    } else if (u == 'g' || u.contains('غرام') || u == 'غ') {
+      return 'غ (g)';
+    } else if (u == 'l' || u.contains('لتر') || u.contains('litre')) {
+      return 'لتر (L)';
+    } else {
+      return 'قطعة (Pièce)';
+    }
   }
 
   static pw.Widget _th(String text) {

@@ -3,68 +3,103 @@ import '../tokens/app_colors.dart';
 import '../tokens/app_radius.dart';
 import '../tokens/app_spacing.dart';
 
+/// Stock level indicator badge.
+///
+/// States: out-of-stock (error), low (warning), in-stock (success).
+///
+/// ```dart
+/// StockBadge(availableQty: product.availableQty)
+/// StockBadge(availableQty: product.availableQty, unitName: 'قطعة', compact: true)
+/// ```
 class StockBadge extends StatelessWidget {
   final int availableQty;
   final int minAlert;
   final String? unitName;
+  final bool compact;
 
   const StockBadge({
     super.key,
     required this.availableQty,
     this.minAlert = 5,
     this.unitName,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final colors = context.appColors;
-    final colorScheme = Theme.of(context).colorScheme;
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     Color bg;
     Color fg;
+    Color border;
     IconData icon;
     String label;
 
     final unitStr = unitName != null ? ' $unitName' : '';
 
     if (availableQty <= 0) {
-      bg = colorScheme.errorContainer;
-      fg = colorScheme.onErrorContainer;
-      icon = Icons.error_outline;
-      label = 'نفذ المخزون (Épuisé)';
+      bg = cs.errorContainer;
+      fg = cs.onErrorContainer;
+      border = cs.onErrorContainer.withValues(alpha: 0.25);
+      icon = Icons.remove_shopping_cart_outlined;
+      label = compact ? 'نفذ' : 'نفذ من المخزون';
     } else if (availableQty <= minAlert) {
       bg = colors.warningContainer;
       fg = colors.onWarningContainer;
+      border = colors.onWarningContainer.withValues(alpha: 0.25);
       icon = Icons.warning_amber_rounded;
-      label = 'مخزون منخفض ($availableQty$unitStr)';
+      label = compact ? '$availableQty$unitStr' : 'قليل: $availableQty$unitStr';
     } else {
       bg = colors.successContainer;
       fg = colors.onSuccessContainer;
-      icon = Icons.check_circle_outline;
-      label = 'متوفر ($availableQty$unitStr)';
+      border = colors.onSuccessContainer.withValues(alpha: 0.25);
+      icon = Icons.inventory_2_outlined;
+      label = compact ? '$availableQty$unitStr' : 'متوفر: $availableQty$unitStr';
     }
 
-    return Container(
-      padding: const EdgeInsetsDirectional.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: AppRadius.smAll,
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: fg),
-          const SizedBox(width: AppSpacing.xs),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: fg,
-            ),
+    final resolvedBg = isDark
+        ? Color.alphaBlend(Colors.black.withValues(alpha: 0.15), bg)
+        : bg;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textWidget = Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: compact ? 10 : 12,
+            fontWeight: FontWeight.w600,
+            color: fg,
+            letterSpacing: 0.2,
           ),
-        ],
-      ),
+        );
+
+        return Container(
+          padding: EdgeInsetsDirectional.symmetric(
+            horizontal: compact ? AppSpacing.sm : AppSpacing.md,
+            vertical: compact ? 1.5 : 3.0,
+          ),
+          decoration: BoxDecoration(
+            color: resolvedBg,
+            borderRadius: AppRadius.fullAll,
+            border: Border.all(color: border, width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: compact ? 11 : 13, color: fg),
+              SizedBox(width: compact ? AppSpacing.xxs : AppSpacing.xs),
+              if (constraints.hasBoundedWidth)
+                Flexible(child: textWidget)
+              else
+                textWidget,
+            ],
+          ),
+        );
+      },
     );
   }
 }

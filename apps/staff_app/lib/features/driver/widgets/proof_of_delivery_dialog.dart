@@ -334,6 +334,7 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
   }
 
   Widget _buildCashStep(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -391,6 +392,7 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
                 _cashController.text = (widget.order.totalAmountCentimes / 100).toStringAsFixed(0);
                 setState(() => _collectedCentimes = widget.order.totalAmountCentimes);
               },
+              backgroundColor: isDark ? const Color(0xFF1A1400) : const Color(0xFFD4AF37)
             ),
             ActionChip(
               label: const Text('دفع لاحقاً (على الحساب)'),
@@ -398,6 +400,7 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
                 _cashController.text = '0';
                 setState(() => _collectedCentimes = 0);
               },
+              backgroundColor: isDark ? const Color(0xFF1A1400) : const Color(0xFFD4AF37)
             ),
           ],
         ),

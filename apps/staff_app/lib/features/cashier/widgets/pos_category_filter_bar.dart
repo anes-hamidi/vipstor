@@ -1,82 +1,202 @@
 import 'package:flutter/material.dart';
 import 'package:ui_kit/ui_kit.dart';
 
-class PosCategory {
-  final String id;
-  final String labelAr;
-  final IconData icon;
-
-  const PosCategory({
-    required this.id,
-    required this.labelAr,
-    required this.icon,
-  });
-}
-
+/// Dynamic category chip bar for the POS catalog.
+///
+/// [categories] is the list of raw category strings fetched from the DB
+/// (empty string "" is treated as "الكل" / All and always appears first).
+/// The caller owns the full list; this widget renders it as animated chips.
 class PosCategoryFilterBar extends StatelessWidget {
   final String selectedCategory;
   final ValueChanged<String> onCategorySelected;
+
+  /// Dynamic list derived from actual product categories.
+  /// Pass an empty list while loading — only the "الكل" chip will show.
+  final List<String> categories;
 
   const PosCategoryFilterBar({
     super.key,
     required this.selectedCategory,
     required this.onCategorySelected,
+    required this.categories,
   });
-
-  static const List<PosCategory> categories = [
-    PosCategory(id: '', labelAr: 'جميع المنتجات', icon: Icons.apps_rounded),
-    PosCategory(id: 'beverages', labelAr: 'مشروبات وعصائر', icon: Icons.local_drink_rounded),
-    PosCategory(id: 'groceries', labelAr: 'مواد غذائية عامة', icon: Icons.kitchen_rounded),
-    PosCategory(id: 'dairy', labelAr: 'ألبان وأجبان', icon: Icons.egg_alt_rounded),
-    PosCategory(id: 'sweets', labelAr: 'حلويات وبسكويت', icon: Icons.cookie_rounded),
-    PosCategory(id: 'cleaning', labelAr: 'منظفات ومواد تنظيف', icon: Icons.cleaning_services_rounded),
-    PosCategory(id: 'hygiene', labelAr: 'عناية شخصية', icon: Icons.soap_rounded),
-    PosCategory(id: 'spices', labelAr: 'توابل وبقوليات', icon: Icons.grain_rounded),
-    PosCategory(id: 'other', labelAr: 'أخرى ومتنوعات', icon: Icons.category_rounded),
-  ];
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isCompact = context.windowClass == WindowClass.compact;
+    final h = isCompact ? 48.0 : 38.0;
+
+    // "الكل" is always first, then the sorted distinct categories from the DB.
+    final items = <String>['', ...categories];
 
     return SizedBox(
-      height: 42,
+      height: h,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsetsDirectional.symmetric(horizontal: AppSpacing.sm),
-        itemCount: categories.length,
-        separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
-        itemBuilder: (context, index) {
-          final cat = categories[index];
-          final isSelected = selectedCategory == cat.id;
-
-          return FilterChip(
-            selected: isSelected,
-            avatar: Icon(
-              cat.icon,
-              size: 16,
-              color: isSelected ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
-            ),
-            label: Text(cat.labelAr),
-            labelStyle: TextStyle(
-              fontSize: 12,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              color: isSelected ? colorScheme.onPrimary : colorScheme.onSurface,
-            ),
-            backgroundColor: colorScheme.surfaceContainer,
-            selectedColor: colorScheme.primary,
-            showCheckmark: false,
-            shape: RoundedRectangleBorder(
-              borderRadius: AppRadius.pillAll,
-              side: BorderSide(
-                color: isSelected ? colorScheme.primary : colorScheme.outlineVariant,
-                width: 1,
-              ),
-            ),
-            onSelected: (_) => onCategorySelected(cat.id),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.xs),
+        itemBuilder: (context, i) {
+          final cat = items[i];
+          final label = cat.isEmpty ? 'الكل' : cat;
+          final icon = _iconForCategory(cat);
+          final sel = selectedCategory == cat;
+          return _GoldCategoryChip(
+            label: label,
+            icon: icon,
+            selected: sel,
+            isDark: isDark,
+            isCompact: isCompact,
+            onTap: () => onCategorySelected(cat),
           );
         },
+      ),
+    );
+  }
+
+  /// Returns a best-effort icon for common Arabic category names.
+  /// Falls back to [Icons.category_rounded] for unknown categories.
+  static IconData _iconForCategory(String cat) {
+    if (cat.isEmpty) return Icons.apps_rounded;
+    final lower = cat.toLowerCase();
+    if (lower.contains('مشروب') || lower.contains('عصير') || lower.contains('ماء')) {
+      return Icons.local_drink_rounded;
+    }
+    if (lower.contains('غذائ') || lower.contains('معلب') || lower.contains('بقال')) {
+      return Icons.kitchen_rounded;
+    }
+    if (lower.contains('لبن') || lower.contains('ألبان') || lower.contains('بيض')) {
+      return Icons.egg_alt_rounded;
+    }
+    if (lower.contains('حلو') || lower.contains('بسكو') || lower.contains('شوكولا')) {
+      return Icons.cookie_rounded;
+    }
+    if (lower.contains('منظف') || lower.contains('تنظيف')) {
+      return Icons.cleaning_services_rounded;
+    }
+    if (lower.contains('عناية') || lower.contains('صحي') || lower.contains('نظافة')) {
+      return Icons.soap_rounded;
+    }
+    if (lower.contains('توابل') || lower.contains('بهار')) {
+      return Icons.grain_rounded;
+    }
+    if (lower.contains('خضر') || lower.contains('فاكه') || lower.contains('فواكه')) {
+      return Icons.eco_rounded;
+    }
+    if (lower.contains('لحم') || lower.contains('دجاج') || lower.contains('سمك')) {
+      return Icons.set_meal_rounded;
+    }
+    return Icons.category_rounded;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _GoldCategoryChip extends StatefulWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool isDark;
+  final bool isCompact;
+  final VoidCallback onTap;
+
+  const _GoldCategoryChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.isDark,
+    required this.isCompact,
+    required this.onTap,
+  });
+
+  @override
+  State<_GoldCategoryChip> createState() => _GoldCategoryChipState();
+}
+
+class _GoldCategoryChipState extends State<_GoldCategoryChip>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 120));
+    _scale = Tween<double>(begin: 1.0, end: 0.94)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sel = widget.selected;
+    final isDark = widget.isDark;
+
+    return GestureDetector(
+      onTapDown: (_) => _ctrl.forward(),
+      onTapUp: (_) {
+        _ctrl.reverse();
+        widget.onTap();
+      },
+      onTapCancel: () => _ctrl.reverse(),
+      child: AnimatedBuilder(
+        animation: _scale,
+        builder: (_, child) => Transform.scale(scale: _scale.value, child: child),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: EdgeInsetsDirectional.symmetric(
+            horizontal: widget.isCompact ? AppSpacing.md : AppSpacing.sm + 2,
+            vertical: 0,
+          ),
+          decoration: BoxDecoration(
+            gradient: sel ? AppGradients.gold : null,
+            color: sel
+                ? null
+                : (isDark
+                    ? const Color(0xFF1A1814)
+                    : const Color(0xFFFAF7F0)),
+            borderRadius: AppRadius.pillAll,
+            border: Border.all(
+              color: sel
+                  ? const Color(0xFFD4AF37)
+                  : const Color(0xFFD4AF37).withValues(alpha: 0.22),
+              width: sel ? 1.5 : 1.0,
+            ),
+            boxShadow: sel ? [AppShadows.goldGlowSm] : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                widget.icon,
+                size: widget.isCompact ? 16 : 14,
+                color: sel
+                    ? const Color(0xFF1A1400)
+                    : const Color(0xFFD4AF37).withValues(alpha: 0.65),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontSize: widget.isCompact ? 13 : 12,
+                  fontWeight: sel ? FontWeight.bold : FontWeight.w500,
+                  color: sel
+                      ? const Color(0xFF1A1400)
+                      : (isDark
+                          ? const Color(0xFFE8DDB0)
+                          : const Color(0xFF5C4A1A)),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

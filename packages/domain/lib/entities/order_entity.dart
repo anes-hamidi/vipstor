@@ -47,6 +47,7 @@ class OrderItemEntity extends Equatable {
   final int quantity;
   final int unitPriceCentimes;
   final int unitCostCentimes;
+  final String? unit;
 
   const OrderItemEntity({
     required this.id,
@@ -55,12 +56,43 @@ class OrderItemEntity extends Equatable {
     required this.quantity,
     required this.unitPriceCentimes,
     required this.unitCostCentimes,
+    this.unit,
   });
 
   int get lineTotalCentimes => quantity * unitPriceCentimes;
 
+  String get formattedQuantityWithUnit {
+    if (unit == null || unit!.trim().isEmpty) return '$quantity';
+    final u = unit!.trim().toLowerCase();
+    String unitLabel;
+    if (u.contains('boit') || u.contains('box') || u.contains('علب') || u.contains('صندوق')) {
+      unitLabel = 'علبة (Boîte)';
+    } else if (u.contains('carton') || u.contains('كرتون')) {
+      unitLabel = 'كرتون (Carton)';
+    } else if (u.contains('pack') || u.contains('طرد') || u.contains('حزم')) {
+      unitLabel = 'طرد (Pack)';
+    } else if (u == 'kg' || u.contains('كغ') || u.contains('كيلو')) {
+      unitLabel = 'كغ (Kg)';
+    } else if (u == 'g' || u.contains('غرام') || u == 'غ') {
+      unitLabel = 'غ (g)';
+    } else if (u == 'l' || u.contains('لتر') || u.contains('litre')) {
+      unitLabel = 'لتر (L)';
+    } else {
+      unitLabel = 'قطعة (Pièce)';
+    }
+    return '$quantity $unitLabel';
+  }
+
   @override
-  List<Object?> get props => [id, productId, productName, quantity, unitPriceCentimes, unitCostCentimes];
+  List<Object?> get props => [
+        id,
+        productId,
+        productName,
+        quantity,
+        unitPriceCentimes,
+        unitCostCentimes,
+        unit,
+      ];
 }
 
 class OrderEntity extends Equatable {

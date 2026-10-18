@@ -8,31 +8,117 @@ final customerSupabaseClientProvider = Provider<SupabaseClient>((ref) {
   return Supabase.instance.client;
 });
 
+final _customerDbProvider = Provider<AppDatabase>((ref) {
+  final db = AppDatabase();
+  ref.onDispose(() => db.close());
+  return db;
+});
+
 final customerProductRepositoryProvider = Provider<IProductRepository>((ref) {
   final client = ref.watch(customerSupabaseClientProvider);
   final service = SupabaseService(client);
-  return ProductRepositoryImpl(client: client, service: service);
+  final db = ref.watch(_customerDbProvider);
+  return ProductRepositoryImpl(client: client, service: service, db: db, isCustomerPortal: true);
 });
 
 final customerOrderRepositoryProvider = Provider<IOrderRepository>((ref) {
   final client = ref.watch(customerSupabaseClientProvider);
   final service = SupabaseService(client);
-  return OrderRepositoryImpl(client: client, service: service);
+  final db = ref.watch(_customerDbProvider);
+  return OrderRepositoryImpl(client: client, service: service, db: db);
 });
 
 final customerRepositoryProvider = Provider<ICustomerRepository>((ref) {
   final client = ref.watch(customerSupabaseClientProvider);
   final service = SupabaseService(client);
-  return CustomerRepositoryImpl(client: client, service: service);
+  final db = ref.watch(_customerDbProvider);
+  return CustomerRepositoryImpl(client: client, service: service, db: db);
 });
+
+const _kProductsCacheKey = 'customer_cached_products_v1';
+const _kPendingOrdersKey = 'customer_pending_orders_v1';
+
+Map<String, dynamic> _productToJson(ProductEntity p) => {
+      'id': p.id,
+      'nameAr': p.nameAr,
+      'nameFr': p.nameFr,
+      'category': p.category,
+      'unit': p.unit,
+      'packSize': p.packSize,
+      'photoUrl': p.photoUrl,
+      'lastUnitCostCentimes': p.lastUnitCostCentimes,
+      'onHandQty': p.onHandQty,
+      'availableQty': p.availableQty,
+      'active': p.active,
+      'barcodes': p.barcodes,
+      'prices': p.prices
+          .map((price) => {
+                'id': price.id,
+                'tier': price.tier.name,
+                'minQty': price.minQty,
+                'priceCentimes': price.priceCentimes,
+              })
+          .toList(),
+    };
+
+ProductEntity _productFromJson(Map<String, dynamic> j) => ProductEntity(
+      id: j['id'] as String,
+      nameAr: (j['nameAr'] as String?) ?? '',
+      nameFr: (j['nameFr'] as String?) ?? '',
+      category: (j['category'] as String?) ?? '',
+      unit: (j['unit'] as String?) ?? 'piece',
+      packSize: (j['packSize'] as num?)?.toInt() ?? 1,
+      photoUrl: j['photoUrl'] as String?,
+      lastUnitCostCentimes: (j['lastUnitCostCentimes'] as num?)?.toInt() ?? 0,
+      onHandQty: (j['onHandQty'] as num?)?.toInt() ?? 0,
+      availableQty: (j['availableQty'] as num?)?.toInt() ?? 0,
+      active: (j['active'] as bool?) ?? true,
+      barcodes: (j['barcodes'] as List? ?? []).cast<String>(),
+      prices: (j['prices'] as List? ?? []).map((p) {
+        final pm = p as Map<String, dynamic>;
+        return ProductPriceTier(
+          id: pm['id'] as String,
+          tier: PriceTier.fromString(pm['tier'] as String),
+          minQty: (pm['minQty'] as num).toInt(),
+          priceCentimes: (pm['priceCentimes'] as num).toInt(),
+        );
+      }).toList(),
+    );
 
 final customerLiveProductsProvider = FutureProvider<List<ProductEntity>>((ref) async {
   final repo = ref.watch(customerProductRepositoryProvider);
-  return repo.getProducts(onlyActive: true);
-});
+  // Always resolve prefs — the override is set in main() before runApp so
+  // this will have a value, but we guard defensively.
+  final prefs = ref.watch(sharedPreferencesProvider) ?? await SharedPreferences.getInstance();
 
-// customer_providers.dart
-// 1) ADD these imports at the top:
+  try {
+    final remote = await repo.getProducts(onlyActive: true);
+    // Cache fresh data for offline fallback (Stale-While-Revalidate)
+    try {
+      final jsonList = remote.map(_productToJson).toList();
+      await prefs.setString(_kProductsCacheKey, jsonEncode(jsonList));
+    } catch (_) {
+      // Cache write failure is non-fatal
+    }
+    return remote;
+  } on Exception catch (e) {
+    // Attempt local cache fallback on any network/server error
+    final cached = prefs.getString(_kProductsCacheKey);
+    if (cached != null && cached.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(cached) as List;
+        final products = decoded
+            .map((item) => _productFromJson(item as Map<String, dynamic>))
+            .toList();
+        if (products.isNotEmpty) return products;
+      } catch (_) {
+        // Cache is corrupt — fall through to rethrow
+      }
+    }
+    // Re-throw with a descriptive message so the UI error state is useful
+    throw Exception('فشل تحميل المنتجات: ${e.toString().replaceFirst('Exception: ', '')}');
+  }
+});
 
 // Provider with async loader or safe fallback instance
 final sharedPreferencesProvider = Provider<SharedPreferences?>((ref) => null);
@@ -331,25 +417,91 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
     required Map<String, dynamic> address,
   }) async {
     final orderRepo = ref.read(customerOrderRepositoryProvider);
+    final prefs = ref.read(sharedPreferencesProvider) ?? await SharedPreferences.getInstance();
+
     final itemsPayload = state.map((it) {
       return {
         'product_id': it.product.id,
         'quantity': it.quantity,
-        'unit_price': it.unitPrice,
-        'unit_cost': it.product.lastUnitCostCentimes,
       };
     }).toList();
 
-    final orderId = await orderRepo.submitCustomerOrder(
-      customerId: customerId,
-      address: address,
-      items: itemsPayload,
-    );
+    try {
+      final orderId = await orderRepo.submitCustomerOrder(
+        customerId: customerId,
+        address: address,
+        items: itemsPayload,
+      );
 
-    clear();
-    ref.invalidate(customerLiveProductsProvider);
-    ref.invalidate(customerOrdersProvider);
-    return orderId;
+      clear();
+      ref.invalidate(customerLiveProductsProvider);
+      ref.invalidate(customerOrdersProvider);
+      return orderId;
+    } catch (e) {
+      // Offline fallback: save order to pending outbox with a client UUID
+      final tempId = const Uuid().v4();
+      final totalAmount = totalCentimes;
+
+      final pendingOrder = {
+        'id': tempId,
+        'client_id': tempId,
+        'order_number': null,
+        'customer_id': customerId,
+        'delivery_address': address,
+        'total_amount': totalAmount,
+        'paid_amount': 0,
+        'status': 'submitted',
+        'is_offline_pending': true,
+        'created_at': DateTime.now().toIso8601String(),
+        'items': itemsPayload,
+      };
+
+      final existingRaw = prefs.getString(_kPendingOrdersKey);
+      List<dynamic> list = [];
+      if (existingRaw != null && existingRaw.isNotEmpty) {
+        try {
+          list = jsonDecode(existingRaw) as List;
+        } catch (_) {}
+      }
+      list.add(pendingOrder);
+      await prefs.setString(_kPendingOrdersKey, jsonEncode(list));
+
+      clear();
+      ref.invalidate(customerOrdersProvider);
+      return tempId;
+    }
+  }
+
+  Future<void> syncPendingOrders() async {
+    final prefs = ref.read(sharedPreferencesProvider) ?? await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kPendingOrdersKey);
+    if (raw == null || raw.isEmpty) return;
+
+    try {
+      final list = jsonDecode(raw) as List;
+      if (list.isEmpty) return;
+
+      final orderRepo = ref.read(customerOrderRepositoryProvider);
+      final remaining = <dynamic>[];
+
+      for (final item in list) {
+        final orderMap = item as Map<String, dynamic>;
+        try {
+          final items = (orderMap['items'] as List).cast<Map<String, dynamic>>();
+          await orderRepo.submitCustomerOrder(
+            customerId: orderMap['customer_id'] as String,
+            address: orderMap['delivery_address'] as Map<String, dynamic>,
+            items: items,
+            clientId: orderMap['client_id'] as String?,
+          );
+        } catch (_) {
+          remaining.add(orderMap);
+        }
+      }
+
+      await prefs.setString(_kPendingOrdersKey, jsonEncode(remaining));
+      ref.invalidate(customerOrdersProvider);
+    } catch (_) {}
   }
 
   Future<String> checkout({
@@ -376,9 +528,70 @@ final customerCartProvider = StateNotifierProvider<CustomerCartNotifier, List<Cu
 
 final customerOrdersProvider = FutureProvider<List<OrderEntity>>((ref) async {
   final profile = ref.watch(customerProfileProvider);
-  if (profile.id == null || profile.id!.isEmpty) {
-    return [];
+  final prefs = ref.watch(sharedPreferencesProvider) ?? await SharedPreferences.getInstance();
+
+  // 1. Read locally queued pending orders
+  final List<OrderEntity> pendingEntities = [];
+  final rawPending = prefs.getString(_kPendingOrdersKey);
+  if (rawPending != null && rawPending.isNotEmpty) {
+    try {
+      final list = jsonDecode(rawPending) as List;
+      for (final p in list) {
+        final pm = p as Map<String, dynamic>;
+        final itemsList = (pm['items'] as List? ?? []).map((i) {
+          final im = i as Map<String, dynamic>;
+          return OrderItemEntity(
+            id: im['product_id'] as String? ?? '',
+            productId: im['product_id'] as String? ?? '',
+            productName: (im['product_name'] as String?) ?? 'منتج',
+            quantity: (im['quantity'] as num?)?.toInt() ?? 1,
+            // unit_price may be absent in orders saved before this fix
+            unitPriceCentimes: (im['unit_price'] as num?)?.toInt() ?? 0,
+            unitCostCentimes: (im['unit_cost'] as num?)?.toInt() ?? 0,
+          );
+        }).toList();
+
+        pendingEntities.add(OrderEntity(
+          id: pm['id'] as String,
+          orderNumber: null,
+          channel: OrderChannel.online,
+          customerId: pm['customer_id'] as String?,
+          customerName: profile.name,
+          customerPhone: profile.phone,
+          status: OrderStatus.submitted,
+          totalAmountCentimes: (pm['total_amount'] as num?)?.toInt() ?? 0,
+          paidAmountCentimes: 0,
+          deliveryAddress: pm['delivery_address'] as Map<String, dynamic>?,
+          items: itemsList,
+          createdAt: DateTime.tryParse(pm['created_at'] as String? ?? '') ?? DateTime.now(),
+          notes: 'في انتظار المزامنة (محفوظ محلياً)',
+        ));
+      }
+    } catch (_) {
+      // Malformed pending store — ignore so remote orders still load
+    }
   }
-  final repo = ref.watch(customerOrderRepositoryProvider);
-  return repo.getOrders(customerId: profile.id);
+
+  // 2. Fetch remote orders from Supabase if customer has an id
+  List<OrderEntity> remoteOrders = [];
+  if (profile.id != null && profile.id!.isNotEmpty) {
+    final repo = ref.watch(customerOrderRepositoryProvider);
+    try {
+      remoteOrders = await repo.getOrders(customerId: profile.id);
+      // Background sync of any pending offline orders
+      if (pendingEntities.isNotEmpty) {
+        ref.read(customerCartProvider.notifier).syncPendingOrders();
+      }
+    } on Exception catch (e) {
+      // If we have at least the pending local orders, return those with an
+      // appended note. Otherwise propagate so the UI shows an error state.
+      if (pendingEntities.isEmpty) {
+        throw Exception('فشل جلب الطلبيات: ${e.toString().replaceFirst('Exception: ', '')}');
+      }
+      // Fall through: return pending-only list so the user isn't left blank
+    }
+  }
+
+  // Merge: pending offline at the top, remote below
+  return [...pendingEntities, ...remoteOrders];
 });

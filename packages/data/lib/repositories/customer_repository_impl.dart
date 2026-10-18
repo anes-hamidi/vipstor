@@ -1,70 +1,87 @@
 import 'package:domain/domain.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import '../datasources/remote/supabase_service.dart';
+import '../datasources/local/app_database.dart';
+import '../datasources/local/connectivity_service.dart';
 
 class CustomerRepositoryImpl implements ICustomerRepository {
   final SupabaseClient client;
   final SupabaseService service;
+  final AppDatabase db;
 
-  CustomerRepositoryImpl({required this.client, required this.service});
+  static const _staleDuration = Duration(minutes: 10);
+
+  CustomerRepositoryImpl({
+    required this.client,
+    required this.service,
+    required this.db,
+  });
 
   @override
   Future<List<CustomerProfileEntity>> getCustomers({String? search}) async {
+    // Background sync if stale
+    _maybeRefreshCustomerCache().ignore();
+
+    // Serve from local cache
+    final cached = search != null && search.trim().isNotEmpty
+        ? await db.searchCustomers(search.trim())
+        : await db.getAllCustomers();
+
+    if (cached.isEmpty && ConnectivityService.instance.isOnline) {
+      await _syncCustomersFromRemote();
+      return getCustomers(search: search);
+    }
+
+    return cached.map(_cachedToEntity).toList();
+  }
+
+  CustomerProfileEntity _cachedToEntity(CachedCustomer row) =>
+      CustomerProfileEntity(
+        id: row.id,
+        userId: row.userId,
+        name: row.name,
+        phone: row.phone,
+        creditLimitCentimes: row.creditLimitCentimes,
+        currentDebtCentimes: row.currentDebtCentimes,
+        priceTier: PriceTier.fromString(row.priceTier),
+        wilaya: row.wilaya,
+        commune: row.commune,
+        addressText: row.addressText,
+      );
+
+  Future<void> _maybeRefreshCustomerCache() async {
+    if (!ConnectivityService.instance.isOnline) return;
+    final lastSync = await db.getLastSync('customers');
+    final isStale = lastSync == null ||
+        DateTime.now().difference(lastSync) > _staleDuration;
+    if (isStale) _syncCustomersFromRemote().ignore();
+  }
+
+  Future<void> _syncCustomersFromRemote() async {
     try {
       var query = client.from('view_customer_balance').select('''
-        customer_id,
-        user_id,
-        customer_name,
-        customer_phone,
-        credit_limit,
-        current_balance
+        customer_id, user_id, customer_name, customer_phone,
+        credit_limit, current_balance
       ''');
-
-      if (search != null && search.trim().isNotEmpty) {
-        final clean = search.trim();
-        query = query.or('customer_name.ilike.%$clean%,customer_phone.ilike.%$clean%');
-      }
-
       final rows = await query.order('customer_name', ascending: true);
 
-      return (rows as List).map<CustomerProfileEntity>((row) {
-        return CustomerProfileEntity(
+      final companions = (rows as List).map((row) {
+        return CachedCustomersCompanion.insert(
           id: row['customer_id'] as String,
           userId: row['user_id'] as String,
           name: row['customer_name'] as String? ?? 'زبون',
           phone: row['customer_phone'] as String? ?? '',
           creditLimitCentimes: (row['credit_limit'] as num?)?.toInt() ?? 0,
           currentDebtCentimes: (row['current_balance'] as num?)?.toInt() ?? 0,
-          priceTier: PriceTier.wholesale,
+          priceTier: 'wholesale',
+          syncedAt: DateTime.now(),
         );
       }).toList();
-    } catch (_) {
-      // Fallback to customers & users tables if view fails
-      try {
-        final rows = await client.from('customers').select('''
-          id,
-          user_id,
-          credit_limit,
-          price_tier,
-          users ( name, phone )
-        ''');
 
-        return (rows as List).map<CustomerProfileEntity>((row) {
-          final user = row['users'] as Map<String, dynamic>?;
-          return CustomerProfileEntity(
-            id: row['id'] as String,
-            userId: row['user_id'] as String,
-            name: user?['name'] as String? ?? 'زبون',
-            phone: user?['phone'] as String? ?? '',
-            creditLimitCentimes: (row['credit_limit'] as num?)?.toInt() ?? 0,
-            currentDebtCentimes: 0,
-            priceTier: PriceTier.fromString(row['price_tier'] as String? ?? 'wholesale'),
-          );
-        }).toList();
-      } catch (e) {
-        return [];
-      }
-    }
+      await db.upsertCustomers(companions);
+      await db.setLastSync('customers', DateTime.now());
+    } catch (_) {}
   }
 
   @override
@@ -135,10 +152,10 @@ class CustomerRepositoryImpl implements ICustomerRepository {
         // Auto-create customer record for this user
         final newCust = await client.from('customers').insert({
           'user_id': userId,
-          'price_tier': 'wholesale',
-          'credit_limit': 0,
-        }).select().single();
+        }).select('id, credit_limit, price_tier').single();
         customerId = newCust['id'] as String;
+        creditLimit = (newCust['credit_limit'] as num?)?.toInt() ?? 0;
+        priceTier = newCust['price_tier'] as String? ?? 'wholesale';
       } else {
         final cust = customerRows.first;
         customerId = cust['id'] as String;
@@ -251,7 +268,7 @@ class CustomerRepositoryImpl implements ICustomerRepository {
         'role': 'customer',
         'language': 'ar',
         'active': true,
-      }).select().single();
+      }).select('id, name, phone, role, language, active').single();
       userId = userRow['id'] as String;
     }
 
@@ -275,10 +292,10 @@ class CustomerRepositoryImpl implements ICustomerRepository {
       } else {
         final newCust = await client.from('customers').insert({
           'user_id': userId,
-          'credit_limit': 0,
-          'price_tier': 'wholesale',
-        }).select().single();
+        }).select('id, credit_limit, price_tier').single();
         customerId = newCust['id'] as String;
+        creditLimit = (newCust['credit_limit'] as num?)?.toInt() ?? 0;
+        priceTier = newCust['price_tier'] as String? ?? 'wholesale';
       }
     } catch (_) {
       customerId ??= userId;
@@ -346,16 +363,14 @@ class CustomerRepositoryImpl implements ICustomerRepository {
       'role': 'customer',
       'language': 'ar',
       'active': true,
-    }).select().single();
+    }).select('id, name, phone, role, language, active').single();
 
     final userId = userRow['id'] as String;
 
-    // 2. Create Customer record
+    // 2. Create Customer record (inserting user_id only per restricted permissions)
     final customerRow = await client.from('customers').insert({
       'user_id': userId,
-      'credit_limit': creditLimitCentimes,
-      'price_tier': priceTier,
-    }).select().single();
+    }).select('id, credit_limit, price_tier').single();
 
     return CustomerProfileEntity(
       id: customerRow['id'] as String,
@@ -469,13 +484,14 @@ class CustomerRepositoryImpl implements ICustomerRepository {
     ].join(' | ');
 
     try {
-      // 1. Try atomic RPC
+      // 1. Try atomic RPC (p_client_id ensures idempotency on network retry)
       final rpcRes = await client.rpc('rpc_collect_customer_debt', params: {
         'p_cashier_id': cashierId,
         'p_customer_id': customerId,
         'p_amount': amountCentimes,
         'p_method': paymentMethod,
         'p_notes': noteString.isNotEmpty ? noteString : null,
+        'p_client_id': const Uuid().v4(),
       });
 
       if (rpcRes != null && rpcRes['status'] == 'success') {

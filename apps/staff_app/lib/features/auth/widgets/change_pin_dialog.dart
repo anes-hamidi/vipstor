@@ -21,7 +21,6 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
   int _currentStep = 1; // 1: Old PIN, 2: New PIN, 3: Confirm PIN
   String _oldPin = '';
   String _newPin = '';
-  String _confirmPin = '';
 
   final _pinController = TextEditingController();
   final _focusNode = FocusNode();
@@ -133,7 +132,6 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
       _currentStep = 1;
       _oldPin = '';
       _newPin = '';
-      _confirmPin = '';
       _errorMessage = null;
       _pinController.clear();
     });

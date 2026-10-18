@@ -6,21 +6,18 @@ import 'package:ui_kit/ui_kit.dart';
 import '../../providers/customer_providers.dart';
 import '../catalog/catalog_screen.dart';
 
-/// App entry: shows the setup form until the customer has real info saved.
-class ProfileGate extends ConsumerWidget {
+/// App entry — allows guest browsing immediately.
+class ProfileGate extends StatelessWidget {
   final VoidCallback? onExit;
   const ProfileGate({super.key, this.onExit});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final complete = ref.watch(customerProfileProvider.select((p) => p.isComplete));
-    return complete
-        ? CatalogScreen(onExit: onExit)
-        : ProfileFormScreen(isSetup: true, onExit: onExit);
-  }
+  Widget build(BuildContext context) => CatalogScreen(onExit: onExit);
 }
 
-/// Used for first-time setup (isSetup: true) and for editing later (from cart).
+/// Profile / delivery details form.
+///
+/// Used for first-time setup ([isSetup]: true) and for editing from the cart.
 class ProfileFormScreen extends ConsumerStatefulWidget {
   final bool isSetup;
   final VoidCallback? onExit;
@@ -47,9 +44,9 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
   void initState() {
     super.initState();
     final p = ref.read(customerProfileProvider);
-    _phone = TextEditingController(text: p.phone);
-    _name = TextEditingController(text: p.name);
-    _wilaya = TextEditingController(text: p.wilaya);
+    _phone   = TextEditingController(text: p.phone);
+    _name    = TextEditingController(text: p.name);
+    _wilaya  = TextEditingController(text: p.wilaya);
     _commune = TextEditingController(text: p.commune);
     _address = TextEditingController(text: p.addressText);
     _lat = p.latitude;
@@ -66,7 +63,8 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
 
   void _toast(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
   }
 
   String? _required(String? v) =>
@@ -74,9 +72,7 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
 
   String? _validatePhone(String? v) {
     if (v == null || v.trim().isEmpty) return 'هذا الحقل مطلوب';
-    if (!CustomerProfileInfo.isValidPhone(v)) {
-      return 'أدخل رقماً صحيحاً مثل 0550123456';
-    }
+    if (!CustomerProfileInfo.isValidPhone(v)) return 'أدخل رقماً صحيحاً مثل 0550123456';
     return null;
   }
 
@@ -96,16 +92,22 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 8),
       );
-      _lat = pos.latitude;
-      _lng = pos.longitude;
+      setState(() {
+        _lat = pos.latitude;
+        _lng = pos.longitude;
+      });
       try {
-        final marks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+        final marks =
+            await placemarkFromCoordinates(pos.latitude, pos.longitude);
         if (marks.isNotEmpty) {
           final m = marks.first;
-          if ((m.administrativeArea ?? '').isNotEmpty) _wilaya.text = m.administrativeArea!;
+          if ((m.administrativeArea ?? '').isNotEmpty) {
+            _wilaya.text = m.administrativeArea!;
+          }
           if ((m.locality ?? '').isNotEmpty) _commune.text = m.locality!;
           if ((m.street ?? '').isNotEmpty) {
-            _address.text = '${m.street}, ${m.subLocality ?? ""}'.trim();
+            _address.text =
+                '${m.street}, ${m.subLocality ?? ""}'.trim();
           }
         }
       } catch (_) {}
@@ -126,15 +128,17 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
       final found = await ref
           .read(customerProfileProvider.notifier)
           .lookupCustomerByPhone(_phone.text);
-      if (!mounted) return; // in setup mode the gate may already have moved on
+      if (!mounted) return;
       if (found) {
         final p = ref.read(customerProfileProvider);
-        _name.text = p.name;
-        _wilaya.text = p.wilaya;
+        _name.text    = p.name;
+        _wilaya.text  = p.wilaya;
         _commune.text = p.commune;
         _address.text = p.addressText;
-        _lat = p.latitude;
-        _lng = p.longitude;
+        setState(() {
+          _lat = p.latitude;
+          _lng = p.longitude;
+        });
         _toast('تم استرجاع بيانات حسابك');
       } else {
         _toast('لا يوجد حساب بهذا الرقم، أكمل البيانات لإنشاء حساب جديد');
@@ -150,7 +154,6 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     final notifier = ref.read(customerProfileProvider.notifier);
-    // Saved on the device immediately; in setup mode the gate opens the catalog now.
     notifier.updateProfile(
       name: _name.text.trim(),
       phone: _phone.text.trim(),
@@ -162,9 +165,7 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
     );
     try {
       await notifier.syncWithDatabase();
-    } catch (_) {
-      // Kept locally; checkout will sync again.
-    }
+    } catch (_) {}
     if (!mounted) return;
     setState(() => _saving = false);
     if (!widget.isSetup) Navigator.pop(context);
@@ -173,58 +174,58 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: !widget.isSetup,
         leading: widget.isSetup && widget.onExit != null
             ? IconButton(
-                icon: const Icon(Icons.arrow_back),
-                tooltip: 'العودة إلى البوابة',
+                icon: const Icon(Icons.arrow_back_rounded),
+                tooltip: 'العودة',
                 onPressed: widget.onExit,
               )
             : null,
-        title: Text(widget.isSetup ? 'أكمل بياناتك' : 'بيانات التوصيل'),
+        title: Text(widget.isSetup ? 'إنشاء الحساب' : 'بيانات التوصيل'),
       ),
+
+      // ── Save button ───────────────────────────────────────────────────
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              onPressed: _saving ? null : _save,
-              icon: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator.adaptive(strokeWidth: 2))
-                  : const Icon(Icons.check),
-              label: Text(widget.isSetup ? 'حفظ والبدء بالتسوق' : 'حفظ التعديلات'),
-            ),
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
+          child: GoldButton.icon(
+            icon: widget.isSetup
+                ? Icons.rocket_launch_rounded
+                : Icons.check_rounded,
+            label: _saving
+                ? 'جاري الحفظ...'
+                : (widget.isSetup ? 'حفظ والبدء بالتسوق' : 'حفظ التعديلات'),
+            onPressed: _saving ? null : _save,
+            loading: _saving,
+            width: double.infinity,
+            height: 52,
           ),
         ),
       ),
+
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 480),
           child: Form(
             key: _formKey,
             child: ListView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
+              padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
               children: [
+                // ── Onboarding hero (setup mode only) ──────────────────
                 if (widget.isSetup) ...[
-                  Text('أهلاً بك في متجر الجملة',
-                      style: theme.textTheme.headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  Text(
-                    'نحتاج بيانات محلك الحقيقية لتوصيل طلبيتك. تُدخلها مرة واحدة وتُحفظ على جهازك.',
-                    style: theme.textTheme.bodyMedium
-                        ?.copyWith(color: cs.onSurfaceVariant),
-                  ),
-                  AppSpacing.gapLg,
+                  _OnboardingHero(isDark: isDark, theme: theme),
+                  const SizedBox(height: AppSpacing.xl),
                 ],
+
+                // ── Phone + lookup ─────────────────────────────────────
+                const SectionHeader(title: 'رقم الهاتف'),
+                const SizedBox(height: AppSpacing.sm),
                 TextFormField(
                   controller: _phone,
                   keyboardType: TextInputType.phone,
@@ -232,77 +233,245 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
                   validator: _validatePhone,
                   decoration: InputDecoration(
                     labelText: 'رقم الهاتف *',
-                    helperText: 'لديك حساب سابق؟ اضغط البحث لاسترجاع بياناتك',
-                    prefixIcon: const Icon(Icons.phone),
-                    suffixIcon: IconButton(
-                      tooltip: 'بحث عن حساب مسجل',
-                      onPressed: _lookingUp ? null : _lookup,
-                      icon: _lookingUp
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator.adaptive(strokeWidth: 2))
-                          : const Icon(Icons.search),
-                    ),
+                    helperText:
+                        'لديك حساب سابق؟ اضغط بحث لاسترجاع بياناتك',
+                    prefixIcon: const Icon(Icons.phone_rounded),
+                    suffixIcon: _lookingUp
+                        ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator
+                                    .adaptive(strokeWidth: 2)),
+                          )
+                        : IconButton(
+                            tooltip: 'بحث عن حساب مسجل',
+                            icon: const Icon(Icons.search_rounded),
+                            onPressed: _lookup,
+                          ),
                   ),
                 ),
-                AppSpacing.gapMd,
+                const SizedBox(height: AppSpacing.md),
+
+                // ── Name ───────────────────────────────────────────────
+                const SectionHeader(title: 'بيانات المحل'),
+                const SizedBox(height: AppSpacing.sm),
                 TextFormField(
                   controller: _name,
                   textInputAction: TextInputAction.next,
                   validator: _required,
                   decoration: const InputDecoration(
-                      labelText: 'اسم المحل / الزبون *', prefixIcon: Icon(Icons.store)),
-                ),
-                AppSpacing.gapMd,
-                OutlinedButton.icon(
-                  onPressed: _locating ? null : _detectGps,
-                  icon: _locating
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator.adaptive(strokeWidth: 2))
-                      : const Icon(Icons.my_location),
-                  label: Text(_locating ? 'جاري تحديد الموقع...' : 'تحديد موقعي تلقائياً'),
-                ),
-                if (_lat != null && _lng != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      'تم حفظ الإحداثيات (${_lat!.toStringAsFixed(4)}, ${_lng!.toStringAsFixed(4)})',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall?.copyWith(color: cs.primary),
-                    ),
+                    labelText: 'اسم المحل / الزبون *',
+                    prefixIcon: Icon(Icons.store_rounded),
                   ),
-                AppSpacing.gapMd,
+                ),
+                const SizedBox(height: AppSpacing.md),
+
+                // ── GPS detection ──────────────────────────────────────
+                const SectionHeader(title: 'موقع التوصيل'),
+                const SizedBox(height: AppSpacing.sm),
+                _GpsCard(
+                  lat: _lat,
+                  lng: _lng,
+                  locating: _locating,
+                  onDetect: _detectGps,
+                  isDark: isDark,
+                ),
+                const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   controller: _wilaya,
                   textInputAction: TextInputAction.next,
                   validator: _required,
                   decoration: const InputDecoration(
-                      labelText: 'الولاية *', prefixIcon: Icon(Icons.map)),
+                    labelText: 'الولاية *',
+                    prefixIcon: Icon(Icons.map_rounded),
+                  ),
                 ),
-                AppSpacing.gapMd,
+                const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   controller: _commune,
                   textInputAction: TextInputAction.next,
                   validator: _required,
                   decoration: const InputDecoration(
-                      labelText: 'البلدية *', prefixIcon: Icon(Icons.location_city)),
+                    labelText: 'البلدية *',
+                    prefixIcon: Icon(Icons.location_city_rounded),
+                  ),
                 ),
-                AppSpacing.gapMd,
+                const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   controller: _address,
                   textInputAction: TextInputAction.done,
                   validator: _required,
                   decoration: const InputDecoration(
-                      labelText: 'العنوان الدقيق / أقرب معلم *',
-                      prefixIcon: Icon(Icons.location_on)),
+                    labelText: 'العنوان الدقيق / أقرب معلم *',
+                    prefixIcon: Icon(Icons.location_on_rounded),
+                  ),
                 ),
+                const SizedBox(height: AppSpacing.xxl),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Onboarding Hero ───────────────────────────────────────────────────────────
+
+class _OnboardingHero extends StatelessWidget {
+  final bool isDark;
+  final ThemeData theme;
+  const _OnboardingHero({required this.isDark, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return LuxuryCard(
+      goldAccent: true,
+      padding: const EdgeInsetsDirectional.all(AppSpacing.xl),
+      child: Column(
+        children: [
+          // Gold icon
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: AppGradients.gold,
+              shape: BoxShape.circle,
+              boxShadow: [AppShadows.goldGlow],
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(AppSpacing.lg),
+              child: Icon(Icons.storefront_rounded,
+                  size: 36, color: Color(0xFF1A1400)),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            'أهلاً بك في متجر الجملة VIP',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'نحتاج بيانات محلك الحقيقية لتوصيل طلبيتك. تُدخلها مرة واحدة وتُحفظ على جهازك.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: isDark
+                  ? const Color(0xFFB8A882)
+                  : const Color(0xFF9A8A60),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          const GoldBadge(
+            label: 'تسجيل مجاني · بدون كلمة مرور',
+            icon: Icons.lock_open_rounded,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── GPS Card ──────────────────────────────────────────────────────────────────
+
+class _GpsCard extends StatelessWidget {
+  final double? lat;
+  final double? lng;
+  final bool locating;
+  final VoidCallback onDetect;
+  final bool isDark;
+
+  const _GpsCard({
+    required this.lat,
+    required this.lng,
+    required this.locating,
+    required this.onDetect,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasLocation = lat != null && lng != null;
+    final theme = Theme.of(context);
+    final colors = context.appColors;
+
+    return LuxuryCard(
+      padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+      child: Row(
+        children: [
+          // Icon
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              gradient: hasLocation ? AppGradients.gold : null,
+              color: hasLocation
+                  ? null
+                  : (isDark
+                      ? const Color(0xFF2A2518)
+                      : const Color(0xFFF3E8C8)),
+              borderRadius: AppRadius.smAll,
+              boxShadow: hasLocation ? [AppShadows.goldGlowSm] : null,
+            ),
+            child: Icon(
+              hasLocation ? Icons.location_on_rounded : Icons.my_location_rounded,
+              size: 20,
+              color: hasLocation
+                  ? const Color(0xFF1A1400)
+                  : (isDark
+                      ? const Color(0xFFF3D278)
+                      : const Color(0xFFC59B27)),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  hasLocation ? 'تم حفظ الموقع' : 'تحديد الموقع تلقائياً',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: hasLocation
+                        ? (isDark
+                            ? const Color(0xFFF3D278)
+                            : const Color(0xFFC59B27))
+                        : null,
+                  ),
+                ),
+                if (hasLocation)
+                  Text(
+                    '${lat!.toStringAsFixed(4)}, ${lng!.toStringAsFixed(4)}',
+                    style: TextStyle(
+                        fontSize: 11, color: colors.success),
+                  )
+                else
+                  Text(
+                    'يساعد السائق على التوصيل بدقة',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          locating
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : GoldIconButton(
+                  icon: hasLocation
+                      ? Icons.refresh_rounded
+                      : Icons.gps_fixed_rounded,
+                  tooltip: hasLocation ? 'تحديث الموقع' : 'تحديد الموقع',
+                  onPressed: onDetect,
+                  size: 36,
+                  filled: hasLocation,
+                ),
+        ],
       ),
     );
   }

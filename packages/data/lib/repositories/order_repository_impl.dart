@@ -1,14 +1,23 @@
+import 'dart:convert';
 import 'package:domain/domain.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import '../datasources/remote/supabase_service.dart';
+import '../datasources/local/app_database.dart';
+import '../datasources/local/connectivity_service.dart';
 
 import 'customer_repository_impl.dart';
 
 class OrderRepositoryImpl implements IOrderRepository {
   final SupabaseClient client;
   final SupabaseService service;
+  final AppDatabase db;
 
-  OrderRepositoryImpl({required this.client, required this.service});
+  OrderRepositoryImpl({
+    required this.client,
+    required this.service,
+    required this.db,
+  });
 
   @override
   Future<List<OrderEntity>> getOrders({
@@ -35,7 +44,7 @@ class OrderRepositoryImpl implements IOrderRepository {
         quantity,
         unit_price,
         unit_cost,
-        products ( name_ar, name_fr )
+        products ( name_ar, name_fr, unit )
       ),
       users!orders_driver_id_fkey ( name, phone )
     ''');
@@ -63,6 +72,7 @@ class OrderRepositoryImpl implements IOrderRepository {
           quantity: (i['quantity'] as num).toInt(),
           unitPriceCentimes: (i['unit_price'] as num).toInt(),
           unitCostCentimes: (i['unit_cost'] as num?)?.toInt() ?? 0,
+          unit: productMap?['unit'] as String?,
         );
       }).toList();
 
@@ -113,7 +123,7 @@ class OrderRepositoryImpl implements IOrderRepository {
             quantity,
             unit_price,
             unit_cost,
-            products ( name_ar, name_fr )
+            products ( name_ar, name_fr, unit )
           ),
           users!orders_driver_id_fkey ( name, phone )
         ''')
@@ -135,6 +145,7 @@ class OrderRepositoryImpl implements IOrderRepository {
         quantity: (i['quantity'] as num).toInt(),
         unitPriceCentimes: (i['unit_price'] as num).toInt(),
         unitCostCentimes: (i['unit_cost'] as num?)?.toInt() ?? 0,
+        unit: productMap?['unit'] as String?,
       );
     }).toList();
 
@@ -190,15 +201,38 @@ class OrderRepositoryImpl implements IOrderRepository {
     required int onAccountCentimes,
   }) async {
     final effectiveCashierId = await _resolveValidUserId(cashierId);
-    final res = await service.postStoreSale(
-      cashierId: effectiveCashierId,
-      customerId: customerId,
-      items: items,
-      paidCashCentimes: paidCashCentimes,
-      onAccountCentimes: onAccountCentimes,
-    );
+    final clientId = const Uuid().v4();
 
-    return res['order_id'] as String;
+    if (ConnectivityService.instance.isOnline) {
+      try {
+        final res = await service.postStoreSale(
+          cashierId: effectiveCashierId,
+          customerId: customerId,
+          items: items,
+          paidCashCentimes: paidCashCentimes,
+          onAccountCentimes: onAccountCentimes,
+        );
+        return res['order_id'] as String? ?? clientId;
+      } catch (_) {
+        // Fall through to offline queue on network error
+      }
+    }
+
+    // ── Offline path: enqueue and return a local order ID ────────────────
+    await db.enqueuePendingOp(PendingOperationsCompanion.insert(
+      clientId: clientId,
+      operationType: 'pos_sale',
+      payloadJson: jsonEncode({
+        'cashier_id': effectiveCashierId,
+        'customer_id': customerId,
+        'items': items,
+        'paid_cash': paidCashCentimes,
+        'on_account': onAccountCentimes,
+      }),
+      createdAt: DateTime.now(),
+    ));
+    // Return the client-generated ID as a local stand-in order ID
+    return clientId;
   }
 
   Future<String?> _resolveValidCustomerId(String? candidateId, Map<String, dynamic> address) async {
@@ -215,7 +249,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     final name = (address['customer_name'] ?? address['store_name'])?.toString();
     if (phone != null && phone.trim().isNotEmpty) {
       try {
-        final custRepo = CustomerRepositoryImpl(client: client, service: service);
+        final custRepo = CustomerRepositoryImpl(client: client, service: service, db: db);
         final synced = await custRepo.syncCustomerProfile(
           name: name ?? 'زبون',
           phone: phone,
@@ -245,42 +279,24 @@ class OrderRepositoryImpl implements IOrderRepository {
     required String customerId,
     required Map<String, dynamic> address,
     required List<Map<String, dynamic>> items,
+    String? clientId,
   }) async {
-    int total = 0;
-    for (final it in items) {
-      total += ((it['quantity'] as num) * (it['unit_price'] as num)).toInt();
-    }
-
     final validCustomerId = await _resolveValidCustomerId(customerId, address);
 
-    final payload = <String, dynamic>{
-      'channel': 'online',
-      'status': 'submitted',
-      'delivery_address': address,
-      'total_amount': total,
-      'paid_amount': 0,
-    };
-    if (validCustomerId != null) {
-      payload['customer_id'] = validCustomerId;
-    }
-
-    final orderRow = await client.from('orders').insert(payload).select('id').single();
-
-    final orderId = orderRow['id'] as String;
-
-    final orderItemsToInsert = items.map((it) {
+    // Only send product_id and quantity to the server
+    final cleanItems = items.map((it) {
       return {
-        'order_id': orderId,
         'product_id': it['product_id'],
         'quantity': it['quantity'],
-        'unit_price': it['unit_price'],
-        'unit_cost': it['unit_cost'] ?? 0,
       };
     }).toList();
 
-    await client.from('order_items').insert(orderItemsToInsert);
-
-    return orderId;
+    return await service.submitCustomerOrder(
+      clientId: clientId,
+      customerId: validCustomerId ?? customerId,
+      address: address,
+      items: cleanItems,
+    );
   }
 
   @override
@@ -291,24 +307,11 @@ class OrderRepositoryImpl implements IOrderRepository {
   }) async {
     final effectiveCashierId = await _resolveValidUserId(cashierId);
     final effectiveDriverId = driverId != null ? await _resolveValidUserId(driverId) : null;
-    try {
-      await service.confirmOnlineOrder(
-        orderId: orderId,
-        cashierId: effectiveCashierId,
-        driverId: effectiveDriverId,
-      );
-    } catch (_) {
-      // Direct update fallback
-      final payload = <String, dynamic>{
-        'status': effectiveDriverId != null ? 'assigned' : 'confirmed',
-        'cashier_id': effectiveCashierId,
-        'confirmed_at': DateTime.now().toIso8601String(),
-      };
-      if (effectiveDriverId != null) {
-        payload['driver_id'] = effectiveDriverId;
-      }
-      await client.from('orders').update(payload).eq('id', orderId);
-    }
+    await service.confirmOnlineOrder(
+      orderId: orderId,
+      cashierId: effectiveCashierId,
+      driverId: effectiveDriverId,
+    );
   }
 
   @override
@@ -356,20 +359,32 @@ class OrderRepositoryImpl implements IOrderRepository {
     required String clientId,
   }) async {
     final effectiveDriverId = await _resolveValidUserId(driverId);
-    try {
-      await service.recordOrderDelivery(
-        driverId: effectiveDriverId,
-        orderId: orderId,
-        collectedCashCentimes: collectedCashCentimes,
-        clientId: clientId,
-      );
-    } catch (_) {
-      await client.from('orders').update({
-        'status': 'delivered',
-        'paid_amount': collectedCashCentimes,
-        'delivered_at': DateTime.now().toIso8601String(),
-      }).eq('id', orderId);
+
+    if (ConnectivityService.instance.isOnline) {
+      try {
+        await service.recordOrderDelivery(
+          driverId: effectiveDriverId,
+          orderId: orderId,
+          collectedCashCentimes: collectedCashCentimes,
+          clientId: clientId,
+        );
+        return;
+      } catch (_) {
+        // Fall through to queue
+      }
     }
+
+    // Offline: queue the delivery
+    await db.enqueuePendingOp(PendingOperationsCompanion.insert(
+      clientId: clientId,
+      operationType: 'delivery',
+      payloadJson: jsonEncode({
+        'driver_id': effectiveDriverId,
+        'order_id': orderId,
+        'collected_cash': collectedCashCentimes,
+      }),
+      createdAt: DateTime.now(),
+    ));
   }
 
   @override
@@ -385,21 +400,32 @@ class OrderRepositoryImpl implements IOrderRepository {
     required String clientId,
   }) async {
     final effectiveDriverId = await _resolveValidUserId(driverId);
-    try {
-      await service.recordOrderDelivery(
-        driverId: effectiveDriverId,
-        orderId: orderId,
-        collectedCashCentimes: collectedCashCentimes,
-        clientId: clientId,
-      );
-    } catch (_) {
-      // Direct update fallback
-      await client.from('orders').update({
-        'status': 'delivered',
-        'paid_amount': collectedCashCentimes,
-        'delivered_at': DateTime.now().toIso8601String(),
-        if (notes != null) 'notes': notes,
-      }).eq('id', orderId);
+
+    if (ConnectivityService.instance.isOnline) {
+      try {
+        await service.recordOrderDelivery(
+          driverId: effectiveDriverId,
+          orderId: orderId,
+          collectedCashCentimes: collectedCashCentimes,
+          clientId: clientId,
+        );
+        return;
+      } catch (_) {
+        // Fall through to queue
+      }
     }
+
+    // Offline: queue (proof metadata is best-effort)
+    await db.enqueuePendingOp(PendingOperationsCompanion.insert(
+      clientId: clientId,
+      operationType: 'delivery',
+      payloadJson: jsonEncode({
+        'driver_id': effectiveDriverId,
+        'order_id': orderId,
+        'collected_cash': collectedCashCentimes,
+        if (notes != null) 'notes': notes,
+      }),
+      createdAt: DateTime.now(),
+    ));
   }
 }

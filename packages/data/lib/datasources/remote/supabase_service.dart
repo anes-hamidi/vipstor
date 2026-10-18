@@ -17,9 +17,25 @@ class SupabaseService {
     return Map<String, dynamic>.from(response as Map);
   }
 
+  /// Submit Customer Order (Server-side price and cost resolution)
+  Future<String> submitCustomerOrder({
+    required String? clientId,
+    required String customerId,
+    required Map<String, dynamic> address,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    final response = await client.rpc('rpc_submit_customer_order', params: {
+      'p_client_id': clientId,
+      'p_customer_id': customerId,
+      'p_delivery_address': address,
+      'p_items': items,
+    });
+    return response.toString();
+  }
+
   /// Post Counter Sale
   Future<Map<String, dynamic>> postStoreSale({
-    required String cashierId,
+    String? cashierId,
     String? customerId,
     required List<Map<String, dynamic>> items,
     required int paidCashCentimes,
@@ -98,16 +114,23 @@ class SupabaseService {
   }
 
   /// Create Staff Member
+  /// Create Staff Member (Requires Moderator Authentication)
   Future<Map<String, dynamic>> createStaffMember({
+    required String adminId,
+    required String adminPin,
     required String name,
     required String phone,
     required String role,
+    required String initialPin,
     String language = 'ar',
   }) async {
     final response = await client.rpc('rpc_create_staff_member', params: {
+      'p_admin_id': adminId,
+      'p_admin_pin': adminPin,
       'p_name': name,
       'p_phone': phone,
       'p_role': role,
+      'p_initial_pin': initialPin,
       'p_language': language,
     });
     return Map<String, dynamic>.from(response as Map);
@@ -125,25 +148,8 @@ class SupabaseService {
       });
       if (res is Map && res['valid'] == true) return true;
       if (res is bool) return res;
-    } catch (_) {
-      // Fallback: direct query check or demo pin
-      try {
-        final rows = await client
-            .from('users')
-            .select('pin_code')
-            .eq('id', userId)
-            .limit(1);
-        if ((rows as List).isNotEmpty) {
-          final storedPin = rows.first['pin_code'] as String?;
-          if (storedPin != null && storedPin.isNotEmpty) {
-            return storedPin == pin;
-          }
-        }
-      } catch (_) {}
-    }
-
-    // Default demo PIN support
-    return pin == '1234' || pin == '0000' || pin == '1111' || pin == '2222';
+    } catch (_) {}
+    return false;
   }
 
   /// Change User PIN
@@ -160,42 +166,27 @@ class SupabaseService {
       });
       if (res is Map && res['status'] == 'success') return true;
       if (res is bool && res) return true;
-    } catch (_) {
-      // Direct update fallback
-      try {
-        await client
-            .from('users')
-            .update({'pin_code': newPin})
-            .eq('id', userId);
-        return true;
-      } catch (_) {}
-    }
-    return true;
+    } catch (_) {}
+    return false;
   }
 
-  /// Reset Staff PIN by Moderator / Admin
+  /// Reset Staff PIN by Moderator / Admin (Requires Moderator PIN Proof)
   Future<bool> resetStaffPinByAdmin({
     required String adminId,
+    required String adminPin,
     required String targetUserId,
     required String newPin,
   }) async {
     try {
       final res = await client.rpc('rpc_reset_user_pin_by_admin', params: {
         'p_admin_id': adminId,
+        'p_admin_pin': adminPin,
         'p_target_user_id': targetUserId,
         'p_new_pin': newPin,
       });
       if (res is Map && res['status'] == 'success') return true;
       if (res is bool && res) return true;
-    } catch (_) {
-      try {
-        await client
-            .from('users')
-            .update({'pin_code': newPin})
-            .eq('id', targetUserId);
-        return true;
-      } catch (_) {}
-    }
+    } catch (_) {}
     return false;
   }
 

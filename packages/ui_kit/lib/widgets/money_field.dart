@@ -43,6 +43,18 @@ class _MoneyFieldState extends State<MoneyField> {
     _internalFocusNode.addListener(_onFocusChange);
   }
 
+  @override
+  void didUpdateWidget(MoneyField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialCentimes != widget.initialCentimes && !_internalFocusNode.hasFocus) {
+      final currentCentimes = ((double.tryParse(_controller.text.replaceAll(' ', '').trim()) ?? 0.0) * 100).round();
+      if (currentCentimes != widget.initialCentimes) {
+        final dzd = (widget.initialCentimes / 100.0).toStringAsFixed(2);
+        _controller.text = widget.initialCentimes > 0 ? dzd : '';
+      }
+    }
+  }
+
   void _onFocusChange() {
     if (!_internalFocusNode.hasFocus) {
       // Format to clean 2 decimal representation on blur

@@ -7,6 +7,7 @@ import 'package:l10n/l10n.dart';
 import 'package:core/core.dart';
 import 'package:data/data.dart';
 import 'package:staff_app/router/staff_router.dart' as staff;
+import 'package:staff_app/providers/staff_providers.dart';
 import 'package:customer_app/main.dart' as customer;
 
 
@@ -18,6 +19,7 @@ Future<void> main() async {
 
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,
+    // ignore: deprecated_member_use
     anonKey: AppConstants.supabaseAnonKey,
   );
 
@@ -34,6 +36,16 @@ class VipMasterApp extends ConsumerStatefulWidget {
 class _VipMasterAppState extends ConsumerState<VipMasterApp> {
   // Mode switcher: 'portal', 'staff', 'customer'
   String _currentAppMode = 'portal';
+
+  @override
+  void initState() {
+    super.initState();
+    // Eagerly start the offline sync worker so it begins connectivity polling
+    // and drains any queued operations from previous sessions.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(offlineSyncServiceProvider);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -12,20 +12,7 @@ import '../../router/staff_router.dart';
 import 'services/driver_telemetry_service.dart';
 import 'widgets/driver_map_view.dart';
 import 'widgets/proof_of_delivery_dialog.dart';
-
-final driverOrdersProvider = FutureProvider<List<OrderEntity>>((ref) async {
-  final repo = ref.watch(orderRepositoryProvider);
-  final user = ref.watch(authStateProvider);
-  if (user == null) return [];
-  return repo.getOrders(driverId: user.id);
-});
-
-final driverWalletBalanceProvider = FutureProvider<int>((ref) async {
-  final repo = ref.watch(settlementRepositoryProvider);
-  final user = ref.watch(authStateProvider);
-  if (user == null) return 0;
-  return repo.getDriverExpectedWallet(user.id);
-});
+import 'widgets/driver_wallet_sheet.dart';
 
 class DriverDeliveriesScreen extends ConsumerStatefulWidget {
   const DriverDeliveriesScreen({super.key});
@@ -79,41 +66,81 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
     }
     final theme = Theme.of(context);
     final telemetryState = _telemetry.state;
+    final colors = context.appColors;
 
     return Scaffold(
+      backgroundColor: colors.obsidian,
       appBar: AppBar(
+        backgroundColor: colors.obsidianSurface,
+        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(
+            height: 1,
+            decoration: const BoxDecoration(gradient: AppGradients.goldFoil),
+          ),
+        ),
         title: Row(
           children: [
-            const Icon(Icons.local_shipping_rounded),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: const BoxDecoration(
+                gradient: AppGradients.goldFoil,
+                borderRadius: AppRadius.smAll,
+              ),
+              child: Text(
+                'VIP',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: colors.obsidian,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
             const SizedBox(width: AppSpacing.sm),
-            Text('مهام التوصيل والملاحة - ${authUser?.name ?? "السائق"}'),
+            Flexible(
+              child: Text(
+                'مهام التوصيل - ${authUser?.name ?? "السائق"}',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: colors.onObsidian,
+                  fontWeight: FontWeight.bold,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: _isMapView ? 'عرض القائمة' : 'عرض الخريطة المباشرة',
-            icon: Icon(_isMapView ? Icons.view_list_rounded : Icons.map_rounded),
+          GoldIconButton(
+            icon: _isMapView ? Icons.view_list_rounded : Icons.map_rounded,
+            tooltip: _isMapView ? 'عرض القائمة' : 'عرض الخريطة',
             onPressed: () => setState(() => _isMapView = !_isMapView),
           ),
-          IconButton(
-            tooltip: 'تحديث المهام والمحفظة',
-            icon: const Icon(Icons.refresh),
+          GoldIconButton(
+            icon: Icons.refresh,
+            tooltip: 'تحديث',
             onPressed: _refresh,
           ),
-          IconButton(
+          GoldIconButton(
+            icon: Icons.logout,
             tooltip: 'تسجيل الخروج',
-            icon: const Icon(Icons.logout),
             onPressed: () => ref.read(authStateProvider.notifier).state = null,
           ),
         ],
       ),
       body: Column(
         children: [
-          // ----------------------------------------------------
-          // Top Telemetry Bar (Battery, Wakelock, GPS, Background)
-          // ----------------------------------------------------
+          // Top Telemetry Bar
           Container(
-            color: theme.colorScheme.surfaceContainer,
+            decoration: BoxDecoration(
+              color: colors.obsidianCard,
+              border: Border(
+                bottom: BorderSide(
+                  color: colors.gold.withValues(alpha: 0.2),
+                  width: 1,
+                ),
+              ),
+            ),
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -229,14 +256,26 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
                     children: [
                       // Driver Wallet KPI Card
                       walletAsync.when(
-                        data: (balanceCentimes) => KpiCard(
-                          title: 'الكاش الإجمالي في عهدتك حالياً (Wallet Balance)',
-                          value: DzdFormatter.formatCentimes(balanceCentimes),
-                          icon: Icons.account_balance_wallet_outlined,
-                          subtitle: 'يتم تسليم هذه المبالغ للمشرف بنهاية جولة التوصيل',
-                          accentColor: context.appColors.warning,
+                        data: (balanceCentimes) => InkWell(
+                          onTap: () {
+                            if (authUser != null) {
+                              DriverWalletSheet.show(
+                                context,
+                                driverId: authUser.id,
+                                driverName: authUser.name,
+                              );
+                            }
+                          },
+                          borderRadius: AppRadius.mdAll,
+                          child: KpiCard(
+                            title: 'الكاش في عهدتك (المحفظة)',
+                            value: DzdFormatter.formatCentimes(balanceCentimes),
+                            icon: Icons.account_balance_wallet_outlined,
+                            subtitle: 'اضغط هنا لعرض تفاصيل العهدة والتسوية',
+                            accentColor: colors.gold,
+                          ),
                         ),
-                        loading: () => const LinearProgressIndicator(),
+                        loading: () => AppStates.loading(),
                         error: (_, __) => const SizedBox.shrink(),
                       ),
                       AppSpacing.gapMd,
@@ -245,22 +284,26 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
                         children: [
                           Text(
                             'الطلبات الموكلة إليك (${orders.length}):',
-                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: colors.onObsidian,
+                            ),
                           ),
-                          FilledButton.tonalIcon(
+                          GoldButton.icon(
                             onPressed: () => setState(() => _isMapView = true),
-                            icon: const Icon(Icons.map, size: 16),
-                            label: const Text('عرض الخريطة وتوزيع المحطات'),
+                            icon: Icons.map,
+                            label: 'عرض الخريطة',
+                            compact: true,
                           ),
                         ],
                       ),
                       AppSpacing.gapSm,
                       Expanded(
                         child: orders.isEmpty
-                            ? const AppEmptyView(
+                            ? AppStates.empty(
                                 icon: Icons.local_shipping_outlined,
-                                title: 'لا توجد طلبات توصيل موكلة إليك حاليًا',
-                                description: 'ستظهر الطلبات الجديدة هنا بمجرد تعيينها لك من طرف مسؤول المخزون.',
+                                title: 'لا توجد طلبات توصيل',
+                                description: 'ستظهر الطلبات الجديدة هنا بمجرد تعيينها لك.',
                               )
                             : ListView.separated(
                                 itemCount: orders.length,
@@ -273,7 +316,9 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
                                   final lng = (order.deliveryAddress?['longitude'] as num?)?.toDouble() ??
                                       (order.customerSnapshot?['longitude'] as num?)?.toDouble();
 
-                                  return Card(
+                                  return LuxuryCard(
+                                    goldAccent: !isDelivered,
+                                    selected: !isDelivered,
                                     child: Padding(
                                       padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
                                       child: Column(
@@ -284,11 +329,26 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
                                             children: [
                                               Row(
                                                 children: [
-                                                  const Icon(Icons.receipt_long, size: 20),
-                                                  const SizedBox(width: AppSpacing.xs),
+                                                  Container(
+                                                    padding: const EdgeInsets.all(6),
+                                                    decoration: BoxDecoration(
+                                                      gradient: isDelivered ? null : AppGradients.goldFoil,
+                                                      color: isDelivered ? colors.obsidianMuted : null,
+                                                      borderRadius: AppRadius.smAll,
+                                                    ),
+                                                    child: Icon(
+                                                      Icons.receipt_long,
+                                                      size: 18,
+                                                      color: isDelivered ? colors.onObsidian.withValues(alpha: 0.5) : colors.obsidian,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: AppSpacing.sm),
                                                   Text(
                                                     'طلب رقم #${order.orderNumber ?? order.id.substring(0, 8)}',
-                                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                                    style: theme.textTheme.titleSmall?.copyWith(
+                                                      fontWeight: FontWeight.bold,
+                                                      color: colors.onObsidian,
+                                                    ),
                                                   ),
                                                 ],
                                               ),
@@ -298,7 +358,7 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
                                               ),
                                             ],
                                           ),
-                                          const Divider(),
+                                          const GoldDivider(),
                                           if (order.customerSnapshot != null) ...[
                                             Row(
                                               children: [
@@ -340,21 +400,41 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
                                           Row(
                                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
-                                              Row(
+                                              Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
                                                 children: [
-                                                  const Text('المبلغ المطلوب تحصيله: ', style: TextStyle(fontWeight: FontWeight.bold)),
-                                                  DzdPriceTag(centimes: order.totalAmountCentimes),
+                                                  Text(
+                                                    'المبلغ المطلوب تحصيله',
+                                                    style: theme.textTheme.labelSmall?.copyWith(
+                                                      color: colors.onObsidian.withValues(alpha: 0.6),
+                                                    ),
+                                                  ),
+                                                  DzdPriceTag.lg(centimes: order.totalAmountCentimes, gold: !isDelivered),
                                                 ],
                                               ),
-                                              Text('${order.items.length} أصناف', style: theme.textTheme.bodySmall),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: colors.obsidianMuted,
+                                                  borderRadius: AppRadius.pillAll,
+                                                ),
+                                                child: Text(
+                                                  '${order.items.length} أصناف',
+                                                  style: theme.textTheme.labelSmall?.copyWith(color: colors.onObsidian),
+                                                ),
+                                              ),
                                             ],
                                           ),
                                           AppSpacing.gapMd,
                                           Row(
                                             children: [
-                                              // 1-Tap navigation launcher
+                                              // Navigation
                                               Expanded(
                                                 child: OutlinedButton.icon(
+                                                  style: OutlinedButton.styleFrom(
+                                                    side: BorderSide(color: colors.gold.withValues(alpha: 0.5)),
+                                                    foregroundColor: colors.gold,
+                                                  ),
                                                   onPressed: () {
                                                     if (lat != null && lng != null) {
                                                       MapsLauncher.launchCoordinates(lat, lng, order.customerName ?? 'عنوان الزبون');
@@ -365,28 +445,28 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
                                                       MapsLauncher.launchQuery(query);
                                                     }
                                                   },
-                                                  icon: const Icon(Icons.navigation_outlined, color: Colors.blue),
+                                                  icon: const Icon(Icons.navigation_outlined, size: 16),
                                                   label: const Text('الملاحة GPS'),
                                                 ),
                                               ),
                                               if (order.customerPhone != null || order.customerSnapshot?['phone'] != null) ...[
                                                 const SizedBox(width: AppSpacing.sm),
-                                                IconButton.outlined(
-                                                  tooltip: 'اتصال هاتفي بالزبون',
+                                                GoldIconButton(
+                                                  icon: Icons.call_rounded,
+                                                  tooltip: 'اتصال بالزبون',
                                                   onPressed: () {
                                                     final phone = order.customerPhone ?? order.customerSnapshot?['phone'];
                                                     if (phone != null) launchUrl(Uri.parse('tel:$phone'));
                                                   },
-                                                  icon: const Icon(Icons.call, color: Colors.green),
                                                 ),
                                               ],
                                               if (!isDelivered) ...[
                                                 const SizedBox(width: AppSpacing.sm),
                                                 Expanded(
-                                                  child: FilledButton.icon(
+                                                  child: GoldButton.icon(
                                                     onPressed: () => _openProofOfDeliveryDialog(order),
-                                                    icon: const Icon(Icons.check_circle_outline),
-                                                    label: const Text('تسليم وإثبات'),
+                                                    icon: Icons.check_circle_outline,
+                                                    label: 'تسليم وإثبات',
                                                   ),
                                                 ),
                                               ],
@@ -403,9 +483,9 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
                   ),
                 );
               },
-              loading: () => const AppLoadingView(message: 'جاري جلب مهام التوصيل...'),
-              error: (err, _) => AppErrorView(
-                message: 'تعذر تحميل مهام التوصيل',
+              loading: () => AppStates.loading(),
+              error: (err, _) => AppStates.error(
+               'تعذر تحميل مهام التوصيل',
                 onRetry: _refresh,
               ),
             ),
