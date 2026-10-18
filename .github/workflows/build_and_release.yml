@@ -33,7 +33,6 @@ on:
         default: '• تحسينات عامة في الأداء وإصلاح الأخطاء'
 
 env:
-  FLUTTER_VERSION: '3.24.3'
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
 
@@ -57,7 +56,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
 
@@ -90,8 +88,19 @@ jobs:
             --build-name=${{ steps.version_step.outputs.VERSION }} \
             --build-number=${{ steps.version_step.outputs.BUILD_NUMBER }}
 
-      - name: Upload APK to Supabase Storage
+      - name: Archive APK as GitHub Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version_step.outputs.APP_TYPE }}-android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload APK to Supabase Storage & Register Release
         run: |
+          if [ -z "${{ env.SUPABASE_URL }}" ] || [ -z "${{ env.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "::warning::SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secret is missing. Skipping Supabase release registration. The APK has been saved in GitHub Artifacts."
+            exit 0
+          fi
+
           APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
           FILE_NAME="${{ steps.version_step.outputs.APP_TYPE }}_v${{ steps.version_step.outputs.VERSION }}_b${{ steps.version_step.outputs.BUILD_NUMBER }}.apk"
           FILE_SIZE=$(stat -c%s "$APK_PATH")
@@ -140,7 +149,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
 
@@ -161,6 +169,23 @@ jobs:
           $zipName = "staff_app_windows_v${ver}_b${buildNum}.zip"
           Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "$zipName" -Force
 
+      - name: Archive Windows Release as GitHub Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-app-windows-zip
+          path: staff_app_windows_*.zip
+
+      - name: Upload ZIP to Supabase Storage & Register Release
+        shell: pwsh
+        run: |
+          if (-not $env:SUPABASE_URL -or -not $env:SUPABASE_SERVICE_ROLE_KEY) {
+            Write-Warning "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secret is missing. Skipping Supabase release registration. The ZIP has been saved in GitHub Artifacts."
+            exit 0
+          }
+
+          $ver = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.version_name }}" } else { "${{ github.ref_name }}".TrimStart('v') }
+          $buildNum = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.build_number }}" } else { "$env:GITHUB_RUN_NUMBER" }
+          $zipName = "staff_app_windows_v${ver}_b${buildNum}.zip"
           $fileSize = (Get-Item $zipName).Length
           $uploadUrl = "${{ env.SUPABASE_URL }}/storage/v1/object/app-releases/windows/$zipName"
           $publicUrl = "${{ env.SUPABASE_URL }}/storage/v1/object/public/app-releases/windows/$zipName"
