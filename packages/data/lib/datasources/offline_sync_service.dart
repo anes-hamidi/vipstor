@@ -89,6 +89,77 @@ class OfflineSyncService {
             'p_method': payload['method'],
             'p_notes': payload['notes'],
           });
+
+        case 'pos_shift_open':
+          await client.from('audit_log').insert({
+            'user_id': payload['cashier_id'],
+            'action': 'SHIFT_OPENED',
+            'target_table': 'settlements',
+            'target_id': payload['cashier_id'],
+            'after_state': {
+              'client_id': op.clientId,
+              'cashier_id': payload['cashier_id'],
+              'cashier_name': payload['cashier_name'],
+              'opening_float_centimes': payload['opening_float_centimes'],
+              'z_report_number': payload['z_report_number'],
+              'opened_at': payload['opened_at'],
+              'synced_at': DateTime.now().toIso8601String(),
+            },
+          });
+
+        case 'pos_shift_close':
+          await client.from('audit_log').insert({
+            'user_id': payload['cashier_id'],
+            'action': 'SHIFT_CLOSED',
+            'target_table': 'settlements',
+            'target_id': payload['cashier_id'],
+            'after_state': {
+              'client_id': op.clientId,
+              'cashier_id': payload['cashier_id'],
+              'cashier_name': payload['cashier_name'],
+              'z_number': payload['z_number'],
+              'expected_centimes': payload['expected_centimes'],
+              'counted_centimes': payload['counted_centimes'],
+              'variance_centimes': payload['variance_centimes'],
+              'cash_sales_centimes': payload['cash_sales_centimes'],
+              'credit_sales_centimes': payload['credit_sales_centimes'],
+              'debt_collected_centimes': payload['debt_collected_centimes'],
+              'supplier_payments_centimes': payload['supplier_payments_centimes'],
+              'driver_settlement_centimes': payload['driver_settlement_centimes'],
+              'opened_at': payload['opened_at'],
+              'closed_at': payload['closed_at'],
+              'denominations': payload['denominations'],
+              'synced_at': DateTime.now().toIso8601String(),
+            },
+          });
+
+        case 'manager_purchase_post':
+          final purchaseId = payload['purchase_id'] as String;
+          final userId = payload['user_id'] as String;
+          if (!purchaseId.startsWith('OFFLINE-')) {
+            await service.postPurchase(
+              purchaseId: purchaseId,
+              userId: userId,
+            );
+          }
+
+        case 'manager_supplier_payment':
+          await client.from('supplier_ledger').insert({
+            'supplier_id': payload['supplier_id'],
+            'amount_change': -(payload['amount'] as int),
+            'ref_type': 'payment',
+            'ref_id': payload['purchase_id'] ?? op.clientId,
+            'notes': payload['notes'] ?? 'سداد نقدي تم ترحيله بعد استعادة الاتصال',
+            'created_by': payload['payer_user_id'],
+          });
+
+        case 'order_status_update':
+          await client.from('orders').update({
+            'status': payload['status'],
+            if (payload['driver_id'] != null) 'driver_id': payload['driver_id'],
+            if (payload['notes'] != null) 'notes': payload['notes'],
+            'updated_at': DateTime.now().toIso8601String(),
+          }).eq('id', payload['order_id']);
       }
 
       await db.markOpDone(op.clientId);

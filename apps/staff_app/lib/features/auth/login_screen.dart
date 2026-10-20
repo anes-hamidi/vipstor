@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pinput/pinput.dart';
 import 'package:domain/domain.dart';
+import 'package:data/data.dart';
 import 'package:ui_kit/ui_kit.dart';
 import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
@@ -65,6 +66,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
       if (isValid) {
         final staff = _selectedStaff!;
+        ref.read(staffLocalAuthStoreProvider).saveLastActiveUser(staff);
         ref.read(staffAuditLoggerProvider).logLogin(user: staff);
         ref.read(authStateProvider.notifier).state = staff;
       } else {
@@ -244,6 +246,32 @@ class _TopBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
+          if (!ConnectivityService.instance.isOnline) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.15),
+                borderRadius: AppRadius.pillAll,
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.wifi_off_rounded, size: 14, color: Colors.orange),
+                  SizedBox(width: 4),
+                  Text(
+                    'غير متصل (Offline)',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
           // Clock pill
           Container(
             padding: const EdgeInsetsDirectional.symmetric(

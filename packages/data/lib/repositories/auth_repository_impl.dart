@@ -1,67 +1,93 @@
 import 'package:domain/domain.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../datasources/local/staff_local_auth_store.dart';
 
-/// Production auth repository.
-///
-/// Staff login flow:
-///   1. Select staff member from list (fetched from DB, no hardcoded fallbacks).
-///   2. Verify 4-digit PIN via rpc_verify_user_pin (bcrypt-checked server-side).
-///   3. On success, Supabase session is obtained via signInWithOtp (phone magic link)
-///      OR via the anonymous fallback — either way the JWT is stored by Supabase.
-///
-/// Customer login flow:
-///   - Customers authenticate via Supabase phone OTP (signInWithOtp).
-///   - No PIN step.
-///
-/// Session restore:
-///   - getCurrentUser() resolves the current Supabase session on app boot.
-///   - If session exists and maps to a users row, user is restored without re-auth.
+/// Production auth repository with full offline-first staff credentials support.
 class AuthRepositoryImpl implements IAuthRepository {
   final SupabaseClient client;
+  final StaffLocalAuthStore localStore;
 
-  AuthRepositoryImpl({required this.client});
+  AuthRepositoryImpl({
+    required this.client,
+    this.localStore = const StaffLocalAuthStore(),
+  });
 
   // ── Public: resolve current session on app boot ────────────────────────────
 
   @override
   Future<UserEntity?> getCurrentUser() async {
-    final session = client.auth.currentSession;
-    if (session == null) return null;
-    return _fetchUserById(session.user.id);
+    try {
+      final session = client.auth.currentSession;
+      if (session != null) {
+        final user = await _fetchUserById(session.user.id);
+        if (user != null) {
+          await localStore.saveLastActiveUser(user);
+          return user;
+        }
+      }
+    } catch (_) {}
+    return localStore.getLastActiveUser();
   }
 
-  // ── Public: staff list (real DB only, no fake fallbacks) ──────────────────
+  // ── Public: staff list (real DB with local offline cache fallback) ──────────
 
   @override
   Future<List<UserEntity>> getStaffMembers() async {
-    final rows = await client
-        .from('users')
-        .select('id, phone, name, role, active, language, created_at, updated_at')
-        .eq('active', true)
-        .neq('role', 'customer')
-        .order('name');
+    try {
+      final rows = await client
+          .from('users')
+          .select('id, phone, name, role, active, language, created_at, updated_at')
+          .eq('active', true)
+          .neq('role', 'customer')
+          .order('name');
 
-    return (rows as List).map((row) => _rowToEntity(row)).toList();
+      final members = (rows as List).map((row) => _rowToEntity(row)).toList();
+      if (members.isNotEmpty) {
+        await localStore.saveStaffMembers(members);
+      }
+      return members;
+    } catch (_) {
+      final cached = await localStore.getStaffMembers();
+      if (cached.isNotEmpty) {
+        return cached;
+      }
+      rethrow;
+    }
   }
 
-  // ── Public: PIN verification ───────────────────────────────────────────────
+  // ── Public: PIN verification (Server-first with offline salted hash fallback) ─
 
   @override
   Future<bool> verifyPin({required String userId, required String pin}) async {
-    final res = await client.rpc('rpc_verify_user_pin', params: {
-      'p_user_id': userId,
-      'p_pin': pin,
-    });
+    try {
+      final res = await client.rpc('rpc_verify_user_pin', params: {
+        'p_user_id': userId,
+        'p_pin': pin,
+      });
 
-    if (res is Map) {
-      if (res['locked'] == true) {
-        throw const AuthException(
-          'الحساب مقفل مؤقتاً بسبب تكرار المحاولات الخاطئة. يرجى الانتظار.',
-        );
+      if (res is Map) {
+        if (res['locked'] == true) {
+          throw const AuthException(
+            'الحساب مقفل مؤقتاً بسبب تكرار المحاولات الخاطئة. يرجى الانتظار.',
+          );
+        }
+        final isValid = res['valid'] == true;
+        if (isValid) {
+          await localStore.saveUserPinHash(userId, pin);
+        }
+        return isValid;
       }
-      return res['valid'] == true;
+      return false;
+    } catch (e) {
+      if (e is AuthException) rethrow;
+
+      final isOfflineValid = await localStore.verifyOfflinePin(userId, pin);
+      if (isOfflineValid) {
+        return true;
+      }
+
+      throw Exception('تعذر الاتصال بالسيرفر، ولم يتم حفظ رمز PIN مسبقاً على هذا الجهاز.');
     }
-    return false;
   }
 
   // ── Public: sign in as staff after PIN verified ───────────────────────────
@@ -103,7 +129,10 @@ class AuthRepositoryImpl implements IAuthRepository {
       'p_new_pin': newPin,
     });
     if (res is Map) {
-      if (res['status'] == 'success') return true;
+      if (res['status'] == 'success') {
+        await localStore.saveUserPinHash(userId, newPin);
+        return true;
+      }
       if (res['message'] != null) {
         throw AuthException(res['message'] as String);
       }
@@ -125,20 +154,21 @@ class AuthRepositoryImpl implements IAuthRepository {
       'p_target_user_id': targetUserId,
       'p_new_pin': newPin,
     });
-    if (res is Map) {
-      if (res['status'] == 'success') return true;
-      if (res['message'] != null) {
-        throw AuthException(res['message'] as String);
-      }
+    final ok = res == true || (res is Map && res['status'] == 'success');
+    if (ok) {
+      await localStore.saveUserPinHash(targetUserId, newPin);
     }
-    return false;
+    return ok;
   }
 
   // ── Public: sign out ───────────────────────────────────────────────────────
 
   @override
   Future<void> signOut() async {
-    await client.auth.signOut();
+    try {
+      await client.auth.signOut();
+    } catch (_) {}
+    await localStore.clearLastActiveUser();
   }
 
   // ── Private helpers ────────────────────────────────────────────────────────

@@ -1,12 +1,21 @@
+import 'dart:convert';
 import 'package:domain/domain.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import '../datasources/remote/supabase_service.dart';
+import '../datasources/local/app_database.dart';
+import '../datasources/local/connectivity_service.dart';
 
 class PurchaseRepositoryImpl implements IPurchaseRepository {
   final SupabaseClient client;
   final SupabaseService service;
+  final AppDatabase? db;
 
-  PurchaseRepositoryImpl({required this.client, required this.service});
+  PurchaseRepositoryImpl({
+    required this.client,
+    required this.service,
+    this.db,
+  });
 
   @override
   Future<List<Map<String, dynamic>>> getSuppliers() async {
@@ -120,27 +129,44 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     final paymentId = 'PAY-SUP-${DateTime.now().millisecondsSinceEpoch % 1000000}';
 
     // 1. Insert into supplier_ledger or payments if table exists
-    try {
-      await client.from('supplier_ledger').insert({
-        'supplier_id': supplierId,
-        'amount_change': -amountCentimes,
-        'ref_type': 'payment',
-        'ref_id': purchaseId ?? paymentId,
-        'notes': notes ?? 'سداد نقدي لمستحقات المورد بواسطة $payerName ($payerRole)',
-        'created_by': effectiveUserId,
-      });
-    } catch (_) {
-      // Fallback: try payments table
+    if (ConnectivityService.instance.isOnline) {
       try {
-        await client.from('payments').insert({
+        await client.from('supplier_ledger').insert({
+          'supplier_id': supplierId,
+          'amount_change': -amountCentimes,
+          'ref_type': 'payment',
+          'ref_id': purchaseId ?? paymentId,
+          'notes': notes ?? 'سداد نقدي لمستحقات المورد بواسطة $payerName ($payerRole)',
+          'created_by': effectiveUserId,
+        });
+      } catch (_) {
+        try {
+          await client.from('payments').insert({
+            'supplier_id': supplierId,
+            'amount': amountCentimes,
+            'method': 'cash',
+            'received_by': effectiveUserId,
+            'status': 'settled',
+            'notes': notes,
+          });
+        } catch (_) {}
+      }
+    } else if (db != null) {
+      final clientId = const Uuid().v4();
+      await db!.enqueuePendingOp(PendingOperationsCompanion.insert(
+        clientId: clientId,
+        operationType: 'manager_supplier_payment',
+        payloadJson: jsonEncode({
           'supplier_id': supplierId,
           'amount': amountCentimes,
-          'method': 'cash',
-          'received_by': effectiveUserId,
-          'status': 'settled',
+          'payer_user_id': effectiveUserId,
+          'payer_name': payerName,
+          'payer_role': payerRole,
+          'purchase_id': purchaseId,
           'notes': notes,
-        });
-      } catch (_) {}
+        }),
+        createdAt: DateTime.now(),
+      ));
     }
 
     // 2. Audit Trail logging
@@ -347,34 +373,43 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
       total += (q * c).toInt();
     }
 
-    final purchaseRow = await client.from('purchases').insert({
-      'supplier_id': supplierId,
-      'invoice_no': invoiceNo,
-      'invoice_date': date.toIso8601String().split('T').first,
-      'status': 'draft',
-      'total_amount': total,
-      'created_by': user,
-    }).select('id').single();
-
-    final purchaseId = purchaseRow['id'] as String;
-
-    if (items.isNotEmpty) {
-      final purchaseItemsToInsert = items.map((it) {
-        final unitCost = (it['unit_cost'] ?? it['cost_centimes'] ?? 0) as int;
-        final sellingPrice = (it['selling_price'] != null ? (it['selling_price'] as num).toInt() : unitCost);
-        return {
-          'purchase_id': purchaseId,
-          'product_id': it['product_id'],
-          'quantity': (it['quantity'] ?? it['qty'] ?? 1) as int,
-          'unit_cost': unitCost,
-          'selling_price': sellingPrice >= unitCost ? sellingPrice : unitCost,
-        };
-      }).toList();
-
-      await client.from('purchase_items').insert(purchaseItemsToInsert);
+    if (!ConnectivityService.instance.isOnline) {
+      // Offline fallback: generate an offline draft purchase ID
+      return 'OFFLINE-${const Uuid().v4()}';
     }
 
-    return purchaseId;
+    try {
+      final purchaseRow = await client.from('purchases').insert({
+        'supplier_id': supplierId,
+        'invoice_no': invoiceNo,
+        'invoice_date': date.toIso8601String().split('T').first,
+        'status': 'draft',
+        'total_amount': total,
+        'created_by': user,
+      }).select('id').single();
+
+      final purchaseId = purchaseRow['id'] as String;
+
+      if (items.isNotEmpty) {
+        final purchaseItemsToInsert = items.map((it) {
+          final unitCost = (it['unit_cost'] ?? it['cost_centimes'] ?? 0) as int;
+          final sellingPrice = (it['selling_price'] != null ? (it['selling_price'] as num).toInt() : unitCost);
+          return {
+            'purchase_id': purchaseId,
+            'product_id': it['product_id'],
+            'quantity': (it['quantity'] ?? it['qty'] ?? 1) as int,
+            'unit_cost': unitCost,
+            'selling_price': sellingPrice >= unitCost ? sellingPrice : unitCost,
+          };
+        }).toList();
+
+        await client.from('purchase_items').insert(purchaseItemsToInsert);
+      }
+
+      return purchaseId;
+    } catch (_) {
+      return 'OFFLINE-${const Uuid().v4()}';
+    }
   }
 
   @override
@@ -384,9 +419,32 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     List<Map<String, dynamic>> items = const [],
   }) async {
     final effectiveUserId = await _resolveValidUserId(userId.isNotEmpty ? userId : client.auth.currentUser?.id);
-    await service.postPurchase(
-      purchaseId: purchaseId,
-      userId: effectiveUserId,
-    );
+
+    if (ConnectivityService.instance.isOnline && !purchaseId.startsWith('OFFLINE-')) {
+      try {
+        await service.postPurchase(
+          purchaseId: purchaseId,
+          userId: effectiveUserId,
+        );
+        return;
+      } catch (_) {
+        // Fall through to offline queue
+      }
+    }
+
+    // Offline: queue in PendingOperations
+    if (db != null) {
+      final clientId = const Uuid().v4();
+      await db!.enqueuePendingOp(PendingOperationsCompanion.insert(
+        clientId: clientId,
+        operationType: 'manager_purchase_post',
+        payloadJson: jsonEncode({
+          'purchase_id': purchaseId,
+          'user_id': effectiveUserId,
+          'items': items,
+        }),
+        createdAt: DateTime.now(),
+      ));
+    }
   }
 }

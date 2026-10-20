@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:data/data.dart';
@@ -79,7 +80,8 @@ final orderRepositoryProvider = Provider<IOrderRepository>((ref) {
 final purchaseRepositoryProvider = Provider<IPurchaseRepository>((ref) {
   final client = ref.watch(supabaseClientProvider);
   final service = ref.watch(supabaseServiceProvider);
-  return PurchaseRepositoryImpl(client: client, service: service);
+  final db = ref.watch(appDatabaseProvider);
+  return PurchaseRepositoryImpl(client: client, service: service, db: db);
 });
 
 final purchasesListProvider = FutureProvider<List<PurchaseEntity>>((ref) async {
@@ -108,9 +110,14 @@ final customerRepositoryProvider = Provider<ICustomerRepository>((ref) {
   return CustomerRepositoryImpl(client: client, service: service, db: db);
 });
 
+final staffLocalAuthStoreProvider = Provider<StaffLocalAuthStore>((ref) {
+  return const StaffLocalAuthStore();
+});
+
 final authRepositoryProvider = Provider<IAuthRepository>((ref) {
   final client = ref.watch(supabaseClientProvider);
-  return AuthRepositoryImpl(client: client);
+  final localStore = ref.watch(staffLocalAuthStoreProvider);
+  return AuthRepositoryImpl(client: client, localStore: localStore);
 });
 
 final appUpdateRepositoryProvider = Provider<IAppUpdateRepository>((ref) {
@@ -173,24 +180,101 @@ final posActiveCustomerProvider = StateProvider<CustomerProfileEntity?>((ref) =>
 // Held Tickets (Suspended Carts)
 final posHeldTicketsProvider = StateProvider<List<PosHeldTicket>>((ref) => []);
 
-// Active Cashier Shift Session
+// Active Cashier Shift Session with local offline persistence and replay
 class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
-  PosShiftNotifier() : super(null);
+  final StaffLocalAuthStore localStore;
+  final AppDatabase db;
+
+  PosShiftNotifier({
+    required this.localStore,
+    required this.db,
+  }) : super(null) {
+    _restoreShift();
+  }
+
+  Future<void> _restoreShift() async {
+    try {
+      final jsonStr = await localStore.getActiveShiftJson();
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final m = jsonDecode(jsonStr) as Map<String, dynamic>;
+        state = PosShiftSession(
+          id: m['id'] as String,
+          zReportNumber: (m['zReportNumber'] as num).toInt(),
+          cashierId: m['cashierId'] as String,
+          cashierName: m['cashierName'] as String,
+          openingFloatCentimes: (m['openingFloatCentimes'] as num).toInt(),
+          cashSalesCentimes: (m['cashSalesCentimes'] as num?)?.toInt() ?? 0,
+          creditSalesCentimes: (m['creditSalesCentimes'] as num?)?.toInt() ?? 0,
+          collectedDebtCashCentimes: (m['collectedDebtCashCentimes'] as num?)?.toInt() ?? 0,
+          supplierPaymentsCashCentimes: (m['supplierPaymentsCashCentimes'] as num?)?.toInt() ?? 0,
+          driverSettlementCashCentimes: (m['driverSettlementCashCentimes'] as num?)?.toInt() ?? 0,
+          returnsCentimes: (m['returnsCentimes'] as num?)?.toInt() ?? 0,
+          openedAt: DateTime.parse(m['openedAt'] as String),
+          isOpen: (m['isOpen'] as bool?) ?? true,
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistCurrentState() async {
+    if (state == null) {
+      await localStore.clearActiveShift();
+    } else {
+      final m = {
+        'id': state!.id,
+        'zReportNumber': state!.zReportNumber,
+        'cashierId': state!.cashierId,
+        'cashierName': state!.cashierName,
+        'openingFloatCentimes': state!.openingFloatCentimes,
+        'cashSalesCentimes': state!.cashSalesCentimes,
+        'creditSalesCentimes': state!.creditSalesCentimes,
+        'collectedDebtCashCentimes': state!.collectedDebtCashCentimes,
+        'supplierPaymentsCashCentimes': state!.supplierPaymentsCashCentimes,
+        'driverSettlementCashCentimes': state!.driverSettlementCashCentimes,
+        'returnsCentimes': state!.returnsCentimes,
+        'openedAt': state!.openedAt.toIso8601String(),
+        'isOpen': state!.isOpen,
+      };
+      await localStore.saveActiveShiftJson(jsonEncode(m));
+    }
+  }
 
   void openShift({
     required String cashierId,
     required String cashierName,
     required int openingFloatCentimes,
   }) {
+    final shiftId = const Uuid().v4();
+    final zNum = (DateTime.now().millisecondsSinceEpoch ~/ 1000) % 1000000;
+    final openedAt = DateTime.now();
+
     state = PosShiftSession(
-      id: const Uuid().v4(),
-      zReportNumber: (DateTime.now().millisecondsSinceEpoch ~/ 1000) % 1000000,
+      id: shiftId,
+      zReportNumber: zNum,
       cashierId: cashierId,
       cashierName: cashierName,
       openingFloatCentimes: openingFloatCentimes,
-      openedAt: DateTime.now(),
+      openedAt: openedAt,
       isOpen: true,
     );
+
+    _persistCurrentState();
+
+    if (!ConnectivityService.instance.isOnline) {
+      db.enqueuePendingOp(PendingOperationsCompanion.insert(
+        clientId: const Uuid().v4(),
+        operationType: 'pos_shift_open',
+        payloadJson: jsonEncode({
+          'shift_id': shiftId,
+          'cashier_id': cashierId,
+          'cashier_name': cashierName,
+          'opening_float_centimes': openingFloatCentimes,
+          'z_report_number': zNum,
+          'opened_at': openedAt.toIso8601String(),
+        }),
+        createdAt: DateTime.now(),
+      ));
+    }
   }
 
   void registerSale({required int cashCentimes, required int creditCentimes}) {
@@ -199,15 +283,15 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
       cashSalesCentimes: state!.cashSalesCentimes + cashCentimes,
       creditSalesCentimes: state!.creditSalesCentimes + creditCentimes,
     );
+    _persistCurrentState();
   }
-
-
 
   void registerReturn({required int refundCentimes}) {
     if (state == null) return;
     state = state!.copyWith(
       returnsCentimes: state!.returnsCentimes + refundCentimes,
     );
+    _persistCurrentState();
   }
 
   void registerDebtCashPayment({required int cashCentimes}) {
@@ -215,6 +299,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     state = state!.copyWith(
       collectedDebtCashCentimes: state!.collectedDebtCashCentimes + cashCentimes,
     );
+    _persistCurrentState();
   }
 
   void registerSupplierCashPayment({required int cashCentimes}) {
@@ -222,6 +307,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     state = state!.copyWith(
       supplierPaymentsCashCentimes: state!.supplierPaymentsCashCentimes + cashCentimes,
     );
+    _persistCurrentState();
   }
 
   void registerDriverSettlement({required int cashCentimes}) {
@@ -229,6 +315,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     state = state!.copyWith(
       driverSettlementCashCentimes: state!.driverSettlementCashCentimes + cashCentimes,
     );
+    _persistCurrentState();
   }
 
   ZReportSummary closeShift({
@@ -237,12 +324,13 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
   }) {
     final current = state!;
     final variance = countedCashCentimes - current.expectedCashInDrawerCentimes;
+    final closedAt = DateTime.now();
 
     final summary = ZReportSummary(
       zNumber: current.zReportNumber,
       cashierName: current.cashierName,
       openedAt: current.openedAt,
-      closedAt: DateTime.now(),
+      closedAt: closedAt,
       openingFloatCentimes: current.openingFloatCentimes,
       cashSalesCentimes: current.cashSalesCentimes,
       creditSalesCentimes: current.creditSalesCentimes,
@@ -258,12 +346,40 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     );
 
     state = null; // Shift closed
+    _persistCurrentState();
+
+    if (!ConnectivityService.instance.isOnline) {
+      db.enqueuePendingOp(PendingOperationsCompanion.insert(
+        clientId: const Uuid().v4(),
+        operationType: 'pos_shift_close',
+        payloadJson: jsonEncode({
+          'cashier_id': current.cashierId,
+          'cashier_name': current.cashierName,
+          'z_number': summary.zNumber,
+          'expected_centimes': summary.expectedCashCentimes,
+          'counted_centimes': summary.countedCashCentimes,
+          'variance_centimes': summary.varianceCentimes,
+          'cash_sales_centimes': summary.cashSalesCentimes,
+          'credit_sales_centimes': summary.creditSalesCentimes,
+          'debt_collected_centimes': summary.collectedDebtCashCentimes,
+          'supplier_payments_centimes': summary.supplierPaymentsCashCentimes,
+          'driver_settlement_centimes': summary.driverSettlementCashCentimes,
+          'opened_at': summary.openedAt.toIso8601String(),
+          'closed_at': closedAt.toIso8601String(),
+          'denominations': denominations,
+        }),
+        createdAt: DateTime.now(),
+      ));
+    }
+
     return summary;
   }
 }
 
 final posActiveShiftProvider = StateNotifierProvider<PosShiftNotifier, PosShiftSession?>((ref) {
-  return PosShiftNotifier();
+  final localStore = ref.watch(staffLocalAuthStoreProvider);
+  final db = ref.watch(appDatabaseProvider);
+  return PosShiftNotifier(localStore: localStore, db: db);
 });
 
 final pendingDriverSettlementsProvider = FutureProvider<List<DriverSettlementSummaryEntity>>((ref) async {
