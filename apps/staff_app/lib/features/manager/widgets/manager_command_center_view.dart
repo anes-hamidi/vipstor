@@ -6,7 +6,6 @@ import 'package:core/core.dart';
 
 import '../../../providers/inventory_providers.dart';
 import '../../../providers/staff_providers.dart';
-import 'online_orders_pipeline_view.dart';
 import 'stock_adjustment_dialog.dart';
 import 'cycle_count_audit_sheet.dart';
 import 'low_stock_replenishment_dashboard.dart';

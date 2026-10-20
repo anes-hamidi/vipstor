@@ -361,6 +361,7 @@ class _PurchaseReceivingScreenState
             ref.invalidate(liveProductsProvider);
             ref.invalidate(suppliersProvider);
             ref.invalidate(purchasesListProvider);
+            ref.invalidate(managerOnlineOrdersProvider);
           },
         ),
         IconButton(
@@ -384,20 +385,32 @@ class _PurchaseReceivingScreenState
             isScrollable: true,
             indicatorColor: const Color(0xFFD4AF37),
             indicatorWeight: 2.5,
-            tabs: const [
-              Tab(
+            tabs: [
+              const Tab(
                   icon: Icon(Icons.dashboard_rounded, size: 18),
                   text: 'لوحة القيادة'),
               Tab(
-                  icon: Icon(Icons.shopping_bag_outlined, size: 18),
+                  icon: Builder(builder: (context) {
+                    final unverifiedCount = ref.watch(unverifiedOrdersCountProvider);
+                    return Badge(
+                      isLabelVisible: unverifiedCount > 0,
+                      label: Text(
+                        '$unverifiedCount',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      backgroundColor: const Color(0xFFD4AF37),
+                      textColor: const Color(0xFF1A1400),
+                      child: const Icon(Icons.shopping_bag_outlined, size: 18),
+                    );
+                  }),
                   text: 'طلبيات الزبائن'),
-              Tab(
+              const Tab(
                   icon: Icon(Icons.add_shopping_cart_rounded, size: 18),
                   text: 'استلام الفواتير'),
-              Tab(
+              const Tab(
                   icon: Icon(Icons.receipt_long_outlined, size: 18),
                   text: 'سجل المشتريات'),
-              Tab(
+              const Tab(
                   icon: Icon(Icons.grid_view_rounded, size: 18),
                   text: 'كتالوج المنتجات'),
             ],

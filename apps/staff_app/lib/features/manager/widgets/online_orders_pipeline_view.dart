@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
@@ -6,10 +7,7 @@ import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
 import '../services/pdf_invoice_service.dart';
 
-final managerOnlineOrdersProvider = FutureProvider<List<OrderEntity>>((ref) async {
-  final repo = ref.watch(orderRepositoryProvider);
-  return repo.getOrders();
-});
+export '../../../providers/staff_providers.dart' show managerOnlineOrdersProvider, unverifiedOrdersCountProvider;
 
 // ─── Pipeline Stage Enum ───────────────────────────────────────────────────
 
@@ -576,6 +574,36 @@ class _OnlineOrdersPipelineViewState
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<List<OrderEntity>>>(managerOnlineOrdersProvider, (prev, next) {
+      final prevList = prev?.value ?? [];
+      final nextList = next.value ?? [];
+      final prevSubmitted = prevList.where((o) => o.status == OrderStatus.submitted).length;
+      final nextSubmitted = nextList.where((o) => o.status == OrderStatus.submitted).length;
+
+      if (prev != null && nextSubmitted > prevSubmitted) {
+        SystemSound.play(SystemSoundType.alert);
+        HapticFeedback.mediumImpact();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.notifications_active_rounded, color: Colors.amber),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text('🔔 طلبية زبون جديدة وردت الآن! ($nextSubmitted بانتظار التدقيق)'),
+                  ),
+                ],
+              ),
+              backgroundColor: const Color(0xFF1F1A12),
+              duration: const Duration(seconds: 4),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    });
+
     final ordersAsync = ref.watch(managerOnlineOrdersProvider);
     final productsAsync = ref.watch(liveProductsProvider);
     final staffAsync = ref.watch(staffMembersProvider);
@@ -1024,43 +1052,85 @@ class _PipelineTabBar extends StatelessWidget {
           ),
         ),
       ),
-      child: TabBar(
-        controller: controller,
-        isScrollable: true,
-        indicatorColor: const Color(0xFFD4AF37),
-        indicatorWeight: 2.5,
-        tabs: stages.map((stage) {
-          final count = counts[stage] ?? 0;
-          return Tab(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(stage.icon, size: 16),
-                const SizedBox(width: AppSpacing.xs),
-                Text(stage.label),
-                if (count > 0) ...[
-                  const SizedBox(width: AppSpacing.xs),
+      child: Row(
+        children: [
+          Expanded(
+            child: TabBar(
+              controller: controller,
+              isScrollable: true,
+              indicatorColor: const Color(0xFFD4AF37),
+              indicatorWeight: 2.5,
+              tabs: stages.map((stage) {
+                final count = counts[stage] ?? 0;
+                return Tab(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(stage.icon, size: 16),
+                      const SizedBox(width: AppSpacing.xs),
+                      Text(stage.label),
+                      if (count > 0) ...[
+                        const SizedBox(width: AppSpacing.xs),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 1),
+                          decoration: const BoxDecoration(
+                            gradient: AppGradients.gold,
+                            borderRadius: AppRadius.pillAll,
+                          ),
+                          child: Text(
+                            '$count',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1A1400),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: AppSpacing.md),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.green.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.green.withValues(alpha: 0.3),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 1),
+                    width: 7,
+                    height: 7,
                     decoration: const BoxDecoration(
-                      gradient: AppGradients.gold,
-                      borderRadius: AppRadius.pillAll,
+                      color: Colors.green,
+                      shape: BoxShape.circle,
                     ),
-                    child: Text(
-                      '$count',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1A1400),
-                      ),
+                  ),
+                  const SizedBox(width: 5),
+                  const Text(
+                    'بث حي',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
                     ),
                   ),
                 ],
-              ],
+              ),
             ),
-          );
-        }).toList(),
+          ),
+        ],
       ),
     );
   }

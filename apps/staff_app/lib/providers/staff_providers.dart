@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:data/data.dart';
 import 'package:domain/domain.dart';
@@ -296,6 +298,82 @@ final driverWalletBalanceProvider = FutureProvider<int>((ref) async {
 final suppliersWithBalancesProvider = FutureProvider<List<SupplierProfileEntity>>((ref) async {
   final repo = ref.watch(purchaseRepositoryProvider);
   return repo.getSuppliersWithBalances();
+});
+
+/// Real-time stream of all orders for the Manager (live synchronization via Supabase Realtime + polling fallback).
+final managerOnlineOrdersProvider = StreamProvider<List<OrderEntity>>((ref) async* {
+  final repo = ref.watch(orderRepositoryProvider);
+  final client = ref.watch(supabaseClientProvider);
+
+  // 1. Initial snapshot
+  List<OrderEntity> currentOrders = await repo.getOrders();
+  yield currentOrders;
+
+  final controller = StreamController<List<OrderEntity>>.broadcast();
+  bool isReloading = false;
+
+  Future<void> reloadOrders() async {
+    if (isReloading) return;
+    isReloading = true;
+    try {
+      final fresh = await repo.getOrders();
+      currentOrders = fresh;
+      if (!controller.isClosed) {
+        controller.add(fresh);
+      }
+    } catch (e) {
+      debugPrint('[managerOnlineOrdersProvider] Live reload error: $e');
+    } finally {
+      isReloading = false;
+    }
+  }
+
+  // 2. Real-time PostgreSQL changes on 'orders' and 'order_items'
+  final channel = client.channel('manager_orders_live_${DateTime.now().millisecondsSinceEpoch}')
+    ..onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'orders',
+      callback: (payload) {
+        debugPrint('[Realtime:orders] Event: ${payload.eventType}');
+        reloadOrders();
+      },
+    )
+    ..onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public',
+      table: 'order_items',
+      callback: (payload) {
+        debugPrint('[Realtime:order_items] Event: ${payload.eventType}');
+        reloadOrders();
+      },
+    );
+
+  channel.subscribe((status, [error]) {
+    if (status == RealtimeSubscribeStatus.subscribed) {
+      reloadOrders();
+    }
+  });
+
+  // 3. Fallback timer (every 6 seconds) for guaranteed offline-recovery / network resilience
+  final timer = Timer.periodic(const Duration(seconds: 6), (_) {
+    reloadOrders();
+  });
+
+  ref.onDispose(() {
+    timer.cancel();
+    channel.unsubscribe();
+    client.removeChannel(channel);
+    controller.close();
+  });
+
+  yield* controller.stream;
+});
+
+/// Count of submitted / unverified orders awaiting manager review
+final unverifiedOrdersCountProvider = Provider<int>((ref) {
+  final orders = ref.watch(managerOnlineOrdersProvider).value ?? [];
+  return orders.where((o) => o.status == OrderStatus.submitted).length;
 });
 
 // Customer Debt & Ledger Providers

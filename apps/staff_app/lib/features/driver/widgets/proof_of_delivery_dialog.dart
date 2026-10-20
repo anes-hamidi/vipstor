@@ -1,10 +1,5 @@
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:signature/signature.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:uuid/uuid.dart';
@@ -13,6 +8,8 @@ import 'package:domain/domain.dart';
 import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
 
+/// Fast Proof of Delivery Dialog:
+/// Focuses strictly on Cash Collection and GPS Localization for quick, streamlined deliveries.
 class ProofOfDeliveryDialog extends ConsumerStatefulWidget {
   final OrderEntity order;
   final VoidCallback onDelivered;
@@ -24,20 +21,13 @@ class ProofOfDeliveryDialog extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ProofOfDeliveryDialog> createState() => _ProofOfDeliveryDialogState();
+  ConsumerState<ProofOfDeliveryDialog> createState() =>
+      _ProofOfDeliveryDialogState();
 }
 
 class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
-  int _currentStep = 0;
   late TextEditingController _cashController;
   int _collectedCentimes = 0;
-
-  // Signature
-  late SignatureController _sigController;
-
-  // Photo
-  Uint8List? _photoBytes;
-  bool _isCompressing = false;
 
   // GPS Stamp
   Position? _stampedPosition;
@@ -53,18 +43,12 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
     _cashController = TextEditingController(
       text: (widget.order.totalAmountCentimes / 100.0).toStringAsFixed(0),
     );
-    _sigController = SignatureController(
-      penStrokeWidth: 3,
-      penColor: Colors.black,
-      exportBackgroundColor: Colors.white,
-    );
     _captureGpsStamp();
   }
 
   @override
   void dispose() {
     _cashController.dispose();
-    _sigController.dispose();
     super.dispose();
   }
 
@@ -73,72 +57,23 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
     try {
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 6),
+        timeLimit: const Duration(seconds: 5),
       );
       _stampedPosition = pos;
 
       try {
-        final placemarks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+        final placemarks =
+            await placemarkFromCoordinates(pos.latitude, pos.longitude);
         if (placemarks.isNotEmpty) {
           final p = placemarks.first;
-          _stampedAddress = '${p.street ?? ""}, ${p.locality ?? ""}, ${p.administrativeArea ?? ""}';
+          _stampedAddress =
+              '${p.street ?? ""}, ${p.locality ?? ""}, ${p.administrativeArea ?? ""}';
         }
       } catch (_) {}
-    } catch (_) {} finally {
+    } catch (_) {
+      // Best-effort GPS capture: does not crash or block delivery
+    } finally {
       if (mounted) setState(() => _isFetchingGps = false);
-    }
-  }
-
-   Future<void> _pickDeliveryPhoto(ImageSource source) async {
-    try {
-      final picker = ImagePicker();
-      
-      // Let ImagePicker compress directly using native OS pipeline (cross-platform safe)
-      final picked = await picker.pickImage(
-        source: source,
-        maxWidth: 1200,
-        maxHeight: 1200,
-        imageQuality: 70, // Compresses image directly without crashing
-      );
-
-      if (picked == null) return;
-
-      setState(() => _isCompressing = true);
-
-      Uint8List bytes = await picked.readAsBytes();
-
-      // Graceful fallback for flutter_image_compress
-      try {
-        final compressed = await FlutterImageCompress.compressWithList(
-          bytes,
-          minHeight: 800,
-          minWidth: 800,
-          quality: 70,
-        );
-        if (compressed.isNotEmpty) {
-          bytes = compressed;
-        }
-      } catch (e) {
-        debugPrint('Image compression skipped/fallback: $e');
-      }
-
-      if (mounted) {
-        setState(() {
-          _photoBytes = bytes;
-          _isCompressing = false;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error picking image: $e');
-      if (mounted) {
-        setState(() => _isCompressing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تعذر التقاط أو اختيار الصورة: $e'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
     }
   }
 
@@ -147,34 +82,20 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
 
     try {
       final user = ref.read(authStateProvider);
-      if (user == null) throw Exception('غير مسجل');
+      if (user == null) throw Exception('غير مسجل الدخول');
 
       final orderRepo = ref.read(orderRepositoryProvider);
       final clientId = const Uuid().v4();
-
-      // Export signature if drawn
-      String? sigBase64;
-      if (_sigController.isNotEmpty) {
-        final sigBytes = await _sigController.toPngBytes();
-        if (sigBytes != null) {
-          sigBase64 = base64Encode(sigBytes);
-        }
-      }
-
-      String? photoBase64;
-      if (_photoBytes != null) {
-        photoBase64 = base64Encode(_photoBytes!);
-      }
 
       await orderRepo.completeDeliveryWithProof(
         driverId: user.id,
         orderId: widget.order.id,
         collectedCashCentimes: _collectedCentimes,
-        signatureBase64: sigBase64,
-        photoBase64: photoBase64,
         deliveryLat: _stampedPosition?.latitude,
         deliveryLng: _stampedPosition?.longitude,
-        notes: _stampedAddress != null ? 'تم التسليم عند: $_stampedAddress' : null,
+        notes: _stampedAddress != null
+            ? 'تم التسليم عند: $_stampedAddress'
+            : null,
         clientId: clientId,
       );
 
@@ -184,7 +105,8 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const Text('تم تأكيد التسليم، حفظ إثبات التوصيل، وترحيل المبلغ لعهدتك بنجاح!'),
+            content: const Text(
+                'تم تأكيد التسليم بنجاح وترحيل المبلغ المحصل لعهدتك!'),
             backgroundColor: context.appColors.success,
           ),
         );
@@ -206,14 +128,20 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final orderNum =
+        widget.order.orderNumber?.toString() ?? widget.order.id.substring(0, 8);
 
     return Dialog(
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(16))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.all(Radius.circular(16)),
+      ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 680),
+        constraints: const BoxConstraints(maxWidth: 480),
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               // Header
@@ -222,323 +150,285 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.verified_rounded, color: Colors.green),
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.local_shipping_rounded,
+                          color: Colors.green,
+                          size: 20,
+                        ),
+                      ),
                       const SizedBox(width: AppSpacing.sm),
                       Text(
-                        'إثبات وتسليم الطلب #${widget.order.orderNumber ?? widget.order.id.substring(0, 8)}',
-                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                        'تسليم الطلب #$orderNum',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
-                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                    visualDensity: VisualDensity.compact,
+                  ),
                 ],
               ),
-              const Divider(),
+              const Divider(height: 24),
 
-              // Stepper tabs indicator
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildStepHeader(0, '1. التحصيل النقد', Icons.payments_outlined),
-                  _buildStepHeader(1, '2. توقيع الزبون', Icons.draw_outlined),
-                  _buildStepHeader(2, '3. صورة وموقع', Icons.camera_alt_outlined),
-                ],
-              ),
-              const Divider(),
-
-              // Step Body
-              Expanded(
-                child: SingleChildScrollView(
-                  child: _buildCurrentStepBody(theme),
+              // 1. Customer & Order Summary Card
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF1E1A16)
+                      : const Color(0xFFF9F6F0),
+                  borderRadius: AppRadius.mdAll,
+                  border: Border.all(
+                    color: const Color(0xFFD4AF37).withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'المبلغ المطلوب:',
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        DzdPriceTag.lg(
+                          centimes: widget.order.totalAmountCentimes,
+                          gold: true,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(Icons.person_outline, size: 16),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            widget.order.customerName ??
+                                widget.order.customerSnapshot?['customer_name'] ??
+                                widget.order.customerSnapshot?['store_name'] ??
+                                'زبون',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (widget.order.customerPhone != null ||
+                            widget.order.customerSnapshot?['phone'] != null) ...[
+                          const SizedBox(width: 8),
+                          const Icon(Icons.phone_outlined, size: 14),
+                          const SizedBox(width: 2),
+                          Text(
+                            widget.order.customerPhone ??
+                                widget.order.customerSnapshot!['phone'] as String,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
               ),
 
-              const Divider(),
-              // Navigation Buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              const SizedBox(height: AppSpacing.md),
+
+              // 2. Cash Collection Field & Fast Chips
+              TextField(
+                controller: _cashController,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: 'المبلغ المحصل نقدًا (دج) *',
+                  prefixIcon: const Icon(Icons.payments_outlined),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  filled: true,
+                ),
+                onChanged: (val) {
+                  final clean = val.replaceAll(' ', '').trim();
+                  final parsed = double.tryParse(clean) ?? 0.0;
+                  setState(() {
+                    _collectedCentimes = (parsed * 100).round();
+                  });
+                },
+              ),
+
+              const SizedBox(height: 8),
+
+              Wrap(
+                spacing: AppSpacing.sm,
                 children: [
-                  if (_currentStep > 0)
-                    OutlinedButton.icon(
-                      onPressed: () => setState(() => _currentStep -= 1),
-                      icon: const Icon(Icons.arrow_back),
-                      label: const Text('السابق'),
-                    )
-                  else
-                    const SizedBox.shrink(),
-                  if (_currentStep < 2)
-                    FilledButton.icon(
-                      onPressed: () => setState(() => _currentStep += 1),
-                      icon: const Icon(Icons.arrow_forward),
-                      label: const Text('التالي'),
-                    )
-                  else
-                    FilledButton.icon(
-                      onPressed: _isSubmitting ? null : _finalizeDelivery,
-                      icon: _isSubmitting
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
-                          : const Icon(Icons.check_circle),
-                      label: Text(_isSubmitting ? 'جاري التأكيد...' : 'تأكيد التسليم النهائي'),
+                  ActionChip(
+                    avatar: const Icon(Icons.check_circle_outline, size: 16),
+                    label: const Text('المبلغ كاملاً'),
+                    onPressed: () {
+                      _cashController.text =
+                          (widget.order.totalAmountCentimes / 100)
+                              .toStringAsFixed(0);
+                      setState(() =>
+                          _collectedCentimes = widget.order.totalAmountCentimes);
+                    },
+                    backgroundColor: isDark
+                        ? const Color(0xFF2A2215)
+                        : const Color(0xFFF3E8CE),
+                  ),
+                  ActionChip(
+                    avatar: const Icon(Icons.history_toggle_off, size: 16),
+                    label: const Text('دفع لاحقاً (على الحساب)'),
+                    onPressed: () {
+                      _cashController.text = '0';
+                      setState(() => _collectedCentimes = 0);
+                    },
+                    backgroundColor: isDark
+                        ? const Color(0xFF241B18)
+                        : const Color(0xFFF5E4E0),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: AppSpacing.md),
+
+              // 3. Location / GPS Geotag Stamp
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF141A24)
+                      : const Color(0xFFEDF4FC),
+                  borderRadius: AppRadius.mdAll,
+                  border: Border.all(
+                    color: Colors.blue.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    if (_isFetchingGps) ...[
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator.adaptive(
+                          strokeWidth: 2,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'جاري تحديد الموقع الجغرافي تلقائياً...',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ] else if (_stampedPosition != null) ...[
+                      const Icon(
+                        Icons.my_location_rounded,
+                        color: Colors.green,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'الموقع: ${_stampedPosition!.latitude.toStringAsFixed(4)}, ${_stampedPosition!.longitude.toStringAsFixed(4)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: Colors.green,
+                              ),
+                            ),
+                            if (_stampedAddress != null)
+                              Text(
+                                _stampedAddress!,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  fontSize: 11,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ] else ...[
+                      const Icon(
+                        Icons.location_off_rounded,
+                        color: Colors.orange,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'لم يتم التقاط الموقع بدقة',
+                          style: TextStyle(fontSize: 12, color: Colors.orange),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _captureGpsStamp,
+                        child: const Text('تحديث', style: TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: AppSpacing.lg),
+
+              // Action Buttons
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('إلغاء'),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.green.shade700,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
+                        vertical: 12,
+                      ),
                     ),
+                    onPressed: _isSubmitting ? null : _finalizeDelivery,
+                    icon: _isSubmitting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator.adaptive(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.done_all_rounded),
+                    label: Text(
+                      _isSubmitting
+                          ? 'جاري التسليم...'
+                          : 'تأكيد التسليم وترحيل العهدة',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 ],
               ),
             ],
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildStepHeader(int stepIndex, String title, IconData icon) {
-    final isSelected = _currentStep == stepIndex;
-    final isPassed = _currentStep > stepIndex;
-
-    return InkWell(
-      onTap: () => setState(() => _currentStep = stepIndex),
-      borderRadius: AppRadius.smAll,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          children: [
-            Icon(
-              isPassed ? Icons.check_circle : icon,
-              size: 16,
-              color: isSelected ? Colors.blue : (isPassed ? Colors.green : Colors.grey),
-            ),
-            const SizedBox(width: 4),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? Colors.blue : (isPassed ? Colors.green : Colors.grey),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCurrentStepBody(ThemeData theme) {
-    switch (_currentStep) {
-      case 0:
-        return _buildCashStep(theme);
-      case 1:
-        return _buildSignatureStep(theme);
-      case 2:
-        return _buildPhotoAndGpsStep(theme);
-      default:
-        return const SizedBox.shrink();
-    }
-  }
-
-  Widget _buildCashStep(ThemeData theme) {
-    final isDark = theme.brightness == Brightness.dark;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainer,
-            borderRadius: AppRadius.mdAll,
-          ),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('المبلغ المطلوب للطلب:'),
-                  DzdPriceTag(centimes: widget.order.totalAmountCentimes, style: const TextStyle(fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('الزبون: ${widget.order.customerName ?? widget.order.customerSnapshot?['customer_name'] ?? "زبون"}', style: theme.textTheme.bodySmall),
-                  if (widget.order.customerPhone != null)
-                    Text('الهاتف: ${widget.order.customerPhone}', style: theme.textTheme.bodySmall),
-                ],
-              ),
-            ],
-          ),
-        ),
-        AppSpacing.gapLg,
-        TextField(
-          controller: _cashController,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'المبلغ المحصل نقدًا من الزبون (دج) *',
-            prefixIcon: Icon(Icons.payments_outlined),
-          ),
-          onChanged: (val) {
-            final clean = val.replaceAll(' ', '').trim();
-            final parsed = double.tryParse(clean) ?? 0.0;
-            setState(() {
-              _collectedCentimes = (parsed * 100).round();
-            });
-          },
-        ),
-        AppSpacing.gapMd,
-        Wrap(
-          spacing: AppSpacing.sm,
-          children: [
-            ActionChip(
-              label: const Text('المبلغ كاملاً'),
-              onPressed: () {
-                _cashController.text = (widget.order.totalAmountCentimes / 100).toStringAsFixed(0);
-                setState(() => _collectedCentimes = widget.order.totalAmountCentimes);
-              },
-              backgroundColor: isDark ? const Color(0xFF1A1400) : const Color(0xFFD4AF37)
-            ),
-            ActionChip(
-              label: const Text('دفع لاحقاً (على الحساب)'),
-              onPressed: () {
-                _cashController.text = '0';
-                setState(() => _collectedCentimes = 0);
-              },
-              backgroundColor: isDark ? const Color(0xFF1A1400) : const Color(0xFFD4AF37)
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSignatureStep(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Text('توقيع الزبون على الشاشة لإثبات الاستلام (Proof of Delivery Signature):', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-        AppSpacing.gapSm,
-        Container(
-          height: 180,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey.shade400, width: 1.5),
-            borderRadius: AppRadius.mdAll,
-            color: Colors.white,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Signature(
-            controller: _sigController,
-            backgroundColor: Colors.white,
-          ),
-        ),
-        AppSpacing.gapSm,
-        Align(
-          alignment: AlignmentDirectional.centerEnd,
-          child: TextButton.icon(
-            onPressed: () => _sigController.clear(),
-            icon: const Icon(Icons.clear, size: 16),
-            label: const Text('مسح التوقيع وإعادة المحاولة'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPhotoAndGpsStep(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Text('صورة إثبات التسليم (Photo Proof):', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-        AppSpacing.gapSm,
-        if (_photoBytes != null) ...[
-          Container(
-            height: 160,
-            decoration: BoxDecoration(
-              borderRadius: AppRadius.mdAll,
-              border: Border.all(color: Colors.green),
-              image: DecorationImage(image: MemoryImage(_photoBytes!), fit: BoxFit.cover),
-            ),
-          ),
-          AppSpacing.gapSm,
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              TextButton.icon(
-                onPressed: () => setState(() => _photoBytes = null),
-                icon: const Icon(Icons.delete_outline, color: Colors.red, size: 16),
-                label: const Text('حذف الصورة', style: TextStyle(color: Colors.red)),
-              ),
-            ],
-          ),
-        ] else if (_isCompressing) ...[
-          const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()))
-        ] else ...[
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _pickDeliveryPhoto(ImageSource.camera),
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text('التقاط بالكاميرا'),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _pickDeliveryPhoto(ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library),
-                  label: const Text('من المعرض'),
-                ),
-              ),
-            ],
-          ),
-        ],
-        AppSpacing.gapLg,
-        const Text('توثيق الموقع الجغرافي (GPS Geotag):', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-        AppSpacing.gapSm,
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            color: Colors.blue.withAlpha(20),
-            borderRadius: AppRadius.mdAll,
-            border: Border.all(color: Colors.blue.withAlpha(60)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_isFetchingGps)
-                const Row(
-                  children: [
-                    SizedBox(width: 16, height: 16, child: CircularProgressIndicator.adaptive(strokeWidth: 2)),
-                    SizedBox(width: 8),
-                    Text('جاري تحديد الإحداثيات الحالية...'),
-                  ],
-                )
-              else if (_stampedPosition != null) ...[
-                Row(
-                  children: [
-                    const Icon(Icons.check_circle, color: Colors.green, size: 18),
-                    const SizedBox(width: 6),
-                    Text(
-                      'إحداثيات GPS: (${_stampedPosition!.latitude.toStringAsFixed(5)}, ${_stampedPosition!.longitude.toStringAsFixed(5)})',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                    ),
-                  ],
-                ),
-                if (_stampedAddress != null) ...[
-                  const SizedBox(height: 4),
-                  Text('العنوان المقارب: $_stampedAddress', style: theme.textTheme.bodySmall),
-                ],
-              ] else
-                Row(
-                  children: [
-                    const Icon(Icons.location_off, color: Colors.orange, size: 18),
-                    const SizedBox(width: 6),
-                    const Text('تعذر جلب إحداثيات GPS بدقة.', style: TextStyle(fontSize: 12)),
-                    const Spacer(),
-                    TextButton(onPressed: _captureGpsStamp, child: const Text('إعادة المحاولة')),
-                  ],
-                ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }
