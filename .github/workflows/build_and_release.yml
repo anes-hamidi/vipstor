@@ -38,12 +38,22 @@ env:
 
 jobs:
   # ============================================================================
-  # 1. Build Android Apps & Customer Web (Ubuntu Runner)
+  # 1. Build Staff App Android APK (Ubuntu Runner)
   # ============================================================================
-  build-mobile-and-web:
-    name: Build Android & Web
+  build-staff-android:
+    name: Build Staff App APK
     runs-on: ubuntu-latest
+    if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
     steps:
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android/sdk/ndk
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
@@ -59,56 +69,20 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Enable Flutter Web
-        run: flutter config --enable-web
-
-      # --- Build Staff App Android APK ---
       - name: Build Staff App APK
-        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
         run: |
           cd apps/staff_app
           flutter pub get
           flutter build apk --release --build-number=${{ github.run_number }}
 
       - name: Archive Staff App APK
-        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: staff-app-android-apk
           path: apps/staff_app/build/app/outputs/flutter-apk/app-release.apk
 
-      # --- Build Customer App Android APK ---
-      - name: Build Customer App APK
-        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
-        run: |
-          cd apps/customer_app
-          flutter pub get
-          flutter build apk --release --build-number=${{ github.run_number }}
-
-      - name: Archive Customer App APK
-        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
-        uses: actions/upload-artifact@v4
-        with:
-          name: customer-app-android-apk
-          path: apps/customer_app/build/app/outputs/flutter-apk/app-release.apk
-
-      # --- Build Customer App Web ---
-      - name: Build Customer App Web
-        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
-        run: |
-          cd apps/customer_app
-          flutter build web --release --build-number=${{ github.run_number }}
-
-      - name: Archive Customer App Web
-        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
-        uses: actions/upload-artifact@v4
-        with:
-          name: customer-app-web
-          path: apps/customer_app/build/web
-
-      # --- Optional Upload to Supabase Storage ---
       - name: Upload Staff App APK to Supabase
-        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != '' && (github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push')
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
         run: |
           APK_PATH="apps/staff_app/build/app/outputs/flutter-apk/app-release.apk"
           FILE_NAME="staff_app_b${{ github.run_number }}.apk"
@@ -144,7 +118,92 @@ jobs:
           JSON
 
   # ============================================================================
-  # 2. Build Staff App Windows Executable (Windows Runner)
+  # 2. Build Customer App Android APK (Ubuntu Runner)
+  # ============================================================================
+  build-customer-android:
+    name: Build Customer App APK
+    runs-on: ubuntu-latest
+    if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
+    steps:
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android/sdk/ndk
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Build Customer App APK
+        run: |
+          cd apps/customer_app
+          flutter pub get
+          flutter build apk --release --build-number=${{ github.run_number }}
+
+      - name: Archive Customer App APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-app-android-apk
+          path: apps/customer_app/build/app/outputs/flutter-apk/app-release.apk
+
+  # ============================================================================
+  # 3. Build Customer App Web (Ubuntu Runner)
+  # ============================================================================
+  build-customer-web:
+    name: Build Customer App Web
+    runs-on: ubuntu-latest
+    if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
+    steps:
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android/sdk/ndk
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Enable Flutter Web
+        run: flutter config --enable-web
+
+      - name: Build Customer App Web
+        run: |
+          cd apps/customer_app
+          flutter pub get
+          flutter build web --release --build-number=${{ github.run_number }}
+
+      - name: Archive Customer App Web
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-app-web
+          path: apps/customer_app/build/web
+
+  # ============================================================================
+  # 4. Build Staff App Windows Executable (Windows Runner)
   # ============================================================================
   build-staff-windows:
     name: Build Staff App Windows
