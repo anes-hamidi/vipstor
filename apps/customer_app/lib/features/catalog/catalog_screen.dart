@@ -7,6 +7,7 @@ import '../../providers/customer_providers.dart';
 import '../cart/cart_screen.dart';
 import '../orders/my_orders_screen.dart';
 import '../profile/profile_form_screen.dart';
+import '../common/widgets/app_update_dialog.dart';
 
 class CatalogScreen extends ConsumerStatefulWidget {
   final VoidCallback? onExit;
@@ -19,6 +20,45 @@ class CatalogScreen extends ConsumerStatefulWidget {
 class _CatalogScreenState extends ConsumerState<CatalogScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
+  bool _hasCheckedUpdate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_hasCheckedUpdate) {
+        _hasCheckedUpdate = true;
+        _checkForUpdate();
+      }
+    });
+  }
+
+  Future<void> _checkForUpdate({bool manual = false}) async {
+    try {
+      final updateService = ref.read(customerAppUpdateServiceProvider);
+      final res = await updateService.checkForUpdate();
+      if (!mounted) return;
+
+      if (res.hasUpdate) {
+        await AppUpdateDialog.show(
+          context,
+          release: res.newRelease!,
+          currentVersion: res.currentVersion,
+          currentBuild: res.currentBuild,
+          updateService: updateService,
+        );
+      } else if (manual) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('أنت تستخدم أحدث إصدار من التطبيق.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[CatalogScreen] Update check failed: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -57,7 +97,7 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                     icon: const Icon(Icons.arrow_back_rounded),
                     onPressed: widget.onExit,
                   ),
-                const SizedBox(width: AppSpacing.md),
+                const SizedBox(width: AppSpacing.sm),
                 // VIP logo chip
                 const DecoratedBox(
                   decoration: BoxDecoration(
@@ -68,20 +108,25 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                   child: Padding(
                     padding: EdgeInsets.all(5),
                     child: Icon(Icons.storefront_rounded,
-                        size: 16, color: Color(0xFF1A1400)),
+                        size: 15, color: Color(0xFF1A1400)),
                   ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
+                const SizedBox(width: AppSpacing.xs),
                 Expanded(
                   child: Text(
                     'متجر الجملة VIP',
                     style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold, letterSpacing: 0.2),
+                        fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 0.2),
                   ),
                 ),
                 IconButton(
+                  tooltip: 'التحقق من التحديثات',
+                  icon: const Icon(Icons.system_update_alt_rounded, size: 20),
+                  onPressed: () => _checkForUpdate(manual: true),
+                ),
+                IconButton(
                   tooltip: 'الملف الشخصي',
-                  icon: const Icon(Icons.person_pin_circle_outlined),
+                  icon: const Icon(Icons.person_pin_circle_outlined, size: 20),
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(
                         builder: (_) =>
@@ -90,14 +135,14 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                 ),
                 IconButton(
                   tooltip: 'طلبياتي',
-                  icon: const Icon(Icons.receipt_long_outlined),
+                  icon: const Icon(Icons.receipt_long_outlined, size: 20),
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const MyOrdersScreen()),
                   ),
                 ),
                 IconButton(
                   tooltip: 'تحديث',
-                  icon: const Icon(Icons.refresh_rounded),
+                  icon: const Icon(Icons.refresh_rounded, size: 20),
                   onPressed: () =>
                       ref.invalidate(customerLiveProductsProvider),
                 ),
@@ -109,7 +154,7 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
       bottomNavigationBar: const _StickyCartBar(),
       body: ContentConstrainedBox.dashboard(
         padding: const EdgeInsetsDirectional.symmetric(
-            horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+            horizontal: 8, vertical: 6),
         child: productsAsync.when(
           loading: () => const _CatalogSkeleton(),
           error: (err, _) => AppStates.error(
@@ -131,15 +176,16 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
               children: [
                 // ── Greeting banner ───────────────────────────────────
                 _GreetingBanner(profile: profile, isDark: isDark, theme: theme),
-                const SizedBox(height: AppSpacing.sm),
+                const SizedBox(height: 6),
 
-                // ── Search ────────────────────────────────────────────
+                // ── Search Bar ────────────────────────────────────────
                 Container(
+                  height: 42,
                   decoration: BoxDecoration(
                     color: isDark
                         ? const Color(0xFF1A1814)
                         : const Color(0xFFFFFDF8),
-                    borderRadius: AppRadius.lgAll,
+                    borderRadius: AppRadius.mdAll,
                     border: Border.all(
                       color: const Color(0xFFD4AF37)
                           .withValues(alpha: isDark ? 0.22 : 0.18),
@@ -151,12 +197,14 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                   child: TextField(
                     controller: _searchCtrl,
                     onChanged: (v) => setState(() => _query = v),
+                    style: const TextStyle(fontSize: 12.5),
                     decoration: InputDecoration(
-                      hintText: 'ابحث عن منتج في الكتالوج...',
-                      prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                      hintText: 'ابحث عن منتج...',
+                      hintStyle: TextStyle(fontSize: 12, color: cs.onSurfaceVariant.withValues(alpha: 0.7)),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 18),
                       suffixIcon: _query.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(Icons.close, size: 18),
+                              icon: const Icon(Icons.close, size: 16),
                               onPressed: () {
                                 _searchCtrl.clear();
                                 setState(() => _query = '');
@@ -164,35 +212,34 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                             )
                           : null,
                       border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding: const EdgeInsetsDirectional.symmetric(
-                          horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                   ),
                 ),
-                const SizedBox(height: AppSpacing.xs),
+                const SizedBox(height: 5),
+
+                // Count badge
                 Row(
                   children: [
                     Container(
                       width: 3,
-                      height: 12,
+                      height: 10,
                       decoration: const BoxDecoration(
                         gradient: AppGradients.goldLuminous,
                         borderRadius: AppRadius.fullAll,
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.xs),
+                    const SizedBox(width: 4),
                     Text(
                       '${filtered.length} منتج متوفر بالجملة',
                       style: theme.textTheme.bodySmall
-                          ?.copyWith(color: cs.onSurfaceVariant),
+                          ?.copyWith(fontSize: 10.5, color: cs.onSurfaceVariant),
                     ),
                   ],
                 ),
-                const SizedBox(height: AppSpacing.xs),
+                const SizedBox(height: 5),
 
-                // ── Modern Responsive Products Grid ─────────────────────
+                // ── 3-Column Compact Products Grid ───────────────────
                 Expanded(
                   child: filtered.isEmpty
                       ? AppStates.empty(
@@ -208,25 +255,26 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                       : LayoutBuilder(
                           builder: (context, constraints) {
                             final width = constraints.maxWidth;
-                            final int crossAxisCount = width < 480
-                                ? 2
-                                : width < 780
-                                    ? 3
-                                    : width < 1100
-                                        ? 4
-                                        : 5;
-                            final double mainAxisExtent = width < 480 ? 295 : 315;
+                            // 3 cards per row on mobile screens, 4-6 on tablets/desktop
+                            final int crossAxisCount = width < 550
+                                ? 3
+                                : width < 850
+                                    ? 4
+                                    : width < 1200
+                                        ? 5
+                                        : 6;
+                            final double mainAxisExtent = width < 550 ? 178 : 190;
 
                             return GridView.builder(
                               padding: const EdgeInsets.only(bottom: AppSpacing.xl),
                               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: crossAxisCount,
                                 mainAxisExtent: mainAxisExtent,
-                                crossAxisSpacing: width < 480 ? 10 : AppSpacing.md,
-                                mainAxisSpacing: width < 480 ? 12 : AppSpacing.md,
+                                crossAxisSpacing: 6,
+                                mainAxisSpacing: 8,
                               ),
                               itemCount: filtered.length,
-                              itemBuilder: (_, i) => _ProductCard(product: filtered[i]),
+                              itemBuilder: (_, i) => _CompactProductCard(product: filtered[i]),
                             );
                           },
                         ),
@@ -253,58 +301,53 @@ class _GreetingBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF191612) : const Color(0xFFFFFBF0),
-        borderRadius: AppRadius.mdAll,
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: const Color(0xFFD4AF37).withValues(alpha: isDark ? 0.20 : 0.16),
-          width: 1,
+          width: 0.8,
         ),
       ),
       child: Row(
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
                 Text(
-                  'أهلاً بك في متجر الجملة',
+                  'مرحباً، ',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: isDark
-                        ? const Color(0xFFB8A882)
-                        : const Color(0xFF9A8A60),
+                    fontSize: 11,
+                    color: isDark ? const Color(0xFFB8A882) : const Color(0xFF9A8A60),
                   ),
                 ),
-                Text(
-                  profile.name.isNotEmpty ? profile.name : 'زبون جملة VIP',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold),
+                Expanded(
+                  child: Text(
+                    profile.name.isNotEmpty ? profile.name : 'زبون جملة VIP',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11.5,
+                    ),
+                  ),
                 ),
               ],
             ),
           ),
           const GoldBadge(label: 'VIP', icon: Icons.diamond_outlined, small: true),
-          const SizedBox(width: AppSpacing.sm),
-          Icon(
-            Icons.edit_location_alt_outlined,
-            size: 16,
-            color: isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27),
-          ),
         ],
       ),
     );
   }
 }
 
-// ── Modern Product Card ───────────────────────────────────────────────────────
+// ── Ultra-Compact Product Card (3 per row on mobile, no layout bugs) ──────────
 
-class _ProductCard extends ConsumerWidget {
+class _CompactProductCard extends ConsumerWidget {
   final ProductEntity product;
-  const _ProductCard({required this.product});
+  const _CompactProductCard({required this.product});
 
   void _showProductDetails(BuildContext context, int wholesalePrice, bool isAvailable) {
     showModalBottomSheet(
@@ -333,302 +376,282 @@ class _ProductCard extends ConsumerWidget {
     final isDark = theme.brightness == Brightness.dark;
     final notifier = ref.read(customerCartProvider.notifier);
 
-    // Only default Wholesale Price tier
+    // Only Wholesale Price Tier
     final wholesale = product.getPriceForQuantity(PriceTier.wholesale, 1);
     final isAvailable = product.availableQty > 0;
     final canAddMore = qty < product.availableQty;
     final inCart = qty > 0;
 
-    return LuxuryCard(
-      selected: inCart,
-      padding: EdgeInsets.zero,
-      onTap: () => _showProductDetails(context, wholesale, isAvailable),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ── Product Visual Section (Top ~44% of card) ─────────────────
-          Expanded(
-            flex: 12,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
-                  child: _ProductImage(product: product, cs: cs),
-                ),
-                // Gradient vignette for high readability
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.35),
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.20),
-                        ],
-                        stops: const [0.0, 0.45, 1.0],
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF171512) : const Color(0xFFFFFDF8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: inCart
+              ? const Color(0xFFD4AF37)
+              : const Color(0xFFD4AF37).withValues(alpha: isDark ? 0.22 : 0.16),
+          width: inCart ? 1.5 : 1.0,
+        ),
+        boxShadow: inCart
+            ? const [AppShadows.goldGlowSm]
+            : (isDark ? AppShadows.cardSoftDark : AppShadows.cardSoftLight),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => _showProductDetails(context, wholesale, isAvailable),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Top Image Container (80px height) ─────────────────
+              SizedBox(
+                height: 80,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ClipRRect(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
+                      child: _ProductImage(product: product, cs: cs),
+                    ),
+                    // Vignette gradient
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.black.withValues(alpha: 0.35),
+                              Colors.transparent,
+                            ],
+                            stops: const [0.0, 0.6],
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-                // Availability Badge (Top Start - NO exact stock count)
-                PositionedDirectional(
-                  top: 7,
-                  start: 7,
-                  child: _AvailabilityBadge(isAvailable: isAvailable),
-                ),
-                // In-Cart Badge (Top End)
-                if (inCart)
-                  PositionedDirectional(
-                    top: 7,
-                    end: 7,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                      decoration: const BoxDecoration(
-                        gradient: AppGradients.gold,
-                        borderRadius: AppRadius.pillAll,
-                        boxShadow: [AppShadows.goldGlowSm],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.shopping_bag_rounded, size: 10, color: Color(0xFF1A1400)),
-                          const SizedBox(width: 3),
-                          Text(
-                            '$qty',
+                    // Availability Dot (Top-Start: NO numeric quantity)
+                    PositionedDirectional(
+                      top: 5,
+                      start: 5,
+                      child: _AvailabilityDot(isAvailable: isAvailable),
+                    ),
+                    // In-Cart Badge (Top-End)
+                    if (inCart)
+                      PositionedDirectional(
+                        top: 5,
+                        end: 5,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          decoration: const BoxDecoration(
+                            gradient: AppGradients.gold,
+                            borderRadius: AppRadius.pillAll,
+                            boxShadow: [BoxShadow(color: Color(0x30000000), blurRadius: 2)],
+                          ),
+                          child: Text(
+                            'x$qty',
                             style: const TextStyle(
                               color: Color(0xFF1A1400),
-                              fontSize: 10,
+                              fontSize: 9,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
+                  ],
+                ),
+              ),
 
-          // ── Details & Action Section (Bottom ~56% of card) ─────────────
-          Expanded(
-            flex: 15,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(9, 8, 9, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // Title + Pack size
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
+              // ── Details & Action Section (Remaining explicit space) ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(6, 6, 6, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Product Title (Fixed 30px height for 2 lines)
+                    SizedBox(
+                      height: 30,
+                      child: Text(
                         product.nameAr,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
+                        style: theme.textTheme.bodySmall?.copyWith(
                           fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                          fontSize: 10.5,
                           height: 1.25,
                           color: isAvailable ? null : cs.onSurface.withValues(alpha: 0.45),
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      if (product.nameFr.isNotEmpty)
+                    ),
+                    const SizedBox(height: 3),
+
+                    // Wholesale Price Row (Only Default Wholesale Tier)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
                         Text(
-                          product.nameFr,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
+                          'جملة',
+                          style: TextStyle(
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? const Color(0xFFB8A882) : const Color(0xFF8A7A52),
+                          ),
+                        ),
+                        DzdPriceTag.sm(
+                          centimes: wholesale,
+                          gold: true,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
                             fontSize: 11,
                           ),
                         ),
-                      if (product.packSize > 1) ...[
-                        const SizedBox(height: 3),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF26221A) : const Color(0xFFF4ECE0),
-                            borderRadius: AppRadius.xsAll,
-                            border: Border.all(
-                              color: const Color(0xFFD4AF37).withValues(alpha: 0.28),
-                              width: 0.5,
-                            ),
-                          ),
-                          child: Text(
-                            '${product.unit} · ${product.packSize} قطع في العلبة',
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7B1C),
-                            ),
-                          ),
-                        ),
                       ],
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 5),
 
-                  // Price Block: DEFAULT WHOLESALE PRICE ONLY
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'سعر الجملة',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? const Color(0xFFB8A882) : const Color(0xFF8A7A52),
-                        ),
-                      ),
-                      const SizedBox(height: 1),
-                      DzdPriceTag(
-                        centimes: wholesale,
-                        gold: true,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14.5,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  // Bottom Action Button / Stepper
-                  SizedBox(
-                    height: 34,
-                    child: !isAvailable
-                        ? Container(
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: cs.surfaceContainerHighest.withValues(alpha: 0.50),
-                              borderRadius: AppRadius.smAll,
-                            ),
-                            child: Text(
-                              'نفذت الكمية',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: cs.onSurfaceVariant.withValues(alpha: 0.60),
+                    // Compact Action Button (26px height)
+                    SizedBox(
+                      height: 26,
+                      child: !isAvailable
+                          ? Container(
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                                borderRadius: BorderRadius.circular(6),
                               ),
-                            ),
-                          )
-                        : qty == 0
-                            ? GoldButton.icon(
-                                icon: Icons.add_shopping_cart_rounded,
-                                label: 'أضف للطلبية',
-                                compact: true,
-                                width: double.infinity,
-                                onPressed: () => notifier.addProduct(product),
-                              )
-                            : Container(
-                                decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF211D10) : const Color(0xFFFBF4DC),
-                                  borderRadius: AppRadius.smAll,
-                                  border: Border.all(
-                                    color: const Color(0xFFD4AF37).withValues(alpha: 0.50),
-                                    width: 1,
+                              child: Text(
+                                'نفذت الكمية',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
+                                  color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+                                ),
+                              ),
+                            )
+                          : qty == 0
+                              ? InkWell(
+                                  onTap: () => notifier.addProduct(product),
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Container(
+                                    decoration: const BoxDecoration(
+                                      gradient: AppGradients.gold,
+                                      borderRadius: BorderRadius.all(Radius.circular(6)),
+                                    ),
+                                    child: const Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.add_shopping_cart_rounded, size: 12, color: Color(0xFF1A1400)),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'أضف',
+                                          style: TextStyle(
+                                            color: Color(0xFF1A1400),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 10,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              : Container(
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF221E14) : const Color(0xFFFBF4DC),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: const Color(0xFFD4AF37).withValues(alpha: 0.5),
+                                      width: 0.8,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      IconButton(
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                                        icon: Icon(
+                                          qty == 1 ? Icons.delete_outline_rounded : Icons.remove_rounded,
+                                          size: 13,
+                                          color: qty == 1 ? cs.error : const Color(0xFFD4AF37),
+                                        ),
+                                        onPressed: () => notifier.updateQuantity(product.id, qty - 1),
+                                      ),
+                                      Text(
+                                        '$qty',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                          color: isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                                        icon: Icon(
+                                          Icons.add_rounded,
+                                          size: 13,
+                                          color: canAddMore
+                                              ? const Color(0xFFD4AF37)
+                                              : cs.onSurfaceVariant.withValues(alpha: 0.3),
+                                        ),
+                                        onPressed: canAddMore
+                                            ? () => notifier.updateQuantity(product.id, qty + 1)
+                                            : null,
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    IconButton(
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                      icon: Icon(
-                                        qty == 1 ? Icons.delete_outline_rounded : Icons.remove_rounded,
-                                        size: 16,
-                                        color: qty == 1 ? cs.error : const Color(0xFFD4AF37),
-                                      ),
-                                      onPressed: () => notifier.updateQuantity(product.id, qty - 1),
-                                    ),
-                                    Text(
-                                      '$qty',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
-                                        color: isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27),
-                                      ),
-                                    ),
-                                    IconButton(
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                      icon: Icon(
-                                        Icons.add_rounded,
-                                        size: 16,
-                                        color: canAddMore
-                                            ? const Color(0xFFD4AF37)
-                                            : cs.onSurfaceVariant.withValues(alpha: 0.35),
-                                      ),
-                                      onPressed: canAddMore
-                                          ? () => notifier.updateQuantity(product.id, qty + 1)
-                                          : null,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 }
 
-// ── Availability Status Badge (No Quantity Numbers) ───────────────────────────
+// ── Availability Dot / Chip (Compact, No Stock Numbers) ───────────────────────
 
-class _AvailabilityBadge extends StatelessWidget {
+class _AvailabilityDot extends StatelessWidget {
   final bool isAvailable;
-  const _AvailabilityBadge({required this.isAvailable});
+  const _AvailabilityDot({required this.isAvailable});
 
   @override
   Widget build(BuildContext context) {
     if (isAvailable) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
         decoration: BoxDecoration(
           color: const Color(0xE60D5E36), // Rich emerald
-          borderRadius: AppRadius.pillAll,
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color: const Color(0x662ECC71),
-            width: 0.8,
+            width: 0.6,
           ),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x35000000),
-              blurRadius: 4,
-              offset: Offset(0, 1),
-            ),
-          ],
+          boxShadow: const [BoxShadow(color: Color(0x35000000), blurRadius: 2)],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 5,
-              height: 5,
+              width: 4,
+              height: 4,
               decoration: const BoxDecoration(
                 color: Color(0xFF2ECC71),
                 shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 3),
             const Text(
               'متوفر',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 9.5,
+                fontSize: 8,
                 fontWeight: FontWeight.bold,
-                letterSpacing: 0.2,
               ),
             ),
           ],
@@ -636,32 +659,32 @@ class _AvailabilityBadge extends StatelessWidget {
       );
     } else {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
         decoration: BoxDecoration(
-          color: const Color(0xE62A1414), // Muted dark crimson
-          borderRadius: AppRadius.pillAll,
+          color: const Color(0xE62A1414), // Dark crimson
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color: const Color(0x66E74C3C),
-            width: 0.8,
+            width: 0.6,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 5,
-              height: 5,
+              width: 4,
+              height: 4,
               decoration: const BoxDecoration(
                 color: Color(0xFFE74C3C),
                 shape: BoxShape.circle,
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 3),
             const Text(
-              'نفذت الكمية',
+              'نفذ',
               style: TextStyle(
                 color: Color(0xFFFF8A80),
-                fontSize: 9.5,
+                fontSize: 8,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -685,7 +708,7 @@ class _ProductImage extends StatelessWidget {
     final hasPhoto = product.photoUrl != null && product.photoUrl!.isNotEmpty;
 
     return Container(
-      color: cs.surfaceContainerHighest.withValues(alpha: 0.40),
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
       child: hasPhoto
           ? CachedNetworkImage(
               imageUrl: product.photoUrl!,
@@ -705,31 +728,16 @@ class _FallbackPlaceholder extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.inventory_2_outlined,
-            size: 34,
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.35),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            'VIP STORE',
-            style: TextStyle(
-              fontSize: 8.5,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.2,
-              color: const Color(0xFFD4AF37).withValues(alpha: 0.35),
-            ),
-          ),
-        ],
+      child: Icon(
+        Icons.inventory_2_outlined,
+        size: 24,
+        color: const Color(0xFFD4AF37).withValues(alpha: 0.40),
       ),
     );
   }
 }
 
-// ── Product Details Bottom Sheet ──────────────────────────────────────────────
+// ── Full Product Details Bottom Sheet ─────────────────────────────────────────
 
 class _ProductDetailsSheet extends ConsumerWidget {
   final ProductEntity product;
@@ -805,7 +813,7 @@ class _ProductDetailsSheet extends ConsumerWidget {
                     ),
                   ),
                 ),
-                _AvailabilityBadge(isAvailable: isAvailable),
+                _AvailabilityDot(isAvailable: isAvailable),
               ],
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -976,33 +984,33 @@ class _CatalogSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        AppStates.skeleton(height: 52, borderRadius: AppRadius.lgAll),
-        const SizedBox(height: AppSpacing.sm),
-        AppStates.skeleton(height: 44, borderRadius: AppRadius.lgAll),
-        const SizedBox(height: AppSpacing.sm),
+        AppStates.skeleton(height: 38, borderRadius: BorderRadius.circular(10)),
+        const SizedBox(height: 6),
+        AppStates.skeleton(height: 42, borderRadius: AppRadius.mdAll),
+        const SizedBox(height: 6),
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
               final width = constraints.maxWidth;
-              final int crossAxisCount = width < 480
-                  ? 2
-                  : width < 780
-                      ? 3
-                      : width < 1100
-                          ? 4
-                          : 5;
-              final double mainAxisExtent = width < 480 ? 295 : 315;
+              final int crossAxisCount = width < 550
+                  ? 3
+                  : width < 850
+                      ? 4
+                      : width < 1200
+                          ? 5
+                          : 6;
+              final double mainAxisExtent = width < 550 ? 178 : 190;
 
               return GridView.builder(
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: crossAxisCount,
                   mainAxisExtent: mainAxisExtent,
-                  crossAxisSpacing: width < 480 ? 10 : AppSpacing.md,
-                  mainAxisSpacing: width < 480 ? 12 : AppSpacing.md,
+                  crossAxisSpacing: 6,
+                  mainAxisSpacing: 8,
                 ),
                 itemCount: crossAxisCount * 3,
                 itemBuilder: (_, __) =>
-                    AppStates.skeleton(borderRadius: AppRadius.lgAll),
+                    AppStates.skeleton(borderRadius: BorderRadius.circular(12)),
               );
             },
           ),

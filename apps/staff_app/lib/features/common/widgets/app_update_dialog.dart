@@ -390,7 +390,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                               borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                          child:  Text('لاحقاً'),
+                          child:  const Text('لاحقاً'),
                         ),
                       ),
                       const SizedBox(width: 12),

@@ -3,6 +3,17 @@ import 'package:data/data.dart';
 import 'package:domain/domain.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import '../services/app_update_service.dart';
+
+final customerAppUpdateRepositoryProvider = Provider<IAppUpdateRepository>((ref) {
+  final client = ref.watch(customerSupabaseClientProvider);
+  return AppUpdateRepositoryImpl(client: client);
+});
+
+final customerAppUpdateServiceProvider = Provider<AppUpdateService>((ref) {
+  final repo = ref.watch(customerAppUpdateRepositoryProvider);
+  return AppUpdateService(repository: repo, appType: 'customer_app');
+});
 
 final customerSupabaseClientProvider = Provider<SupabaseClient>((ref) {
   return Supabase.instance.client;
