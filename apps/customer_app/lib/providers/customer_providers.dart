@@ -5,18 +5,26 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/app_update_service.dart';
 
+
+
+final customerSupabaseClientProvider = Provider<SupabaseClient>((ref) {
+  return Supabase.instance.client;
+});
+
+final customerSupabaseServiceProvider = Provider<SupabaseService>((ref) {
+  final client = ref.watch(customerSupabaseClientProvider);
+  return SupabaseService(client);
+});
+
 final customerAppUpdateRepositoryProvider = Provider<IAppUpdateRepository>((ref) {
   final client = ref.watch(customerSupabaseClientProvider);
-  return AppUpdateRepositoryImpl(client: client);
+  final service = ref.watch(customerSupabaseServiceProvider);
+  return AppUpdateRepositoryImpl(client: client, service: service);
 });
 
 final customerAppUpdateServiceProvider = Provider<AppUpdateService>((ref) {
   final repo = ref.watch(customerAppUpdateRepositoryProvider);
   return AppUpdateService(repository: repo, appType: 'customer_app');
-});
-
-final customerSupabaseClientProvider = Provider<SupabaseClient>((ref) {
-  return Supabase.instance.client;
 });
 
 final _customerDbProvider = Provider<AppDatabase>((ref) {
