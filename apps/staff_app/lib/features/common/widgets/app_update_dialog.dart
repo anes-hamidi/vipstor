@@ -294,7 +294,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                       style: TextStyle(
                         fontSize: 12,
                         height: 1.5,
-                        color: colors.onObsidian.withValues(alpha: 0.85),
+                        color: colors.onGold.withValues(alpha: 0.85),
                       ),
                     ),
                   ),
