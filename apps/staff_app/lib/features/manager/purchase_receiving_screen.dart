@@ -17,6 +17,7 @@ import 'widgets/manager_command_center_view.dart';
 import 'services/pdf_invoice_service.dart';
 import '../common/widgets/headless_barcode_scanner_button.dart';
 import '../common/services/headless_barcode_scanner_service.dart';
+import '../moderator/widgets/staff_profile_edit_sheet.dart';
 
 
 
@@ -61,6 +62,26 @@ class _PurchaseReceivingScreenState
     _tabController.dispose();
     _invoiceNoController.dispose();
     super.dispose();
+  }
+
+  // ─── Profile ──────────────────────────────────────────────────────────────
+
+  Future<void> _openEditProfile() async {
+    final user = ref.read(authStateProvider);
+    if (user == null) return;
+    final updated = await StaffProfileEditSheet.show(
+      context,
+      ref,
+      userId: user.id,
+      name: user.name,
+      phone: user.phone,
+      role: user.role.name,
+      active: user.active,
+      language: user.language,
+    );
+    if (updated == true && mounted) {
+      setState(() {});
+    }
   }
 
   // ─── Dialogs ──────────────────────────────────────────────────────────────
@@ -229,43 +250,68 @@ class _PurchaseReceivingScreenState
           isDark ? const Color(0xFF141210) : const Color(0xFFFBF8F0),
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      title: Row(
-        children: [
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: AppGradients.gold,
-              borderRadius: AppRadius.smAll,
-              boxShadow: [AppShadows.goldGlowSm],
-            ),
-            child: Padding(
-              padding: EdgeInsets.all(6),
-              child: Icon(Icons.storefront_rounded,
-                  size: 18, color: Color(0xFF1A1400)),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'إدارة المخزون والمشتريات',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                  overflow: TextOverflow.ellipsis,
+      title: InkWell(
+        onTap: _openEditProfile,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+          child: Row(
+            children: [
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: AppGradients.gold,
+                  borderRadius: AppRadius.smAll,
+                  boxShadow: [AppShadows.goldGlowSm],
                 ),
-                if (authUser?.name != null)
-                  Text(
-                    authUser!.name,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                  ),
-              ],
-            ),
+                child: Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Icon(Icons.storefront_rounded,
+                      size: 18, color: Color(0xFF1A1400)),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'إدارة المخزون والمشتريات',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (authUser?.name != null)
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              authUser!.name,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.edit_outlined,
+                            size: 12,
+                            color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
       actions: [
+        IconButton(
+          tooltip: 'تعديل الملف الشخصي',
+          icon: const Icon(Icons.manage_accounts_outlined),
+          onPressed: _openEditProfile,
+        ),
         IconButton(
           tooltip: 'تسوية وتعديل المخزون',
           icon: const Icon(Icons.tune_rounded),

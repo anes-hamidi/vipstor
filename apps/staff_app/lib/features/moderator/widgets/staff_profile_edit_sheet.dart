@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
+import 'package:domain/domain.dart';
 import '../../../providers/staff_providers.dart';
+import '../../../router/staff_router.dart';
 
 /// A bottom sheet / dialog for editing any staff member's profile.
 /// Usable from any screen: moderator dashboard, cashier settings,
@@ -69,9 +71,12 @@ class _StaffProfileEditSheetState
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _phone;
+  late final TextEditingController _oldPinCtrl;
+  late final TextEditingController _newPinCtrl;
   late String _role;
   late bool _active;
   late String _language;
+  bool _changePin = false;
   bool _saving = false;
   String? _error;
 
@@ -87,6 +92,8 @@ class _StaffProfileEditSheetState
     super.initState();
     _name = TextEditingController(text: widget.initialName);
     _phone = TextEditingController(text: widget.initialPhone);
+    _oldPinCtrl = TextEditingController();
+    _newPinCtrl = TextEditingController();
     _role = widget.initialRole;
     _active = widget.initialActive;
     _language = widget.initialLanguage;
@@ -96,6 +103,8 @@ class _StaffProfileEditSheetState
   void dispose() {
     _name.dispose();
     _phone.dispose();
+    _oldPinCtrl.dispose();
+    _newPinCtrl.dispose();
     super.dispose();
   }
 
@@ -106,15 +115,51 @@ class _StaffProfileEditSheetState
       _error = null;
     });
     try {
+      final currentUser = ref.read(authStateProvider);
+      final isModerator = currentUser?.role == UserRole.moderator;
+
+      // 1. Change PIN if requested
+      if (_changePin && _oldPinCtrl.text.isNotEmpty && _newPinCtrl.text.isNotEmpty) {
+        if (_newPinCtrl.text.trim().length < 4) {
+          throw Exception('رمز PIN الجديد يجب أن يتكون من 4 أرقام على الأقل');
+        }
+        final authRepo = ref.read(authRepositoryProvider);
+        final pinOk = await authRepo.changePin(
+          userId: widget.userId,
+          oldPin: _oldPinCtrl.text.trim(),
+          newPin: _newPinCtrl.text.trim(),
+        );
+        if (!pinOk) {
+          throw Exception('رمز PIN الحالي غير صحيح، تعذر تغيير الرمز');
+        }
+      }
+
+      // 2. Update user profile in Supabase
       final client = ref.read(supabaseClientProvider);
-      await client.from('users').update({
+      final updateData = <String, dynamic>{
         'name': _name.text.trim(),
         'phone': _phone.text.trim(),
-        'role': _role,
-        'active': _active,
         'language': _language,
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', widget.userId);
+      };
+
+      if (isModerator) {
+        updateData['role'] = _role;
+        updateData['active'] = _active;
+      }
+
+      await client.from('users').update(updateData).eq('id', widget.userId);
+
+      // 3. Immediately update in-memory auth state if editing self
+      if (currentUser != null && currentUser.id == widget.userId) {
+        ref.read(authStateProvider.notifier).state = currentUser.copyWith(
+          name: _name.text.trim(),
+          phone: _phone.text.trim(),
+          language: _language,
+          role: isModerator ? UserRole.fromString(_role) : currentUser.role,
+          active: isModerator ? _active : currentUser.active,
+        );
+      }
 
       ref.invalidate(staffMembersProvider);
       ref.invalidate(liveStaffUsersProvider);
@@ -132,11 +177,13 @@ class _StaffProfileEditSheetState
     final theme = Theme.of(context);
     final colors = context.appColors;
     final isDark = theme.brightness == Brightness.dark;
+    final currentUser = ref.watch(authStateProvider);
+    final isModerator = currentUser?.role == UserRole.moderator;
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.75,
+      initialChildSize: 0.80,
       maxChildSize: 0.95,
-      minChildSize: 0.4,
+      minChildSize: 0.45,
       expand: false,
       builder: (_, scrollCtrl) => Container(
         decoration: BoxDecoration(
@@ -215,7 +262,7 @@ class _StaffProfileEditSheetState
                   controller: scrollCtrl,
                   padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
                   children: [
-                    // Name
+                    // Full Name
                     TextFormField(
                       controller: _name,
                       textInputAction: TextInputAction.next,
@@ -227,7 +274,7 @@ class _StaffProfileEditSheetState
                       ),
                     ),
                     const SizedBox(height: AppSpacing.md),
-                    // Phone
+                    // Phone Number
                     TextFormField(
                       controller: _phone,
                       keyboardType: TextInputType.phone,
@@ -240,65 +287,96 @@ class _StaffProfileEditSheetState
                       ),
                     ),
                     const SizedBox(height: AppSpacing.lg),
-                    // Role
-                    Text('الصلاحية / الدور',
-                        style: theme.textTheme.labelLarge
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.sm,
-                      children: _roles.map((r) {
-                        final (value, label, icon) = r;
-                        final selected = _role == value;
-                        return GestureDetector(
-                          onTap: () => setState(() => _role = value),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsetsDirectional.symmetric(
-                                horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-                            decoration: BoxDecoration(
-                              gradient: selected ? AppGradients.gold : null,
-                              color: selected
-                                  ? null
-                                  : (isDark
-                                      ? colors.obsidianSurface
-                                      : theme.colorScheme.surfaceContainerHighest),
-                              borderRadius: AppRadius.mdAll,
-                              border: Border.all(
+
+                    // Role Section: editable by moderator, view-only badge for driver/manager
+                    if (isModerator) ...[
+                      Text('الصلاحية / الدور',
+                          style: theme.textTheme.labelLarge
+                              ?.copyWith(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: AppSpacing.sm),
+                      Wrap(
+                        spacing: AppSpacing.sm,
+                        runSpacing: AppSpacing.sm,
+                        children: _roles.map((r) {
+                          final (value, label, icon) = r;
+                          final selected = _role == value;
+                          return GestureDetector(
+                            onTap: () => setState(() => _role = value),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              padding: const EdgeInsetsDirectional.symmetric(
+                                  horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                              decoration: BoxDecoration(
+                                gradient: selected ? AppGradients.gold : null,
                                 color: selected
-                                    ? const Color(0xFFD4AF37)
-                                    : theme.colorScheme.outlineVariant,
+                                    ? null
+                                    : (isDark
+                                        ? colors.obsidianSurface
+                                        : theme.colorScheme.surfaceContainerHighest),
+                                borderRadius: AppRadius.mdAll,
+                                border: Border.all(
+                                  color: selected
+                                      ? const Color(0xFFD4AF37)
+                                      : theme.colorScheme.outlineVariant,
+                                ),
+                                boxShadow: selected ? [AppShadows.goldGlowSm] : null,
                               ),
-                              boxShadow: selected ? [AppShadows.goldGlowSm] : null,
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(icon,
-                                    size: 16,
-                                    color: selected
-                                        ? const Color(0xFF1A1400)
-                                        : theme.colorScheme.onSurfaceVariant),
-                                const SizedBox(width: 6),
-                                Text(
-                                  label,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    color: selected
-                                        ? const Color(0xFF1A1400)
-                                        : theme.colorScheme.onSurface,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(icon,
+                                      size: 16,
+                                      color: selected
+                                          ? const Color(0xFF1A1400)
+                                          : theme.colorScheme.onSurfaceVariant),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    label,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: selected
+                                          ? const Color(0xFF1A1400)
+                                          : theme.colorScheme.onSurface,
+                                    ),
                                   ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                    ] else ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: isDark ? colors.obsidianSurface : theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: AppRadius.mdAll,
+                          border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.badge_outlined, size: 20, color: Color(0xFFD4AF37)),
+                            const SizedBox(width: AppSpacing.sm),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('الدور الوظيفي الحالي', style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _roles.firstWhere((r) => r.$1 == _role, orElse: () => ('', _role, Icons.person)).$2,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                 ),
                               ],
                             ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    // Language
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
+
+                    // Preferred Language
                     Text('اللغة المفضلة',
                         style: theme.textTheme.labelLarge
                             ?.copyWith(fontWeight: FontWeight.bold)),
@@ -321,33 +399,106 @@ class _StaffProfileEditSheetState
                       ],
                     ),
                     const SizedBox(height: AppSpacing.lg),
-                    // Active toggle
+
+                    // Active account toggle (only moderator can enable/disable staff)
+                    if (isModerator) ...[
+                      LuxuryCard(
+                        padding: const EdgeInsetsDirectional.symmetric(
+                            horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+                        child: SwitchListTile.adaptive(
+                          value: _active,
+                          onChanged: (v) => setState(() => _active = v),
+                          title: Text(
+                            _active ? 'الحساب نشط' : 'الحساب معطل',
+                            style: theme.textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text(
+                            _active
+                                ? 'يمكن لهذا الموظف تسجيل الدخول'
+                                : 'لا يمكن لهذا الموظف تسجيل الدخول',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          secondary: Icon(
+                            _active
+                                ? Icons.check_circle_rounded
+                                : Icons.cancel_rounded,
+                            color: _active ? colors.success : colors.error,
+                          ),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
+
+                    // Optional PIN Change Section
                     LuxuryCard(
-                      padding: const EdgeInsetsDirectional.symmetric(
-                          horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
-                      child: SwitchListTile.adaptive(
-                        value: _active,
-                        onChanged: (v) => setState(() => _active = v),
-                        title: Text(
-                          _active ? 'الحساب نشط' : 'الحساب معطل',
-                          style: theme.textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(
-                          _active
-                              ? 'يمكن لهذا الموظف تسجيل الدخول'
-                              : 'لا يمكن لهذا الموظف تسجيل الدخول',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        secondary: Icon(
-                          _active
-                              ? Icons.check_circle_rounded
-                              : Icons.cancel_rounded,
-                          color: _active ? colors.success : colors.error,
-                        ),
-                        contentPadding: EdgeInsets.zero,
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.pin_outlined, size: 20, color: Color(0xFFD4AF37)),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'تغيير رمز PIN السري للدخول',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              ),
+                              Switch.adaptive(
+                                value: _changePin,
+                                onChanged: (v) => setState(() {
+                                  _changePin = v;
+                                  if (!v) {
+                                    _oldPinCtrl.clear();
+                                    _newPinCtrl.clear();
+                                  }
+                                }),
+                              ),
+                            ],
+                          ),
+                          if (_changePin) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            TextFormField(
+                              controller: _oldPinCtrl,
+                              keyboardType: TextInputType.number,
+                              obscureText: true,
+                              maxLength: 6,
+                              decoration: const InputDecoration(
+                                labelText: 'رمز PIN الحالي *',
+                                prefixIcon: Icon(Icons.lock_outline),
+                                counterText: '',
+                              ),
+                              validator: (v) {
+                                if (!_changePin) return null;
+                                if (v == null || v.trim().isEmpty) return 'يرجى إدخال رمز PIN الحالي';
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            TextFormField(
+                              controller: _newPinCtrl,
+                              keyboardType: TextInputType.number,
+                              obscureText: true,
+                              maxLength: 6,
+                              decoration: const InputDecoration(
+                                labelText: 'رمز PIN الجديد (4 أرقام على الأقل) *',
+                                prefixIcon: Icon(Icons.lock_reset),
+                                counterText: '',
+                              ),
+                              validator: (v) {
+                                if (!_changePin) return null;
+                                if (v == null || v.trim().length < 4) return 'يجب أن يكون الرمز 4 أرقام على الأقل';
+                                return null;
+                              },
+                            ),
+                          ],
+                        ],
                       ),
                     ),
+
                     if (_error != null) ...[
                       const SizedBox(height: AppSpacing.md),
                       Container(

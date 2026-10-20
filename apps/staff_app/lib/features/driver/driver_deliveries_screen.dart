@@ -13,6 +13,7 @@ import 'services/driver_telemetry_service.dart';
 import 'widgets/driver_map_view.dart';
 import 'widgets/proof_of_delivery_dialog.dart';
 import 'widgets/driver_wallet_sheet.dart';
+import '../moderator/widgets/staff_profile_edit_sheet.dart';
 
 class DriverDeliveriesScreen extends ConsumerStatefulWidget {
   const DriverDeliveriesScreen({super.key});
@@ -56,6 +57,24 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
     );
   }
 
+  Future<void> _openEditProfile() async {
+    final user = ref.read(authStateProvider);
+    if (user == null) return;
+    final updated = await StaffProfileEditSheet.show(
+      context,
+      ref,
+      userId: user.id,
+      name: user.name,
+      phone: user.phone,
+      role: user.role.name,
+      active: user.active,
+      language: user.language,
+    );
+    if (updated == true && mounted) {
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ordersAsync = ref.watch(driverOrdersProvider);
@@ -80,37 +99,56 @@ class _DriverDeliveriesScreenState extends ConsumerState<DriverDeliveriesScreen>
             decoration: const BoxDecoration(gradient: AppGradients.goldFoil),
           ),
         ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: const BoxDecoration(
-                gradient: AppGradients.goldFoil,
-                borderRadius: AppRadius.smAll,
-              ),
-              child: Text(
-                'VIP',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: colors.obsidian,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 1.5,
+        title: InkWell(
+          onTap: _openEditProfile,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: const BoxDecoration(
+                    gradient: AppGradients.goldFoil,
+                    borderRadius: AppRadius.smAll,
+                  ),
+                  child: Text(
+                    'VIP',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: colors.obsidian,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Flexible(
-              child: Text(
-                'مهام التوصيل - ${authUser?.name ?? "السائق"}',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: colors.onObsidian,
-                  fontWeight: FontWeight.bold,
+                const SizedBox(width: AppSpacing.sm),
+                Flexible(
+                  child: Text(
+                    'مهام التوصيل - ${authUser?.name ?? "السائق"}',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: colors.onObsidian,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                overflow: TextOverflow.ellipsis,
-              ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.edit_outlined,
+                  size: 14,
+                  color: colors.gold.withValues(alpha: 0.7),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
         actions: [
+          GoldIconButton(
+            icon: Icons.manage_accounts_outlined,
+            tooltip: 'تعديل الملف الشخصي',
+            onPressed: _openEditProfile,
+          ),
           GoldIconButton(
             icon: _isMapView ? Icons.view_list_rounded : Icons.map_rounded,
             tooltip: _isMapView ? 'عرض القائمة' : 'عرض الخريطة',
