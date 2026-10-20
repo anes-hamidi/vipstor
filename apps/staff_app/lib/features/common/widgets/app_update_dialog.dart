@@ -156,7 +156,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: colors.onObsidian,
+                            color: colors.onGold,
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -166,7 +166,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                             : 'يتوفر تحسينات جديدة وإصلاحات للنظام',
                           style: TextStyle(
                             fontSize: 12,
-                            color: colors.onObsidian.withValues(alpha: 0.6),
+                            color: colors.onGold.withValues(alpha: 0.6),
                           ),
                         ),
                       ],
@@ -174,7 +174,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                   ),
                   if (!isMandatory && !_isDownloading)
                     IconButton(
-                      icon: Icon(Icons.close, color: colors.onObsidian.withValues(alpha: 0.5)),
+                      icon: Icon(Icons.close, color: colors.onGold.withValues(alpha: 0.5)),
                       onPressed: () => Navigator.of(context).pop(),
                     ),
                 ],
@@ -200,7 +200,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                           'الإصدار الحالي',
                           style: TextStyle(
                             fontSize: 11,
-                            color: colors.onObsidian.withValues(alpha: 0.5),
+                            color: colors.onGold.withValues(alpha: 0.5),
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -209,7 +209,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            color: colors.onObsidian.withValues(alpha: 0.7),
+                            color: colors.onGold.withValues(alpha: 0.7),
                           ),
                         ),
                       ],
@@ -276,7 +276,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: colors.onObsidian,
+                    color: colors.onGold,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -314,7 +314,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                           'جاري تحميل التحديث...',
                           style: TextStyle(
                             fontSize: 12,
-                            color: colors.onObsidian.withValues(alpha: 0.7),
+                            color: colors.onGold.withValues(alpha: 0.7),
                           ),
                         ),
                         Text(
@@ -343,7 +343,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 11,
-                        color: colors.onObsidian.withValues(alpha: 0.5),
+                        color: colors.onGold.withValues(alpha: 0.5),
                       ),
                     ),
                   ],
@@ -383,14 +383,14 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
                         child: OutlinedButton(
                           onPressed: () => Navigator.of(context).pop(),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: colors.onObsidian.withValues(alpha: 0.7),
+                            foregroundColor: colors.onGold.withValues(alpha: 0.7),
                             side: BorderSide(color: colors.goldBorder),
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                          child: const Text('لاحقاً'),
+                          child:  Text('لاحقاً'),
                         ),
                       ),
                       const SizedBox(width: 12),

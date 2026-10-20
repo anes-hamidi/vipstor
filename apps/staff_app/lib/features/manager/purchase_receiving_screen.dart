@@ -15,6 +15,8 @@ import 'widgets/low_stock_replenishment_dashboard.dart';
 import 'widgets/stock_transfer_dialog.dart';
 import 'widgets/manager_command_center_view.dart';
 import 'services/pdf_invoice_service.dart';
+import '../common/widgets/headless_barcode_scanner_button.dart';
+import '../common/services/headless_barcode_scanner_service.dart';
 
 
 
@@ -40,6 +42,7 @@ class _PurchaseReceivingScreenState
   final List<Map<String, dynamic>> _invoiceItems = [];
 
   // Product search inside invoice selector
+  final _productSearchController = TextEditingController();
   String _productSearch = '';
   String? _receivingCategory;
   // Product search inside catalog tab
@@ -51,10 +54,10 @@ class _PurchaseReceivingScreenState
     _tabController = TabController(length: 5, vsync: this);
   }
 
-
-
   @override
   void dispose() {
+    HeadlessBarcodeScannerService.instance.stopScanning();
+    _productSearchController.dispose();
     _tabController.dispose();
     _invoiceNoController.dispose();
     super.dispose();
@@ -672,10 +675,31 @@ class _PurchaseReceivingScreenState
           ),
           AppSpacing.gapSm,
           TextField(
-            decoration: const InputDecoration(
+            controller: _productSearchController,
+            decoration: InputDecoration(
               isDense: true,
-              hintText: 'بحث سريع...',
-              prefixIcon: Icon(Icons.search_rounded, size: 18),
+              hintText: 'بحث سريع (اسم، باركود)...',
+              prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  HeadlessBarcodeScannerButton(
+                    controller: _productSearchController,
+                    onScanned: (barcode) {
+                      setState(() => _productSearch = barcode);
+                    },
+                    tooltip: 'مسح باركود المنتج بالكاميرا',
+                  ),
+                  if (_productSearch.isNotEmpty)
+                    IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 16),
+                      onPressed: () {
+                        _productSearchController.clear();
+                        setState(() => _productSearch = '');
+                      },
+                    ),
+                ],
+              ),
             ),
             onChanged: (v) => setState(() => _productSearch = v),
           ),

@@ -24,6 +24,8 @@ import 'widgets/supplier_payment_dialog.dart';
 import 'widgets/driver_settlement_dialog.dart';
 import 'widgets/cashier_pin_dialog.dart';
 import 'widgets/printer_settings_dialog.dart';
+import '../common/widgets/headless_barcode_scanner_button.dart';
+import '../common/services/headless_barcode_scanner_service.dart';
 import 'package:flutter/services.dart';
 class CounterPosScreen extends ConsumerStatefulWidget {
   const CounterPosScreen({super.key});
@@ -110,6 +112,7 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
 
   @override
   void dispose() {
+    HeadlessBarcodeScannerService.instance.stopScanning();
     _searchController.dispose();
     _barcodeController.dispose();
     _barcodeFocusNode.dispose();
@@ -746,10 +749,16 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                               controller: _barcodeController,
                               focusNode: _barcodeFocusNode,
                               
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 isDense: true,
                                 hintText: 'مسح الباركود...',
-                                prefixIcon: Icon(Icons.qr_code_scanner_rounded, size: 18),
+                                prefixIcon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                                suffixIcon: HeadlessBarcodeScannerButton(
+                                  controller: _barcodeController,
+                                  onScanned: _onBarcodeSubmitted,
+                                  continuous: true,
+                                  tooltip: 'مسح الباركود بالكاميرا (متواصل)',
+                                ),
                               ),
                               onSubmitted: _onBarcodeSubmitted,
                             ),
@@ -795,14 +804,19 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                         ),
                       ),
                       ConstrainedBox(
-                        constraints:  const BoxConstraints(minWidth: 160, maxWidth: 240),
+                        constraints:  const BoxConstraints(minWidth: 160, maxWidth: 260),
                         child: TextField(
                           controller: _barcodeController,
                           focusNode: _barcodeFocusNode,
-                          decoration:  InputDecoration(
+                          decoration: InputDecoration(
                             isDense: true,
                             hintText: showKeys ? 'مسح الباركود [F1]...' : 'مسح الباركود...',
                             prefixIcon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                            suffixIcon: HeadlessBarcodeScannerButton(
+                              controller: _barcodeController,
+                              onScanned: _onBarcodeSubmitted,
+                              continuous: true,
+                            ),
                           ),
                           onSubmitted: _onBarcodeSubmitted,
                         ),

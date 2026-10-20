@@ -7,6 +7,8 @@ import 'package:domain/domain.dart';
 import '../../../providers/inventory_providers.dart';
 import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
+import '../../common/widgets/headless_barcode_scanner_button.dart';
+import '../../common/services/headless_barcode_scanner_service.dart';
 
 
 
@@ -19,6 +21,7 @@ class CycleCountAuditSheet extends ConsumerStatefulWidget {
 }
 
 class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
+  final _searchController = TextEditingController();
   String _search = '';
   bool _onlyDiscrepancies = false;
   bool _isReconciling = false;
@@ -26,6 +29,8 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
 
   @override
   void dispose() {
+    HeadlessBarcodeScannerService.instance.stopScanning();
+    _searchController.dispose();
     _reconciliationNotesCtrl.dispose();
     super.dispose();
   }
@@ -261,10 +266,31 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
             children: [
               Expanded(
                 child: TextField(
-                  decoration: const InputDecoration(
+                  controller: _searchController,
+                  decoration: InputDecoration(
                     hintText: 'بحث عن منتج في الجرد (اسم، باركود)...',
-                    prefixIcon: Icon(Icons.search_rounded, size: 20),
+                    prefixIcon: const Icon(Icons.search_rounded, size: 20),
                     isDense: true,
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        HeadlessBarcodeScannerButton(
+                          controller: _searchController,
+                          onScanned: (code) {
+                            setState(() => _search = code.trim());
+                          },
+                          tooltip: 'مسح باركود المنتج بالجرد',
+                        ),
+                        if (_search.isNotEmpty)
+                          IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 16),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _search = '');
+                            },
+                          ),
+                      ],
+                    ),
                   ),
                   onChanged: (v) => setState(() => _search = v.trim()),
                 ),

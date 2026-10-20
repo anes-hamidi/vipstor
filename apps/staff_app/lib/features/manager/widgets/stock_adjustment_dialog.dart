@@ -7,6 +7,8 @@ import 'package:uuid/uuid.dart';
 import '../../../providers/inventory_providers.dart';
 import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
+import '../../common/widgets/headless_barcode_scanner_button.dart';
+import '../../common/services/headless_barcode_scanner_service.dart';
 
 class StockAdjustmentDialog extends ConsumerStatefulWidget {
   final Product? initialProduct;
@@ -35,6 +37,7 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
 
   @override
   void dispose() {
+    HeadlessBarcodeScannerService.instance.stopScanning();
     _qtyController.dispose();
     _notesController.dispose();
     _batchController.dispose();
@@ -207,10 +210,40 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
               const Divider(height: 24),
 
               // Product Picker (if not fixed)
-              Text(
-                'المنتج المستهدف',
-                style: theme.textTheme.labelMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'المنتج المستهدف',
+                    style: theme.textTheme.labelMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  HeadlessBarcodeScannerButton(
+                    tooltip: 'مسح باركود المنتج بالكاميرا لتحديده',
+                    onScanned: (code) {
+                      final clean = code.trim();
+                      final found = products
+                          .where((p) => p.barcodes.any((b) => b.trim() == clean))
+                          .firstOrNull;
+                      if (found != null) {
+                        setState(() => _selectedProductId = found.id);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('تم تحديد المنتج: ${found.nameAr}'),
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('لم يتم العثور على منتج بالباركود: $clean'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
               const SizedBox(height: AppSpacing.xs),
               productsAsync.when(

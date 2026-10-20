@@ -7,6 +7,8 @@ import 'package:uuid/uuid.dart';
 import '../../../providers/inventory_providers.dart';
 import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
+import '../../common/widgets/headless_barcode_scanner_button.dart';
+import '../../common/services/headless_barcode_scanner_service.dart';
 
 
 
@@ -30,6 +32,7 @@ class _StockTransferDialogState extends ConsumerState<StockTransferDialog> {
 
   @override
   void dispose() {
+    HeadlessBarcodeScannerService.instance.stopScanning();
     _qtyController.dispose();
     _notesController.dispose();
     super.dispose();
@@ -249,6 +252,39 @@ class _StockTransferDialogState extends ConsumerState<StockTransferDialog> {
               const SizedBox(height: AppSpacing.md),
 
               // Add Item Section
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('اختيار الصنف للنقل', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  HeadlessBarcodeScannerButton(
+                    tooltip: 'مسح باركود الصنف لاختياره فوراً',
+                    onScanned: (code) {
+                      final clean = code.trim();
+                      final products = productsAsync.value ?? [];
+                      final found = products
+                          .where((p) => p.barcodes.any((b) => b.trim() == clean))
+                          .firstOrNull;
+                      if (found != null) {
+                        setState(() => _selectedProductId = found.id);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('تم تحديد الصنف: ${found.nameAr}'),
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('لم يتم العثور على صنف بالباركود: $clean'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [

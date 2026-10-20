@@ -11,6 +11,7 @@ import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
 import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
+import '../../common/widgets/headless_barcode_scanner_button.dart';
 
 /// Supported unit definitions with localized labels and default packing factors.
 enum ProductUnitType {
@@ -1007,10 +1008,19 @@ class _CreateProductDialogState extends ConsumerState<CreateProductDialog>
         labelText: _isPackType ? 'باركود القطعة الفردية' : 'باركود المنتج',
         hintText: 'امسح أو اكتب الباركود...',
         prefixIcon: const Icon(Icons.qr_code_scanner_rounded),
-        suffixIcon: IconButton(
-          icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-          tooltip: 'توليد باركود تلقائي EAN-13',
-          onPressed: () => _generateBarcode(isBox: false),
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            HeadlessBarcodeScannerButton(
+              controller: _barcodeController,
+              tooltip: 'مسح الباركود بالكاميرا',
+            ),
+            IconButton(
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              tooltip: 'توليد باركود تلقائي EAN-13',
+              onPressed: () => _generateBarcode(isBox: false),
+            ),
+          ],
         ),
       ),
     );
@@ -1025,10 +1035,19 @@ class _CreateProductDialogState extends ConsumerState<CreateProductDialog>
         labelText: 'باركود الكرتون / الطرد (Colis)',
         hintText: 'امسح باركود الصندوق الخارجي...',
         prefixIcon: const Icon(Icons.qr_code_2_rounded),
-        suffixIcon: IconButton(
-          icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-          tooltip: 'توليد باركود للكرتون',
-          onPressed: () => _generateBarcode(isBox: true),
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            HeadlessBarcodeScannerButton(
+              controller: _boxBarcodeController,
+              tooltip: 'مسح باركود الكرتون بالكاميرا',
+            ),
+            IconButton(
+              icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+              tooltip: 'توليد باركود للكرتون',
+              onPressed: () => _generateBarcode(isBox: true),
+            ),
+          ],
         ),
       ),
     );

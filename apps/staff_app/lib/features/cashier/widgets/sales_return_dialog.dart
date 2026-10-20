@@ -5,6 +5,8 @@ import 'package:core/core.dart';
 import 'package:domain/domain.dart';
 import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
+import '../../common/widgets/headless_barcode_scanner_button.dart';
+import '../../common/services/headless_barcode_scanner_service.dart';
 
 class SalesReturnDialog extends ConsumerStatefulWidget {
   final String? initialOrderId;
@@ -45,6 +47,7 @@ class _SalesReturnDialogState extends ConsumerState<SalesReturnDialog> {
 
   @override
   void dispose() {
+    HeadlessBarcodeScannerService.instance.stopScanning();
     _orderIdController.dispose();
     super.dispose();
   }
@@ -178,9 +181,14 @@ class _SalesReturnDialogState extends ConsumerState<SalesReturnDialog> {
                   Expanded(
                     child: TextField(
                       controller: _orderIdController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         hintText: 'امسح باركود الوصل أو أدخل معرّف الطلب...',
-                        prefixIcon: Icon(Icons.qr_code_scanner),
+                        prefixIcon: const Icon(Icons.qr_code_scanner),
+                        suffixIcon: HeadlessBarcodeScannerButton(
+                          controller: _orderIdController,
+                          onScanned: (_) => _fetchOrder(),
+                          tooltip: 'مسح باركود الوصل بالكاميرا',
+                        ),
                       ),
                       onSubmitted: (_) => _fetchOrder(),
                     ),

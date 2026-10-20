@@ -2,6 +2,9 @@ name: Build and Private OTA Release
 
 on:
   push:
+    branches:
+      - master
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -9,28 +12,25 @@ on:
       app_type:
         description: 'Application to build'
         required: true
-        default: 'staff_app'
+        default: 'all'
         type: choice
         options:
+          - all
           - staff_app
           - customer_app
       version_name:
         description: 'Version Name (e.g. 1.2.0)'
-        required: true
+        required: false
         default: '1.2.0'
-      build_number:
-        description: 'Build Number (e.g. 15)'
-        required: true
-        default: '15'
       is_mandatory:
         description: 'Force all users to update immediately'
-        required: true
+        required: false
         default: false
         type: boolean
       release_notes:
-        description: 'Changelog / Release Notes'
+        description: 'Release Notes'
         required: false
-        default: '• تحسينات عامة في الأداء وإصلاح الأخطاء'
+        default: 'Automated release build from GitHub Actions'
 
 env:
   SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -38,10 +38,10 @@ env:
 
 jobs:
   # ============================================================================
-  # 1. Build Android APK
+  # 1. Build Android Apps & Customer Web (Ubuntu Runner)
   # ============================================================================
-  build-android:
-    name: Build Android APK
+  build-mobile-and-web:
+    name: Build Android & Web
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -59,53 +59,61 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Extract Version Info
-        id: version_step
+      - name: Enable Flutter Web
+        run: flutter config --enable-web
+
+      # --- Build Staff App Android APK ---
+      - name: Build Staff App APK
+        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VERSION=${{ github.event.inputs.version_name }}" >> $GITHUB_OUTPUT
-            echo "BUILD_NUMBER=${{ github.event.inputs.build_number }}" >> $GITHUB_OUTPUT
-            echo "APP_TYPE=${{ github.event.inputs.app_type }}" >> $GITHUB_OUTPUT
-            echo "IS_MANDATORY=${{ github.event.inputs.is_mandatory }}" >> $GITHUB_OUTPUT
-            echo "NOTES<<EOF" >> $GITHUB_OUTPUT
-            echo "${{ github.event.inputs.release_notes }}" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            TAG_NAME="${GITHUB_REF#refs/tags/v}"
-            echo "VERSION=$TAG_NAME" >> $GITHUB_OUTPUT
-            echo "BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> $GITHUB_OUTPUT
-            echo "APP_TYPE=staff_app" >> $GITHUB_OUTPUT
-            echo "IS_MANDATORY=false" >> $GITHUB_OUTPUT
-            echo "NOTES=• تحديث تلقائي برقم الإصدار $TAG_NAME" >> $GITHUB_OUTPUT
-          fi
+          cd apps/staff_app
+          flutter pub get
+          flutter build apk --release --build-number=${{ github.run_number }}
 
-      - name: Install Dependencies
-        run: flutter pub get
-
-      - name: Build Android Release APK
-        run: |
-          flutter build apk --release \
-            --build-name=${{ steps.version_step.outputs.VERSION }} \
-            --build-number=${{ steps.version_step.outputs.BUILD_NUMBER }}
-
-      - name: Archive APK as GitHub Artifact
+      - name: Archive Staff App APK
+        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.version_step.outputs.APP_TYPE }}-android-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: staff-app-android-apk
+          path: apps/staff_app/build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Upload APK to Supabase Storage & Register Release
+      # --- Build Customer App Android APK ---
+      - name: Build Customer App APK
+        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
         run: |
-          if [ -z "${{ env.SUPABASE_URL }}" ] || [ -z "${{ env.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
-            echo "::warning::SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secret is missing. Skipping Supabase release registration. The APK has been saved in GitHub Artifacts."
-            exit 0
-          fi
+          cd apps/customer_app
+          flutter pub get
+          flutter build apk --release --build-number=${{ github.run_number }}
 
-          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
-          FILE_NAME="${{ steps.version_step.outputs.APP_TYPE }}_v${{ steps.version_step.outputs.VERSION }}_b${{ steps.version_step.outputs.BUILD_NUMBER }}.apk"
+      - name: Archive Customer App APK
+        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-app-android-apk
+          path: apps/customer_app/build/app/outputs/flutter-apk/app-release.apk
+
+      # --- Build Customer App Web ---
+      - name: Build Customer App Web
+        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
+        run: |
+          cd apps/customer_app
+          flutter build web --release --build-number=${{ github.run_number }}
+
+      - name: Archive Customer App Web
+        if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-app-web
+          path: apps/customer_app/build/web
+
+      # --- Optional Upload to Supabase Storage ---
+      - name: Upload Staff App APK to Supabase
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != '' && (github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push')
+        run: |
+          APK_PATH="apps/staff_app/build/app/outputs/flutter-apk/app-release.apk"
+          FILE_NAME="staff_app_b${{ github.run_number }}.apk"
           FILE_SIZE=$(stat -c%s "$APK_PATH")
           
-          # Upload via Supabase Storage REST API
           curl -f -X POST \
             "${{ env.SUPABASE_URL }}/storage/v1/object/app-releases/android/$FILE_NAME" \
             -H "Authorization: Bearer ${{ env.SUPABASE_SERVICE_ROLE_KEY }}" \
@@ -115,7 +123,6 @@ jobs:
 
           DOWNLOAD_URL="${{ env.SUPABASE_URL }}/storage/v1/object/public/app-releases/android/$FILE_NAME"
           
-          # Register in app_versions table
           curl -f -X POST \
             "${{ env.SUPABASE_URL }}/rest/v1/app_versions" \
             -H "apikey: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}" \
@@ -124,24 +131,25 @@ jobs:
             -H "Prefer: return=minimal" \
             -d @- <<JSON
           {
-            "app_type": "${{ steps.version_step.outputs.APP_TYPE }}",
+            "app_type": "staff_app",
             "platform": "android",
-            "version_name": "${{ steps.version_step.outputs.VERSION }}",
-            "build_number": ${{ steps.version_step.outputs.BUILD_NUMBER }},
+            "version_name": "1.0.0",
+            "build_number": ${{ github.run_number }},
             "min_supported_build": 1,
             "download_url": "$DOWNLOAD_URL",
-            "release_notes": "${{ steps.version_step.outputs.NOTES }}",
-            "is_mandatory": ${{ steps.version_step.outputs.IS_MANDATORY }},
+            "release_notes": "Automated Android release build",
+            "is_mandatory": false,
             "file_size_bytes": $FILE_SIZE
           }
           JSON
 
   # ============================================================================
-  # 2. Build Windows Executable
+  # 2. Build Staff App Windows Executable (Windows Runner)
   # ============================================================================
-  build-windows:
-    name: Build Windows Release
+  build-staff-windows:
+    name: Build Staff App Windows
     runs-on: windows-latest
+    if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -152,22 +160,20 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Install Dependencies
-        run: flutter pub get
+      - name: Enable Windows Desktop
+        run: flutter config --enable-windows-desktop
 
-      - name: Build Windows Desktop Release
+      - name: Build Staff App Windows Release
         run: |
-          $ver = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.version_name }}" } else { "${{ github.ref_name }}".TrimStart('v') }
-          $buildNum = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.build_number }}" } else { "$env:GITHUB_RUN_NUMBER" }
-          flutter build windows --release --build-name=$ver --build-number=$buildNum
+          cd apps/staff_app
+          flutter pub get
+          flutter build windows --release --build-number=${{ github.run_number }}
 
       - name: Package Windows Release into ZIP
         shell: pwsh
         run: |
-          $ver = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.version_name }}" } else { "${{ github.ref_name }}".TrimStart('v') }
-          $buildNum = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.build_number }}" } else { "$env:GITHUB_RUN_NUMBER" }
-          $zipName = "staff_app_windows_v${ver}_b${buildNum}.zip"
-          Compress-Archive -Path "build\windows\x64\runner\Release\*" -DestinationPath "$zipName" -Force
+          $zipName = "staff_app_windows_b${{ github.run_number }}.zip"
+          Compress-Archive -Path "apps\staff_app\build\windows\x64\runner\Release\*" -DestinationPath "$zipName" -Force
 
       - name: Archive Windows Release as GitHub Artifact
         uses: actions/upload-artifact@v4
@@ -175,41 +181,30 @@ jobs:
           name: staff-app-windows-zip
           path: staff_app_windows_*.zip
 
-      - name: Upload ZIP to Supabase Storage & Register Release
+      - name: Upload Windows ZIP to Supabase
         shell: pwsh
+        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
         run: |
-          if (-not $env:SUPABASE_URL -or -not $env:SUPABASE_SERVICE_ROLE_KEY) {
-            Write-Warning "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY secret is missing. Skipping Supabase release registration. The ZIP has been saved in GitHub Artifacts."
-            exit 0
-          }
-
-          $ver = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.version_name }}" } else { "${{ github.ref_name }}".TrimStart('v') }
-          $buildNum = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.build_number }}" } else { "$env:GITHUB_RUN_NUMBER" }
-          $zipName = "staff_app_windows_v${ver}_b${buildNum}.zip"
+          $zipName = "staff_app_windows_b${{ github.run_number }}.zip"
           $fileSize = (Get-Item $zipName).Length
           $uploadUrl = "${{ env.SUPABASE_URL }}/storage/v1/object/app-releases/windows/$zipName"
           $publicUrl = "${{ env.SUPABASE_URL }}/storage/v1/object/public/app-releases/windows/$zipName"
 
-          # Upload ZIP to Supabase Storage
           Invoke-RestMethod -Uri $uploadUrl -Method Post -Headers @{
             "Authorization" = "Bearer ${{ env.SUPABASE_SERVICE_ROLE_KEY }}"
             "Content-Type"  = "application/zip"
             "x-upsert"      = "true"
           } -InFile $zipName
 
-          # Register in public.app_versions
-          $notes = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.release_notes }}" } else { "تحديث تلقائي لويندوز" }
-          $isMandatory = if ("${{ github.event_name }}" -eq "workflow_dispatch") { [bool]::Parse("${{ github.event.inputs.is_mandatory }}") } else { $false }
-          
           $body = @{
             app_type            = "staff_app"
             platform            = "windows"
-            version_name        = $ver
-            build_number        = [int]$buildNum
+            version_name        = "1.0.0"
+            build_number        = [int]${{ github.run_number }}
             min_supported_build = 1
             download_url        = $publicUrl
-            release_notes       = $notes
-            is_mandatory        = $isMandatory
+            release_notes       = "Automated Windows release build"
+            is_mandatory        = $false
             file_size_bytes     = $fileSize
           } | ConvertTo-Json
 
