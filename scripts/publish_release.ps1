@@ -74,9 +74,12 @@ Push-Location $appDir
 try {
     if ($Platform -eq 'android') {
         Write-Host "[1/3] Building Android Release APK for $AppType..." -ForegroundColor Cyan
-        flutter build apk --release --build-name=$Version --build-number=$BuildNumber
+        flutter build apk --release --split-per-abi --no-tree-shake-icons --build-name=$Version --build-number=$BuildNumber
 
-        $rawFilePath = Join-Path $appDir "build\app\outputs\flutter-apk\app-release.apk"
+        $rawFilePath = Join-Path $appDir "build\app\outputs\flutter-apk\app-arm64-v8a-release.apk"
+        if (-not (Test-Path $rawFilePath)) {
+            $rawFilePath = Join-Path $appDir "build\app\outputs\flutter-apk\app-release.apk"
+        }
         if (-not (Test-Path $rawFilePath)) {
             throw "APK build output not found at $rawFilePath"
         }

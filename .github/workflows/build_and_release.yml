@@ -73,7 +73,7 @@ jobs:
         run: |
           cd apps/staff_app
           flutter pub get
-          flutter build apk --release --split-per-abi --build-number=${{ github.run_number }}
+          flutter build apk --release --split-per-abi --no-tree-shake-icons --build-number=${{ github.run_number }}
 
       - name: Archive Staff App APKs
         uses: actions/upload-artifact@v4
@@ -168,7 +168,7 @@ jobs:
         run: |
           cd apps/customer_app
           flutter pub get
-          flutter build apk --release --split-per-abi --build-number=${{ github.run_number }}
+          flutter build apk --release --split-per-abi --no-tree-shake-icons --build-number=${{ github.run_number }}
 
       - name: Archive Customer App APKs
         uses: actions/upload-artifact@v4

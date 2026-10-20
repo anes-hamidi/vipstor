@@ -43,3 +43,7 @@ hooks:
   user_defines:
     sqlite3:
       source: system
+
+flutter:
+  uses-material-design: true
+
