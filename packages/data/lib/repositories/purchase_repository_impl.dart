@@ -30,14 +30,25 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     String? companyRegister,
     String? notes,
   }) async {
-    final row = await client.from('suppliers').insert({
-      'name': name.trim(),
-      'phone': phone.trim(),
-      'company_register': companyRegister?.trim(),
-      'notes': notes?.trim(),
-    }).select().single();
+    try {
+      final res = await client.rpc('rpc_create_supplier', params: {
+        'p_name': name.trim(),
+        'p_phone': phone.trim(),
+        'p_company_register': companyRegister?.trim(),
+        'p_notes': notes?.trim(),
+      });
+      return Map<String, dynamic>.from(res as Map);
+    } catch (_) {
+      // Fallback for offline or legacy environments
+      final row = await client.from('suppliers').insert({
+        'name': name.trim(),
+        'phone': phone.trim(),
+        'company_register': companyRegister?.trim(),
+        'notes': notes?.trim(),
+      }).select().single();
 
-    return Map<String, dynamic>.from(row);
+      return Map<String, dynamic>.from(row);
+    }
   }
 
   @override
@@ -379,36 +390,48 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     }
 
     try {
-      final purchaseRow = await client.from('purchases').insert({
-        'supplier_id': supplierId,
-        'invoice_no': invoiceNo,
-        'invoice_date': date.toIso8601String().split('T').first,
-        'status': 'draft',
-        'total_amount': total,
-        'created_by': user,
-      }).select('id').single();
-
-      final purchaseId = purchaseRow['id'] as String;
-
-      if (items.isNotEmpty) {
-        final purchaseItemsToInsert = items.map((it) {
-          final unitCost = (it['unit_cost'] ?? it['cost_centimes'] ?? 0) as int;
-          final sellingPrice = (it['selling_price'] != null ? (it['selling_price'] as num).toInt() : unitCost);
-          return {
-            'purchase_id': purchaseId,
-            'product_id': it['product_id'],
-            'quantity': (it['quantity'] ?? it['qty'] ?? 1) as int,
-            'unit_cost': unitCost,
-            'selling_price': sellingPrice >= unitCost ? sellingPrice : unitCost,
-          };
-        }).toList();
-
-        await client.from('purchase_items').insert(purchaseItemsToInsert);
-      }
-
-      return purchaseId;
+      final res = await client.rpc('rpc_create_draft_purchase', params: {
+        'p_supplier_id': supplierId,
+        'p_invoice_no': invoiceNo,
+        'p_invoice_date': date.toIso8601String().split('T').first,
+        'p_total_amount': total,
+        'p_created_by': user,
+        'p_items': items,
+      });
+      return res.toString();
     } catch (_) {
-      return 'OFFLINE-${const Uuid().v4()}';
+      try {
+        final purchaseRow = await client.from('purchases').insert({
+          'supplier_id': supplierId,
+          'invoice_no': invoiceNo,
+          'invoice_date': date.toIso8601String().split('T').first,
+          'status': 'draft',
+          'total_amount': total,
+          'created_by': user,
+        }).select('id').single();
+
+        final purchaseId = purchaseRow['id'] as String;
+
+        if (items.isNotEmpty) {
+          final purchaseItemsToInsert = items.map((it) {
+            final unitCost = (it['unit_cost'] ?? it['cost_centimes'] ?? 0) as int;
+            final sellingPrice = (it['selling_price'] != null ? (it['selling_price'] as num).toInt() : unitCost);
+            return {
+              'purchase_id': purchaseId,
+              'product_id': it['product_id'],
+              'quantity': (it['quantity'] ?? it['qty'] ?? 1) as int,
+              'unit_cost': unitCost,
+              'selling_price': sellingPrice >= unitCost ? sellingPrice : unitCost,
+            };
+          }).toList();
+
+          await client.from('purchase_items').insert(purchaseItemsToInsert);
+        }
+
+        return purchaseId;
+      } catch (_) {
+        return 'OFFLINE-${const Uuid().v4()}';
+      }
     }
   }
 

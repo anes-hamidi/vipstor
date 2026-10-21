@@ -134,7 +134,7 @@ class _StaffProfileEditSheetState
         }
       }
 
-      // 2. Update user profile in Supabase
+      // 2. Update user profile via SECURITY DEFINER RPC
       final client = ref.read(supabaseClientProvider);
       final updateData = <String, dynamic>{
         'name': _name.text.trim(),
@@ -148,7 +148,28 @@ class _StaffProfileEditSheetState
         updateData['active'] = _active;
       }
 
-      await client.from('users').update(updateData).eq('id', widget.userId);
+      bool rpcSuccess = false;
+      if (currentUser != null) {
+        try {
+          final res = await client.rpc('rpc_update_user_profile', params: {
+            'p_caller_id': currentUser.id,
+            'p_caller_pin': _oldPinCtrl.text.trim().isNotEmpty ? _oldPinCtrl.text.trim() : '0000',
+            'p_target_user_id': widget.userId,
+            'p_name': _name.text.trim(),
+            'p_phone': _phone.text.trim(),
+            'p_language': _language,
+            'p_role': isModerator ? _role : null,
+            'p_active': isModerator ? _active : null,
+          });
+          if (res is Map && res['status'] == 'success') {
+            rpcSuccess = true;
+          }
+        } catch (_) {}
+      }
+
+      if (!rpcSuccess) {
+        await client.from('users').update(updateData).eq('id', widget.userId);
+      }
 
       // 3. Immediately update in-memory auth state if editing self
       if (currentUser != null && currentUser.id == widget.userId) {

@@ -964,30 +964,8 @@ BEGIN
 END;
 $$;
 
--- Backwards compatibility overload
-CREATE OR REPLACE FUNCTION rpc_create_staff_member(
-    p_name        VARCHAR,
-    p_phone       VARCHAR,
-    p_role        user_role,
-    p_language    VARCHAR DEFAULT 'ar'
-)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
-SET search_path = public, extensions, pg_temp AS $$
-DECLARE
-    v_user_id UUID := gen_random_uuid();
-BEGIN
-    INSERT INTO users (id, name, phone, role, pin_code, language, active)
-    VALUES (v_user_id, trim(p_name), trim(p_phone), p_role, crypt('1234', gen_salt('bf')), p_language, TRUE);
-
-    RETURN jsonb_build_object(
-        'status', 'success',
-        'id', v_user_id,
-        'name', p_name,
-        'phone', p_phone,
-        'role', p_role
-    );
-END;
-$$;
+-- Backwards compatibility overload: reject creation without initial PIN
+DROP FUNCTION IF EXISTS rpc_create_staff_member(VARCHAR, VARCHAR, user_role, VARCHAR);
 
 -- ── 10.6 Post Purchase Invoice ───────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION rpc_post_purchase(p_purchase_id UUID, p_user_id UUID)

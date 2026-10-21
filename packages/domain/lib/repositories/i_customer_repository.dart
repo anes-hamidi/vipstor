@@ -10,7 +10,7 @@ abstract class ICustomerRepository {
     int creditLimitCentimes = 0,
     String priceTier = 'wholesale',
   });
-  Future<CustomerProfileEntity?> getCustomerByPhone(String phone);
+  Future<CustomerProfileEntity?> getCustomerByPhone(String phone, {String? deviceToken});
   Future<CustomerProfileEntity> syncCustomerProfile({
     required String name,
     required String phone,
@@ -21,6 +21,7 @@ abstract class ICustomerRepository {
     double? longitude,
     String? existingCustomerId,
     String? existingUserId,
+    String? deviceToken,
   });
   Future<List<CustomerLedgerEntryEntity>> getCustomerLedger(String customerId);
   Future<List<CustomerUnpaidOrderEntity>> getCustomerUnpaidOrders(String customerId);

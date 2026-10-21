@@ -139,12 +139,13 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
           _lat = p.latitude;
           _lng = p.longitude;
         });
-        _toast('تم استرجاع بيانات حسابك');
+        _toast('تم استرجاع بيانات حسابك بنجاح');
       } else {
         _toast('لا يوجد حساب بهذا الرقم، أكمل البيانات لإنشاء حساب جديد');
       }
-    } catch (_) {
-      _toast('تعذر البحث الآن، تحقق من الاتصال');
+    } catch (e) {
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      _toast(msg.isNotEmpty ? msg : 'تعذر البحث الآن، تحقق من الاتصال');
     } finally {
       if (mounted) setState(() => _lookingUp = false);
     }
@@ -165,10 +166,15 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
     );
     try {
       await notifier.syncWithDatabase();
-    } catch (_) {}
-    if (!mounted) return;
-    setState(() => _saving = false);
-    if (!widget.isSetup) Navigator.pop(context);
+      if (!mounted) return;
+      setState(() => _saving = false);
+      if (!widget.isSetup) Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      _toast(msg.isNotEmpty ? msg : 'تعذر حفظ البيانات');
+    }
   }
 
   @override

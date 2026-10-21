@@ -62,7 +62,7 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
         _focusNode.requestFocus();
       } else {
         setState(() {
-          _errorMessage = 'رمز PIN الحالي غير صحيح! جرب 1234';
+          _errorMessage = 'رمز PIN الحالي غير صحيح!';
           _pinController.clear();
         });
         _focusNode.requestFocus();

@@ -17,18 +17,20 @@ class SupabaseService {
     return Map<String, dynamic>.from(response as Map);
   }
 
-  /// Submit Customer Order (Server-side price and cost resolution)
+  /// Submit Customer Order (Server-side price and cost resolution with device authentication)
   Future<String> submitCustomerOrder({
     required String? clientId,
     required String customerId,
     required Map<String, dynamic> address,
     required List<Map<String, dynamic>> items,
+    String? deviceToken,
   }) async {
     final response = await client.rpc('rpc_submit_customer_order', params: {
       'p_client_id': clientId,
       'p_customer_id': customerId,
       'p_delivery_address': address,
       'p_items': items,
+      if (deviceToken != null) 'p_device_token': deviceToken,
     });
     return response.toString();
   }

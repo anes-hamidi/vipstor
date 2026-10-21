@@ -81,34 +81,53 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
 
     await Future.delayed(const Duration(milliseconds: 350));
 
-    // Accepted default PIN for fast switch / unlock is '1234' or any 4-digit PIN in demo
-    // In production, PIN hash matching will occur
-    const validPin = '1234';
-
-    if (pin == validPin || pin == '0000' || pin == '1111' || pin == '2222') {
-      if (!mounted) return;
-      final selected = _selectedStaff;
-      final nav = Navigator.of(context);
-      if (nav.canPop()) {
-        nav.pop(true);
-      }
-      if (widget.mode == CashierPinMode.switchCashier && selected != null) {
-        final currentAuth = ref.read(authStateProvider);
-        if (currentAuth != null) {
-          ref.read(staffAuditLoggerProvider).logCashierSwitch(
-                previousCashier: currentAuth,
-                newCashier: selected,
-              );
-        } else {
-          ref.read(staffAuditLoggerProvider).logLogin(user: selected);
-        }
-        ref.read(authStateProvider.notifier).state = selected;
-      }
-    } else {
+    final targetUser = _selectedStaff ?? ref.read(authStateProvider);
+    if (targetUser == null) {
       if (!mounted) return;
       setState(() {
         _isVerifying = false;
-        _errorMessage = 'رمز PIN غير صحيح! جرب 1234';
+        _errorMessage = 'يرجى تحديد الموظف أولاً!';
+        _pinController.clear();
+      });
+      return;
+    }
+
+    try {
+      final repo = ref.read(authRepositoryProvider);
+      final isValid = await repo.verifyPin(userId: targetUser.id, pin: pin);
+
+      if (!mounted) return;
+      if (isValid) {
+        final selected = _selectedStaff;
+        final nav = Navigator.of(context);
+        if (nav.canPop()) {
+          nav.pop(true);
+        }
+        if (widget.mode == CashierPinMode.switchCashier && selected != null) {
+          final currentAuth = ref.read(authStateProvider);
+          if (currentAuth != null) {
+            ref.read(staffAuditLoggerProvider).logCashierSwitch(
+                  previousCashier: currentAuth,
+                  newCashier: selected,
+                );
+          } else {
+            ref.read(staffAuditLoggerProvider).logLogin(user: selected);
+          }
+          ref.read(authStateProvider.notifier).state = selected;
+        }
+      } else {
+        setState(() {
+          _isVerifying = false;
+          _errorMessage = 'رمز PIN غير صحيح!';
+          _pinController.clear();
+        });
+        _focusNode.requestFocus();
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isVerifying = false;
+        _errorMessage = e.toString().replaceFirst('AuthException: ', '').replaceFirst('Exception: ', '');
         _pinController.clear();
       });
       _focusNode.requestFocus();

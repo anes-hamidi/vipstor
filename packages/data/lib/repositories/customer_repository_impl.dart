@@ -118,9 +118,41 @@ class CustomerRepositoryImpl implements ICustomerRepository {
   }
 
   @override
-  Future<CustomerProfileEntity?> getCustomerByPhone(String phone) async {
+  Future<CustomerProfileEntity?> getCustomerByPhone(String phone, {String? deviceToken}) async {
     final cleanPhone = phone.trim();
     if (cleanPhone.isEmpty) return null;
+
+    // First attempt: secure device-bound lookup via RPC
+    try {
+      final res = await client.rpc('rpc_lookup_customer_by_phone', params: {
+        'p_phone': cleanPhone,
+        'p_device_token': deviceToken,
+      });
+
+      if (res is Map) {
+        if (res['device_mismatch'] == true) {
+          throw Exception(res['message'] ?? 'هذا الحساب مرتبط بجهاز آخر لحماية البيانات');
+        }
+        if (res['found'] == true) {
+          return CustomerProfileEntity(
+            id: res['id'] as String,
+            userId: res['user_id'] as String,
+            name: res['name'] as String? ?? 'زبون',
+            phone: res['phone'] as String? ?? cleanPhone,
+            creditLimitCentimes: (res['credit_limit'] as num?)?.toInt() ?? 0,
+            currentDebtCentimes: 0,
+            priceTier: PriceTier.fromString(res['price_tier'] as String? ?? 'wholesale'),
+            wilaya: res['wilaya'] as String?,
+            commune: res['commune'] as String?,
+            addressText: res['address_text'] as String?,
+            latitude: (res['latitude'] as num?)?.toDouble(),
+            longitude: (res['longitude'] as num?)?.toDouble(),
+          );
+        }
+      }
+    } catch (e) {
+      if (e.toString().contains('مرتبط بجهاز آخر')) rethrow;
+    }
 
     try {
       // 1. Find user by phone
@@ -218,9 +250,81 @@ class CustomerRepositoryImpl implements ICustomerRepository {
     double? longitude,
     String? existingCustomerId,
     String? existingUserId,
+    String? deviceToken,
   }) async {
     final cleanPhone = phone.trim();
     final cleanName = name.trim().isNotEmpty ? name.trim() : 'زبون متجر الجملة';
+
+    // 1. Try device-bound registration RPC first
+    if (deviceToken != null && deviceToken.isNotEmpty) {
+      try {
+        final res = await client.rpc('rpc_register_or_bind_customer_device', params: {
+          'p_phone': cleanPhone,
+          'p_device_token': deviceToken,
+          'p_name': cleanName,
+          'p_wilaya': wilaya.trim(),
+          'p_commune': commune.trim(),
+          'p_address_text': addressText.trim(),
+          'p_latitude': latitude,
+          'p_longitude': longitude,
+        });
+
+        if (res is Map) {
+          if (res['success'] == false && res['bound_to_other_device'] == true) {
+            throw Exception(res['error'] ?? 'هذا الحساب مرتبط بجهاز آخر بالفعل لحماية البيانات');
+          }
+          if (res['success'] == true) {
+            return CustomerProfileEntity(
+              id: res['customer_id'] as String,
+              userId: res['user_id'] as String,
+              name: res['name'] as String? ?? cleanName,
+              phone: res['phone'] as String? ?? cleanPhone,
+              wilaya: res['wilaya'] as String? ?? wilaya,
+              commune: res['commune'] as String? ?? commune,
+              addressText: res['address_text'] as String? ?? addressText,
+              creditLimitCentimes: (res['credit_limit'] as num?)?.toInt() ?? 0,
+              currentDebtCentimes: 0,
+              priceTier: PriceTier.fromString(res['price_tier'] as String? ?? 'wholesale'),
+              latitude: latitude,
+              longitude: longitude,
+            );
+          }
+        }
+      } catch (e) {
+        if (e.toString().contains('مرتبط بجهاز آخر')) rethrow;
+      }
+    }
+
+    try {
+      final res = await client.rpc('rpc_sync_customer_profile', params: {
+        'p_name': cleanName,
+        'p_phone': cleanPhone,
+        'p_wilaya': wilaya.trim(),
+        'p_commune': commune.trim(),
+        'p_address_text': addressText.trim(),
+        'p_latitude': latitude,
+        'p_longitude': longitude,
+        'p_existing_customer_id': existingCustomerId,
+        'p_existing_user_id': existingUserId,
+      });
+
+      if (res is Map) {
+        return CustomerProfileEntity(
+          id: res['customer_id'] as String,
+          userId: res['user_id'] as String,
+          name: res['name'] as String? ?? cleanName,
+          phone: res['phone'] as String? ?? cleanPhone,
+          wilaya: res['wilaya'] as String? ?? wilaya,
+          commune: res['commune'] as String? ?? commune,
+          addressText: res['address_text'] as String? ?? addressText,
+          creditLimitCentimes: (res['credit_limit'] as num?)?.toInt() ?? 0,
+          currentDebtCentimes: 0,
+          priceTier: PriceTier.fromString(res['price_tier'] as String? ?? 'wholesale'),
+          latitude: latitude,
+          longitude: longitude,
+        );
+      }
+    } catch (_) {}
 
     String? userId = existingUserId;
 

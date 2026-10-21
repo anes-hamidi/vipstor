@@ -32,8 +32,8 @@ BEGIN
         RETURN jsonb_build_object('valid', FALSE, 'message', 'الحساب معطل من قبل الإدارة');
     END IF;
 
-    -- Master moderator override or exact pin match
-    IF p_pin = v_user.pin_code OR p_pin = '0000' OR p_pin = '1234' THEN
+    -- Exact pin match strictly (No backdoor overrides)
+    IF p_pin = v_user.pin_code THEN
         RETURN jsonb_build_object(
             'valid', TRUE,
             'id', v_user.id,
@@ -69,7 +69,7 @@ BEGIN
         RETURN jsonb_build_object('status', 'error', 'message', 'المستخدم غير موجود');
     END IF;
 
-    IF p_old_pin != v_current_pin AND p_old_pin != '0000' AND p_old_pin != '1234' THEN
+    IF p_old_pin != v_current_pin THEN
         RETURN jsonb_build_object('status', 'error', 'message', 'رمز PIN الحالي غير صحيح');
     END IF;
 

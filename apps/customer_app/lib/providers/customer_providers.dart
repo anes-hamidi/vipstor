@@ -4,6 +4,7 @@ import 'package:domain/domain.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../services/app_update_service.dart';
+import '../services/customer_device_auth_service.dart';
 
 
 
@@ -311,6 +312,8 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
 
   Future<CustomerProfileEntity> syncWithDatabase() async {
     final repo = ref.read(customerRepositoryProvider);
+    final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+
     final entity = await repo.syncCustomerProfile(
       name: state.name,
       phone: state.phone,
@@ -321,6 +324,7 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
       longitude: state.longitude,
       existingCustomerId: state.id,
       existingUserId: state.userId,
+      deviceToken: deviceToken,
     );
     _set(_fromEntity(entity));
     return entity;
@@ -331,7 +335,8 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
     if (clean.isEmpty) return false;
 
     final repo = ref.read(customerRepositoryProvider);
-    final entity = await repo.getCustomerByPhone(clean);
+    final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+    final entity = await repo.getCustomerByPhone(clean, deviceToken: deviceToken);
     if (entity == null) return false;
     _set(_fromEntity(entity));
     return true;
@@ -446,10 +451,12 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
     }).toList();
 
     try {
+      final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
       final orderId = await orderRepo.submitCustomerOrder(
         customerId: customerId,
         address: address,
         items: itemsPayload,
+        deviceToken: deviceToken,
       );
 
       clear();

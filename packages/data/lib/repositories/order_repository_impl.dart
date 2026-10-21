@@ -280,6 +280,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     required Map<String, dynamic> address,
     required List<Map<String, dynamic>> items,
     String? clientId,
+    String? deviceToken,
   }) async {
     final validCustomerId = await _resolveValidCustomerId(customerId, address);
 
@@ -296,6 +297,7 @@ class OrderRepositoryImpl implements IOrderRepository {
       customerId: validCustomerId ?? customerId,
       address: address,
       items: cleanItems,
+      deviceToken: deviceToken,
     );
   }
 
