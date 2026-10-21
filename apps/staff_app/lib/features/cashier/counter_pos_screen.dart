@@ -7,6 +7,7 @@ import '../../router/staff_router.dart';
 import '../moderator/widgets/staff_profile_edit_sheet.dart';
 import 'services/pos_thermal_printer.dart';
 import 'widgets/pos_keyboard_dispatcher.dart';
+import 'widgets/barcode_keyboard_wedge_listener.dart';
 import 'widgets/pos_header_status_bar.dart';
 import 'widgets/pos_category_filter_bar.dart';
 import 'widgets/pos_product_card.dart';
@@ -550,7 +551,9 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
 final topInset = MediaQuery.paddingOf(context).top;
 final bottomInset = MediaQuery.paddingOf(context).bottom;
 final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
-    return PosKeyboardDispatcher(
+    return BarcodeKeyboardWedgeListener(
+      onBarcodeScanned: _onBarcodeSubmitted,
+      child: PosKeyboardDispatcher(
       onF1Search: () => _searchController.selection = TextSelection(baseOffset: 0, extentOffset: _searchController.text.length),
       onF2Customer: _openCustomerSearch,
       onF3CustomItem: _openCustomItemModal,
@@ -675,7 +678,9 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                 ],
               ),
       ),
-    );
+      )
+      );
+      
   }
 
   Widget _buildCatalogPane() {
@@ -927,6 +932,7 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
         ],
       ),
     );
+  
   }
 
   Widget _buildCartPanel({bool isMobileSheet = false, ScrollController? scrollController, WidgetRef? customRef}) {
