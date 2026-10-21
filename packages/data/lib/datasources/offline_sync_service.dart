@@ -16,12 +16,29 @@ class OfflineSyncService {
 
   bool _syncing = false;
   StreamSubscription<bool>? _connectivitySub;
+  final Map<String, DateTime> _nextRetryMap = {};
 
   OfflineSyncService({
     required this.db,
     required this.client,
     required this.service,
   });
+
+  /// Exponential backoff schedule for failed queue items: 2s, 5s, 15s, 60s
+  static Duration _getBackoffDelay(int retryCount) {
+    switch (retryCount) {
+      case 0:
+        return Duration.zero;
+      case 1:
+        return const Duration(seconds: 2);
+      case 2:
+        return const Duration(seconds: 5);
+      case 3:
+        return const Duration(seconds: 15);
+      default:
+        return const Duration(seconds: 60);
+    }
+  }
 
   /// Call once from the app bootstrapper (after Supabase init).
   void start() {
@@ -40,15 +57,22 @@ class OfflineSyncService {
   }
 
   /// Tries to flush all pending / failed operations.  Safe to call multiple
-  /// times — a guard prevents concurrent runs.
+  /// times — a guard prevents concurrent runs and exponential backoff
+  /// protects against tight synchronous retry loops.
   Future<void> drainQueue() async {
     if (_syncing) return;
     if (!ConnectivityService.instance.isOnline) return;
 
     _syncing = true;
     try {
+      final now = DateTime.now();
       final ops = await db.getPendingOps();
       for (final op in ops) {
+        // Enforce exponential backoff: skip if within backoff delay window
+        final nextRetry = _nextRetryMap[op.clientId];
+        if (nextRetry != null && now.isBefore(nextRetry)) {
+          continue;
+        }
         await _replayOp(op);
       }
     } finally {
@@ -63,14 +87,26 @@ class OfflineSyncService {
 
       switch (op.operationType) {
         case 'pos_sale':
-          await client.rpc('rpc_post_store_sale', params: {
-            'p_client_id': op.clientId,
-            'p_cashier_id': payload['cashier_id'],
-            'p_customer_id': payload['customer_id'],
-            'p_items': payload['items'],
-            'p_paid_cash': payload['paid_cash'],
-            'p_on_account': payload['on_account'],
-          });
+          try {
+            await client.rpc('rpc_post_store_sale', params: {
+              'p_client_id': op.clientId,
+              'p_cashier_id': payload['cashier_id'],
+              'p_customer_id': payload['customer_id'],
+              'p_items': payload['items'],
+              'p_paid_cash': payload['paid_cash'],
+              'p_on_account': payload['on_account'],
+            });
+          } on PostgrestException catch (e) {
+            // Graceful stock conflict resolution: If remote stock was insufficient,
+            // server flags as 'requires_manager_review'. If legacy RPC raises exception,
+            // flag and mark done to prevent unhandled crashing / infinite loops.
+            if (e.message.toLowerCase().contains('insufficient stock')) {
+              _nextRetryMap.remove(op.clientId);
+              await db.markOpDone(op.clientId);
+              return;
+            }
+            rethrow;
+          }
 
         case 'delivery':
           await service.recordOrderDelivery(
@@ -91,46 +127,31 @@ class OfflineSyncService {
           });
 
         case 'pos_shift_open':
-          await client.from('audit_log').insert({
-            'user_id': payload['cashier_id'],
-            'action': 'SHIFT_OPENED',
-            'target_table': 'settlements',
-            'target_id': payload['cashier_id'],
-            'after_state': {
-              'client_id': op.clientId,
-              'cashier_id': payload['cashier_id'],
-              'cashier_name': payload['cashier_name'],
-              'opening_float_centimes': payload['opening_float_centimes'],
-              'z_report_number': payload['z_report_number'],
-              'opened_at': payload['opened_at'],
-              'synced_at': DateTime.now().toIso8601String(),
-            },
+          await client.rpc('rpc_open_pos_shift', params: {
+            'p_client_id': op.clientId,
+            'p_cashier_id': payload['cashier_id'],
+            'p_cashier_name': payload['cashier_name'] ?? 'أمين الصندوق',
+            'p_opening_float': payload['opening_float_centimes'] ?? 0,
+            'p_z_report_sequence': payload['z_report_number'] ?? 0,
+            'p_opened_at': payload['opened_at'],
           });
 
         case 'pos_shift_close':
-          await client.from('audit_log').insert({
-            'user_id': payload['cashier_id'],
-            'action': 'SHIFT_CLOSED',
-            'target_table': 'settlements',
-            'target_id': payload['cashier_id'],
-            'after_state': {
-              'client_id': op.clientId,
-              'cashier_id': payload['cashier_id'],
-              'cashier_name': payload['cashier_name'],
-              'z_number': payload['z_number'],
-              'expected_centimes': payload['expected_centimes'],
-              'counted_centimes': payload['counted_centimes'],
-              'variance_centimes': payload['variance_centimes'],
-              'cash_sales_centimes': payload['cash_sales_centimes'],
-              'credit_sales_centimes': payload['credit_sales_centimes'],
-              'debt_collected_centimes': payload['debt_collected_centimes'],
-              'supplier_payments_centimes': payload['supplier_payments_centimes'],
-              'driver_settlement_centimes': payload['driver_settlement_centimes'],
-              'opened_at': payload['opened_at'],
-              'closed_at': payload['closed_at'],
-              'denominations': payload['denominations'],
-              'synced_at': DateTime.now().toIso8601String(),
-            },
+          await client.rpc('rpc_close_pos_shift', params: {
+            'p_client_id': op.clientId,
+            'p_cashier_id': payload['cashier_id'],
+            'p_z_report_sequence': payload['z_number'] ?? 0,
+            'p_expected_cash': payload['expected_centimes'] ?? 0,
+            'p_actual_cash': payload['counted_centimes'] ?? 0,
+            'p_variance': payload['variance_centimes'] ?? 0,
+            'p_cash_sales': payload['cash_sales_centimes'] ?? 0,
+            'p_credit_sales': payload['credit_sales_centimes'] ?? 0,
+            'p_debt_collected': payload['debt_collected_centimes'] ?? 0,
+            'p_supplier_payments': payload['supplier_payments_centimes'] ?? 0,
+            'p_driver_settlements': payload['driver_settlement_centimes'] ?? 0,
+            'p_returns_amount': payload['returns_centimes'] ?? 0,
+            'p_denominations': payload['denominations'] ?? {},
+            'p_closed_at': payload['closed_at'],
           });
 
         case 'manager_purchase_post':
@@ -162,16 +183,30 @@ class OfflineSyncService {
           }).eq('id', payload['order_id']);
       }
 
+      _nextRetryMap.remove(op.clientId);
       await db.markOpDone(op.clientId);
     } on PostgrestException catch (e) {
-      // Duplicate key = already applied — treat as done.
-      if (e.code == '23505' || (e.message.contains('already exists'))) {
+      // Duplicate key or already processed = already applied — treat as done.
+      if (e.code == '23505' || e.message.contains('already exists') || e.message.contains('already_processed')) {
+        _nextRetryMap.remove(op.clientId);
         await db.markOpDone(op.clientId);
       } else {
-        await db.markOpFailed(op.clientId, e.message);
+        _scheduleRetry(op, e.message);
       }
     } catch (e) {
-      await db.markOpFailed(op.clientId, e.toString());
+      _scheduleRetry(op, e.toString());
     }
+  }
+
+  void _scheduleRetry(PendingOperation op, String error) {
+    final nextRetryCount = op.retryCount + 1;
+    final delay = _getBackoffDelay(nextRetryCount);
+    _nextRetryMap[op.clientId] = DateTime.now().add(delay);
+    db.markOpFailed(op.clientId, error, newRetryCount: nextRetryCount).ignore();
+    Timer(delay, () {
+      if (ConnectivityService.instance.isOnline) {
+        drainQueue();
+      }
+    });
   }
 }

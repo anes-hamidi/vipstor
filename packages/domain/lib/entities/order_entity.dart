@@ -13,7 +13,8 @@ enum OrderStatus {
   outForDelivery,
   delivered,
   settled,
-  cancelled;
+  cancelled,
+  requiresManagerReview;
 
   static OrderStatus fromString(String val) {
     switch (val) {
@@ -28,6 +29,7 @@ enum OrderStatus {
       case 'delivered': return OrderStatus.delivered;
       case 'settled': return OrderStatus.settled;
       case 'cancelled': return OrderStatus.cancelled;
+      case 'requires_manager_review': return OrderStatus.requiresManagerReview;
       default: return OrderStatus.submitted;
     }
   }
@@ -35,6 +37,7 @@ enum OrderStatus {
   String get dbValue {
     switch (this) {
       case OrderStatus.outForDelivery: return 'out_for_delivery';
+      case OrderStatus.requiresManagerReview: return 'requires_manager_review';
       default: return name;
     }
   }

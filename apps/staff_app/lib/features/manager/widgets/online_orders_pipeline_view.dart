@@ -1287,6 +1287,8 @@ class _OrderCard extends StatelessWidget {
       case OrderStatus.refused:
       case OrderStatus.cancelled:
         return StatusBadgeType.cancelled;
+      case OrderStatus.requiresManagerReview:
+        return StatusBadgeType.draft;
       // ignore: unreachable_switch_default — future-proofs against new enum values from the DB
       default:
         return StatusBadgeType.draft;

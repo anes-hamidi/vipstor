@@ -85,7 +85,7 @@ class StaffAuditLogger {
     }
   }
 
-  /// Log shift opened by cashier
+  /// Log shift opened by cashier into structured pos_shifts
   Future<void> logShiftOpened({
     required String cashierId,
     required String cashierName,
@@ -93,25 +93,20 @@ class StaffAuditLogger {
     required int zReportNumber,
   }) async {
     try {
-      await client.from('audit_log').insert({
-        'user_id': cashierId,
-        'action': 'SHIFT_OPENED',
-        'target_table': 'settlements',
-        'target_id': cashierId,
-        'after_state': {
-          'cashier_id': cashierId,
-          'cashier_name': cashierName,
-          'opening_float_centimes': openingFloatCentimes,
-          'z_report_number': zReportNumber,
-          'opened_at': DateTime.now().toIso8601String(),
-        },
+      await client.rpc('rpc_open_pos_shift', params: {
+        'p_client_id': null,
+        'p_cashier_id': cashierId,
+        'p_cashier_name': cashierName,
+        'p_opening_float': openingFloatCentimes,
+        'p_z_report_sequence': zReportNumber,
+        'p_opened_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
       debugPrint('Failed to log shift open: $e');
     }
   }
 
-  /// Log shift closed with Z-Report
+  /// Log shift closed with Z-Report into structured pos_shifts
   Future<void> logShiftClosed({
     required String cashierId,
     required String cashierName,
@@ -123,26 +118,26 @@ class StaffAuditLogger {
     required int creditSalesCentimes,
     required int debtCollectedCentimes,
     required int supplierPaymentsCentimes,
+    int driverSettlementCentimes = 0,
+    int returnsCentimes = 0,
+    Map<int, int>? denominations,
   }) async {
     try {
-      await client.from('audit_log').insert({
-        'user_id': cashierId,
-        'action': 'SHIFT_CLOSED',
-        'target_table': 'settlements',
-        'target_id': cashierId,
-        'after_state': {
-          'cashier_id': cashierId,
-          'cashier_name': cashierName,
-          'z_report_number': zNumber,
-          'expected_cash_centimes': expectedCentimes,
-          'counted_cash_centimes': countedCentimes,
-          'variance_centimes': varianceCentimes,
-          'cash_sales_centimes': cashSalesCentimes,
-          'credit_sales_centimes': creditSalesCentimes,
-          'debt_collected_centimes': debtCollectedCentimes,
-          'supplier_payments_centimes': supplierPaymentsCentimes,
-          'closed_at': DateTime.now().toIso8601String(),
-        },
+      await client.rpc('rpc_close_pos_shift', params: {
+        'p_client_id': null,
+        'p_cashier_id': cashierId,
+        'p_z_report_sequence': zNumber,
+        'p_expected_cash': expectedCentimes,
+        'p_actual_cash': countedCentimes,
+        'p_variance': varianceCentimes,
+        'p_cash_sales': cashSalesCentimes,
+        'p_credit_sales': creditSalesCentimes,
+        'p_debt_collected': debtCollectedCentimes,
+        'p_supplier_payments': supplierPaymentsCentimes,
+        'p_driver_settlements': driverSettlementCentimes,
+        'p_returns_amount': returnsCentimes,
+        'p_denominations': denominations ?? {},
+        'p_closed_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
       debugPrint('Failed to log shift close: $e');

@@ -149,6 +149,7 @@ class CustomerProfileInfo {
   final String? userId;
   final String name;
   final String phone;
+  final PriceTier priceTier;
   final String wilaya;
   final String commune;
   final String addressText;
@@ -161,6 +162,7 @@ class CustomerProfileInfo {
     this.userId,
     this.name = '',
     this.phone = '',
+    this.priceTier = PriceTier.retail,
     this.wilaya = '',
     this.commune = '',
     this.addressText = '',
@@ -202,6 +204,7 @@ class CustomerProfileInfo {
         'userId': userId,
         'name': name,
         'phone': phone,
+        'priceTier': priceTier.name,
         'wilaya': wilaya,
         'commune': commune,
         'addressText': addressText,
@@ -215,6 +218,7 @@ class CustomerProfileInfo {
         userId: j['userId'] as String?,
         name: (j['name'] as String?) ?? '',
         phone: (j['phone'] as String?) ?? '',
+        priceTier: PriceTier.fromString((j['priceTier'] as String?) ?? 'retail'),
         wilaya: (j['wilaya'] as String?) ?? '',
         commune: (j['commune'] as String?) ?? '',
         addressText: (j['addressText'] as String?) ?? '',
@@ -228,6 +232,7 @@ class CustomerProfileInfo {
     String? userId,
     String? name,
     String? phone,
+    PriceTier? priceTier,
     String? wilaya,
     String? commune,
     String? addressText,
@@ -240,6 +245,7 @@ class CustomerProfileInfo {
       userId: userId ?? this.userId,
       name: name ?? this.name,
       phone: phone ?? this.phone,
+      priceTier: priceTier ?? this.priceTier,
       wilaya: wilaya ?? this.wilaya,
       commune: commune ?? this.commune,
       addressText: addressText ?? this.addressText,
@@ -302,6 +308,7 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
         userId: e.userId,
         name: e.name,
         phone: e.phone,
+        priceTier: e.priceTier,
         wilaya: e.wilaya ?? state.wilaya,
         commune: e.commune ?? state.commune,
         addressText: e.addressText ?? state.addressText,
@@ -402,15 +409,31 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
   CustomerCartNotifier(this.ref) : super([]);
 
   void addProduct(ProductEntity product, {int quantity = 1}) {
+    final profile = ref.read(customerProfileProvider);
+    final effectiveTier = (profile.isComplete && profile.isSynced)
+        ? profile.priceTier
+        : PriceTier.retail;
+
     final idx = state.indexWhere((it) => it.product.id == product.id);
     if (idx != -1) {
       final existing = state[idx];
       final updated = List<CustomerCartItem>.from(state);
-      updated[idx] = existing.copyWith(quantity: existing.quantity + quantity);
+      updated[idx] = existing.copyWith(
+        quantity: existing.quantity + quantity,
+        tier: effectiveTier,
+      );
       state = updated;
     } else {
-      state = [...state, CustomerCartItem(product: product, quantity: quantity)];
+      state = [...state, CustomerCartItem(product: product, quantity: quantity, tier: effectiveTier)];
     }
+  }
+
+  void recalculateTiers() {
+    final profile = ref.read(customerProfileProvider);
+    final effectiveTier = (profile.isComplete && profile.isSynced)
+        ? profile.priceTier
+        : PriceTier.retail;
+    state = state.map((it) => it.copyWith(tier: effectiveTier)).toList();
   }
 
   void updateQuantity(String productId, int quantity) {
@@ -549,7 +572,13 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
 }
 
 final customerCartProvider = StateNotifierProvider<CustomerCartNotifier, List<CustomerCartItem>>((ref) {
-  return CustomerCartNotifier(ref);
+  final notifier = CustomerCartNotifier(ref);
+  ref.listen<CustomerProfileInfo>(customerProfileProvider, (prev, next) {
+    if (prev?.isSynced != next.isSynced || prev?.priceTier != next.priceTier) {
+      notifier.recalculateTiers();
+    }
+  });
+  return notifier;
 });
 
 final customerOrdersProvider = FutureProvider<List<OrderEntity>>((ref) async {

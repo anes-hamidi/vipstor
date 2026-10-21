@@ -139,12 +139,12 @@ class AppDatabase extends _$AppDatabase {
       (delete(pendingOperations)..where((o) => o.clientId.equals(clientId)))
           .go();
 
-  Future<void> markOpFailed(String clientId, String error) =>
+  Future<void> markOpFailed(String clientId, String error, {int? newRetryCount}) =>
       (update(pendingOperations)..where((o) => o.clientId.equals(clientId)))
           .write(PendingOperationsCompanion(
         status: const Value('failed'),
         lastError: Value(error),
-        retryCount: const Value.absent(),
+        retryCount: newRetryCount != null ? Value(newRetryCount) : const Value.absent(),
       ));
 
   Future<int> countPendingOps() async {

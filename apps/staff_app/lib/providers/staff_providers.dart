@@ -184,10 +184,12 @@ final posHeldTicketsProvider = StateProvider<List<PosHeldTicket>>((ref) => []);
 class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
   final StaffLocalAuthStore localStore;
   final AppDatabase db;
+  final SupabaseClient? client;
 
   PosShiftNotifier({
     required this.localStore,
     required this.db,
+    this.client,
   }) : super(null) {
     _restoreShift();
   }
@@ -243,10 +245,11 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     required String cashierId,
     required String cashierName,
     required int openingFloatCentimes,
-  }) {
+  }) async {
     final shiftId = const Uuid().v4();
     final zNum = (DateTime.now().millisecondsSinceEpoch ~/ 1000) % 1000000;
     final openedAt = DateTime.now();
+    final clientId = const Uuid().v4();
 
     state = PosShiftSession(
       id: shiftId,
@@ -260,21 +263,37 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
 
     _persistCurrentState();
 
-    if (!ConnectivityService.instance.isOnline) {
-      db.enqueuePendingOp(PendingOperationsCompanion.insert(
-        clientId: const Uuid().v4(),
-        operationType: 'pos_shift_open',
-        payloadJson: jsonEncode({
-          'shift_id': shiftId,
-          'cashier_id': cashierId,
-          'cashier_name': cashierName,
-          'opening_float_centimes': openingFloatCentimes,
-          'z_report_number': zNum,
-          'opened_at': openedAt.toIso8601String(),
-        }),
-        createdAt: DateTime.now(),
-      ));
+    final payload = {
+      'shift_id': shiftId,
+      'cashier_id': cashierId,
+      'cashier_name': cashierName,
+      'opening_float_centimes': openingFloatCentimes,
+      'z_report_number': zNum,
+      'opened_at': openedAt.toIso8601String(),
+    };
+
+    if (ConnectivityService.instance.isOnline && client != null) {
+      try {
+        await client!.rpc('rpc_open_pos_shift', params: {
+          'p_client_id': clientId,
+          'p_cashier_id': cashierId,
+          'p_cashier_name': cashierName,
+          'p_opening_float': openingFloatCentimes,
+          'p_z_report_sequence': zNum,
+          'p_opened_at': openedAt.toIso8601String(),
+        });
+        return;
+      } catch (_) {
+        // Enqueue offline operation on failure
+      }
     }
+
+    db.enqueuePendingOp(PendingOperationsCompanion.insert(
+      clientId: clientId,
+      operationType: 'pos_shift_open',
+      payloadJson: jsonEncode(payload),
+      createdAt: DateTime.now(),
+    ));
   }
 
   void registerSale({required int cashCentimes, required int creditCentimes}) {
@@ -325,6 +344,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     final current = state!;
     final variance = countedCashCentimes - current.expectedCashInDrawerCentimes;
     final closedAt = DateTime.now();
+    final clientId = const Uuid().v4();
 
     final summary = ZReportSummary(
       zNumber: current.zReportNumber,
@@ -348,26 +368,55 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     state = null; // Shift closed
     _persistCurrentState();
 
-    if (!ConnectivityService.instance.isOnline) {
+    final payload = {
+      'shift_id': current.id,
+      'cashier_id': current.cashierId,
+      'cashier_name': current.cashierName,
+      'z_number': summary.zNumber,
+      'expected_centimes': summary.expectedCashCentimes,
+      'counted_centimes': summary.countedCashCentimes,
+      'variance_centimes': summary.varianceCentimes,
+      'cash_sales_centimes': summary.cashSalesCentimes,
+      'credit_sales_centimes': summary.creditSalesCentimes,
+      'debt_collected_centimes': summary.collectedDebtCashCentimes,
+      'supplier_payments_centimes': summary.supplierPaymentsCashCentimes,
+      'driver_settlement_centimes': summary.driverSettlementCashCentimes,
+      'returns_centimes': summary.returnsCentimes,
+      'opened_at': summary.openedAt.toIso8601String(),
+      'closed_at': closedAt.toIso8601String(),
+      'denominations': denominations,
+    };
+
+    if (ConnectivityService.instance.isOnline && client != null) {
+      client!.rpc('rpc_close_pos_shift', params: {
+        'p_client_id': clientId,
+        'p_shift_id': current.id,
+        'p_cashier_id': current.cashierId,
+        'p_z_report_sequence': summary.zNumber,
+        'p_expected_cash': summary.expectedCashCentimes,
+        'p_actual_cash': summary.countedCashCentimes,
+        'p_variance': summary.varianceCentimes,
+        'p_cash_sales': summary.cashSalesCentimes,
+        'p_credit_sales': summary.creditSalesCentimes,
+        'p_debt_collected': summary.collectedDebtCashCentimes,
+        'p_supplier_payments': summary.supplierPaymentsCashCentimes,
+        'p_driver_settlements': summary.driverSettlementCashCentimes,
+        'p_returns_amount': summary.returnsCentimes,
+        'p_denominations': denominations,
+        'p_closed_at': closedAt.toIso8601String(),
+      }).then((_) {}).catchError((_) {
+        db.enqueuePendingOp(PendingOperationsCompanion.insert(
+          clientId: clientId,
+          operationType: 'pos_shift_close',
+          payloadJson: jsonEncode(payload),
+          createdAt: DateTime.now(),
+        ));
+      });
+    } else {
       db.enqueuePendingOp(PendingOperationsCompanion.insert(
-        clientId: const Uuid().v4(),
+        clientId: clientId,
         operationType: 'pos_shift_close',
-        payloadJson: jsonEncode({
-          'cashier_id': current.cashierId,
-          'cashier_name': current.cashierName,
-          'z_number': summary.zNumber,
-          'expected_centimes': summary.expectedCashCentimes,
-          'counted_centimes': summary.countedCashCentimes,
-          'variance_centimes': summary.varianceCentimes,
-          'cash_sales_centimes': summary.cashSalesCentimes,
-          'credit_sales_centimes': summary.creditSalesCentimes,
-          'debt_collected_centimes': summary.collectedDebtCashCentimes,
-          'supplier_payments_centimes': summary.supplierPaymentsCashCentimes,
-          'driver_settlement_centimes': summary.driverSettlementCashCentimes,
-          'opened_at': summary.openedAt.toIso8601String(),
-          'closed_at': closedAt.toIso8601String(),
-          'denominations': denominations,
-        }),
+        payloadJson: jsonEncode(payload),
         createdAt: DateTime.now(),
       ));
     }
@@ -379,7 +428,8 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
 final posActiveShiftProvider = StateNotifierProvider<PosShiftNotifier, PosShiftSession?>((ref) {
   final localStore = ref.watch(staffLocalAuthStoreProvider);
   final db = ref.watch(appDatabaseProvider);
-  return PosShiftNotifier(localStore: localStore, db: db);
+  final client = ref.watch(supabaseClientProvider);
+  return PosShiftNotifier(localStore: localStore, db: db, client: client);
 });
 
 final pendingDriverSettlementsProvider = FutureProvider<List<DriverSettlementSummaryEntity>>((ref) async {

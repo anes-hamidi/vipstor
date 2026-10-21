@@ -207,16 +207,21 @@ class ProductRepositoryImpl implements IProductRepository {
     final viewRows = await client
         .from('view_customer_products')
         .select(
-            'product_id, name_ar, name_fr, category, unit, pack_size, photo_url, active, available_qty')
+            'product_id, name_ar, name_fr, category, unit, pack_size, photo_url, active, available_qty, retail_price, wholesale_price')
         .eq('active', true);
 
     if ((viewRows as List).isEmpty) return;
     final ids = viewRows.map((r) => r['product_id'] as String).toList();
 
-    final priceRows = await client
-        .from('product_prices')
-        .select('id, product_id, tier, min_qty, price')
-        .inFilter('product_id', ids);
+    List priceRows = [];
+    try {
+      priceRows = await client
+          .from('product_prices')
+          .select('id, product_id, tier, min_qty, price')
+          .inFilter('product_id', ids);
+    } catch (_) {
+      priceRows = [];
+    }
 
     final barcodeRows = await client
         .from('product_barcodes')
@@ -224,7 +229,7 @@ class ProductRepositoryImpl implements IProductRepository {
         .inFilter('product_id', ids);
 
     final pricesMap = <String, List<Map<String, dynamic>>>{};
-    for (final p in priceRows as List) {
+    for (final p in priceRows) {
       pricesMap.putIfAbsent(p['product_id'] as String, () => [])
         .add(Map<String, dynamic>.from(p));
     }
@@ -236,6 +241,28 @@ class ProductRepositoryImpl implements IProductRepository {
 
     final companions = viewRows.map<CachedProductsCompanion>((r) {
       final pid = r['product_id'] as String;
+      final retail = (r['retail_price'] as num?)?.toInt() ?? 0;
+      final wholesale = (r['wholesale_price'] as num?)?.toInt() ?? retail;
+
+      // Fallback/Synthesis if product_prices rows were restricted by RLS
+      final pList = pricesMap[pid] ?? [];
+      if (pList.isEmpty) {
+        pList.add({
+          'id': '${pid}_retail',
+          'product_id': pid,
+          'tier': 'retail',
+          'min_qty': 1,
+          'price': retail,
+        });
+        pList.add({
+          'id': '${pid}_wholesale',
+          'product_id': pid,
+          'tier': 'wholesale',
+          'min_qty': 1,
+          'price': wholesale,
+        });
+      }
+
       return CachedProductsCompanion.insert(
         id: pid,
         nameAr: r['name_ar'] as String? ?? '',
@@ -248,7 +275,7 @@ class ProductRepositoryImpl implements IProductRepository {
         availableQty: (r['available_qty'] as num?)?.toInt() ?? 0,
         active: r['active'] as bool? ?? true,
         photoUrl: Value(r['photo_url'] as String?),
-        pricesJson: jsonEncode(pricesMap[pid] ?? []),
+        pricesJson: jsonEncode(pList),
         barcodesJson: jsonEncode(barcodesMap[pid] ?? []),
         syncedAt: DateTime.now(),
       );

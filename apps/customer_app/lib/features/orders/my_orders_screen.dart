@@ -39,6 +39,8 @@ class MyOrdersScreen extends ConsumerWidget {
       OrderStatus.cancelled ||
       OrderStatus.refused =>
         (badge: StatusBadgeType.cancelled, label: 'ملغى'),
+      OrderStatus.requiresManagerReview =>
+        (badge: StatusBadgeType.pending, label: 'قيد مراجعة الإدارة'),
     };
   }
 

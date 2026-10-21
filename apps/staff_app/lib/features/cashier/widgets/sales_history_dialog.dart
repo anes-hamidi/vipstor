@@ -76,6 +76,8 @@ class _SalesHistoryDialogState extends ConsumerState<SalesHistoryDialog> {
       case OrderStatus.refused:
       case OrderStatus.cancelled:
         return StatusBadgeType.cancelled;
+      case OrderStatus.requiresManagerReview:
+        return StatusBadgeType.pending;
     }
   }
 

@@ -349,14 +349,15 @@ class _CompactProductCard extends ConsumerWidget {
   final ProductEntity product;
   const _CompactProductCard({required this.product});
 
-  void _showProductDetails(BuildContext context, int wholesalePrice, bool isAvailable) {
+  void _showProductDetails(BuildContext context, int displayPrice, bool isWholesale, bool isAvailable) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _ProductDetailsSheet(
         product: product,
-        wholesalePrice: wholesalePrice,
+        displayPrice: displayPrice,
+        isWholesale: isWholesale,
         isAvailable: isAvailable,
       ),
     );
@@ -376,8 +377,11 @@ class _CompactProductCard extends ConsumerWidget {
     final isDark = theme.brightness == Brightness.dark;
     final notifier = ref.read(customerCartProvider.notifier);
 
-    // Only Wholesale Price Tier
-    final wholesale = product.getPriceForQuantity(PriceTier.wholesale, 1);
+    // Isolate pricing tier visibility: unauthenticated anonymous users see retail
+    final profile = ref.watch(customerProfileProvider);
+    final isWholesaleEligible = profile.isComplete && profile.isSynced;
+    final effectiveTier = isWholesaleEligible ? profile.priceTier : PriceTier.retail;
+    final displayPrice = product.getPriceForQuantity(effectiveTier, 1);
     final isAvailable = product.availableQty > 0;
     final canAddMore = qty < product.availableQty;
     final inCart = qty > 0;
@@ -401,7 +405,7 @@ class _CompactProductCard extends ConsumerWidget {
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => _showProductDetails(context, wholesale, isAvailable),
+          onTap: () => _showProductDetails(context, displayPrice, isWholesaleEligible, isAvailable),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -486,12 +490,12 @@ class _CompactProductCard extends ConsumerWidget {
                     ),
                     const SizedBox(height: 3),
 
-                    // Wholesale Price Row (Only Default Wholesale Tier)
+                    // Price Row (Wholesale for verified profile, retail for unauthenticated)
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'جملة',
+                          isWholesaleEligible ? 'جملة' : 'تجزئة',
                           style: TextStyle(
                             fontSize: 8.5,
                             fontWeight: FontWeight.w600,
@@ -499,7 +503,7 @@ class _CompactProductCard extends ConsumerWidget {
                           ),
                         ),
                         DzdPriceTag.sm(
-                          centimes: wholesale,
+                          centimes: displayPrice,
                           gold: true,
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
@@ -741,12 +745,14 @@ class _FallbackPlaceholder extends StatelessWidget {
 
 class _ProductDetailsSheet extends ConsumerWidget {
   final ProductEntity product;
-  final int wholesalePrice;
+  final int displayPrice;
+  final bool isWholesale;
   final bool isAvailable;
 
   const _ProductDetailsSheet({
     required this.product,
-    required this.wholesalePrice,
+    required this.displayPrice,
+    required this.isWholesale,
     required this.isAvailable,
   });
 
@@ -880,13 +886,13 @@ class _ProductDetailsSheet extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('سعر الجملة',
+                        Text(isWholesale ? 'سعر الجملة' : 'سعر التجزئة',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27),
                               fontWeight: FontWeight.bold,
                             )),
                         const SizedBox(height: 2),
-                        DzdPriceTag(centimes: wholesalePrice, gold: true),
+                        DzdPriceTag(centimes: displayPrice, gold: true),
                       ],
                     ),
                   ),
