@@ -1,291 +1,301 @@
-name: Build and Private OTA Release
+# =============================================================================
+# VIP Smock - build and publish releases
+#
+# This workflow does not duplicate the build/publish logic: every job calls
+# scripts/publish_release.ps1, so local releases and CI releases behave the
+# same way.
+#
+# Required repository secrets (already configured for Supabase):
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+#
+# Optional Android release-signing secrets. Without them, Android jobs fail
+# unless you run with allow_debug_signing = true (unsafe, testing only):
+#   ANDROID_KEYSTORE_BASE64      base64 of the .jks file
+#   ANDROID_KEYSTORE_PASSWORD    keystore password
+#   ANDROID_KEY_PASSWORD         key password
+#   ANDROID_KEY_ALIAS            key alias
+#
+# Optional repository variable (applies to tag releases too):
+#   ANDROID_SIGNER_SHA256        pinned APK signer SHA-256 fingerprint
+#
+# To create ANDROID_KEYSTORE_BASE64 locally:
+#   [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\Users\fethi\keys\vip-release.jks"))
+#
+# Releases are started manually (Actions > Run workflow) or by pushing a v* tag.
+# Pushing to main/master no longer publishes automatically.
+# =============================================================================
+
+name: Build and Release
 
 on:
-  push:
-    branches:
-      - master
-      - main
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
-      app_type:
-        description: 'Application to build'
+      target:
+        description: 'What to release'
         required: true
         default: 'all'
         type: choice
         options:
           - all
-          - staff_app
-          - customer_app
+          - staff_android
+          - staff_windows
+          - customer_android
+          - customer_web
       version_name:
-        description: 'Version Name (e.g. 1.2.0)'
+        description: 'Version name (x.y.z)'
+        required: true
+        default: '1.1.0'
+        type: string
+      android_abi:
+        description: 'Android ABI (universal is larger and may exceed the 50 MB limit)'
+        required: true
+        default: 'arm64-v8a'
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86_64
+          - universal
+      min_supported_build:
+        description: 'Minimum supported build number (default 1)'
         required: false
-        default: '1.2.0'
+        default: '1'
+        type: string
+      max_upload_mb:
+        description: 'Supabase per-file limit in MB (Free 50, Pro 500)'
+        required: false
+        default: '50'
+        type: string
       is_mandatory:
         description: 'Force all users to update immediately'
         required: false
         default: false
         type: boolean
-      release_notes:
-        description: 'Release Notes'
+      allow_debug_signing:
+        description: 'Allow a debug-signed APK (testing only, breaks OTA signatures)'
         required: false
-        default: 'Automated release build from GitHub Actions'
+        default: false
+        type: boolean
+      allowed_signer_sha256:
+        description: 'Optional pinned APK signer SHA-256 fingerprint'
+        required: false
+        default: ''
+        type: string
+      release_notes:
+        description: 'Release notes'
+        required: false
+        default: 'Automated release from GitHub Actions'
+        type: string
+  push:
+    tags:
+      - 'v*'
 
-env:
-  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-  SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
-  # ============================================================================
-  # 1. Build Staff App Android APK (Ubuntu Runner)
-  # ============================================================================
-  build-staff-android:
-    name: Build Staff App APK
+  # ===========================================================================
+  # 1. Compute the matrix and version (cheap Linux job)
+  # ===========================================================================
+  plan:
+    name: Plan release
     runs-on: ubuntu-latest
-    if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.plan.outputs.version }}
     steps:
-      - name: Free Disk Space
+      - name: Compute matrix and version
+        id: plan
+        shell: pwsh
+        env:
+          TARGET: ${{ inputs.target }}
+          VERSION_INPUT: ${{ inputs.version_name }}
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          df -h
+          $all = @(
+            @{ app = 'staff_app';    platform = 'android' },
+            @{ app = 'staff_app';    platform = 'windows' },
+            @{ app = 'customer_app'; platform = 'android' },
+            @{ app = 'customer_app'; platform = 'web' }
+          )
 
-      - name: Checkout Code
-        uses: actions/checkout@v4
+          $target = $env:TARGET
+          if ($target -eq 'staff_android') {
+            $selected = @($all[0])
+          }
+          elseif ($target -eq 'staff_windows') {
+            $selected = @($all[1])
+          }
+          elseif ($target -eq 'customer_android') {
+            $selected = @($all[2])
+          }
+          elseif ($target -eq 'customer_web') {
+            $selected = @($all[3])
+          }
+          else {
+            $selected = $all
+          }
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+          $matrix = @{ include = $selected } | ConvertTo-Json -Compress -Depth 5
+          "matrix=$matrix" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
+          $version = $env:VERSION_INPUT
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            $version = $env:GITHUB_REF_NAME
+          }
+          $version = $version -replace '^v', ''
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Invalid version '$version'. Use x.y.z or dispatch the workflow with a version input."
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: Build Staff App APK
-        run: |
-          cd apps/staff_app
-          flutter pub get
-          flutter build apk --release --split-per-abi --no-tree-shake-icons --build-number=${{ github.run_number }}
-
-      - name: Archive Staff App APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: staff-app-android-apk
-          path: apps/staff_app/build/app/outputs/flutter-apk/*.apk
-
-      - name: Upload Staff App APK to Supabase
-        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
-        continue-on-error: true
-        run: |
-          APK_PATH="apps/staff_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
-          if [ ! -f "$APK_PATH" ]; then
-            APK_PATH="apps/staff_app/build/app/outputs/flutter-apk/app-release.apk"
-          fi
-          
-          FILE_NAME="staff_app_b${{ github.run_number }}.apk"
-          FILE_SIZE=$(stat -c%s "$APK_PATH")
-          echo "Uploading $APK_PATH ($FILE_SIZE bytes) to Supabase Storage..."
-          
-          HTTP_STATUS=$(curl -s -o /tmp/upload_response.json -w "%{http_code}" -X POST \
-            "${{ env.SUPABASE_URL }}/storage/v1/object/app-releases/android/$FILE_NAME" \
-            -H "apikey: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}" \
-            -H "Authorization: Bearer ${{ env.SUPABASE_SERVICE_ROLE_KEY }}" \
-            -H "Content-Type: application/vnd.android.package-archive" \
-            -H "x-upsert: true" \
-            --data-binary "@$APK_PATH")
-            
-          echo "Supabase Storage Upload HTTP Status: $HTTP_STATUS"
-          cat /tmp/upload_response.json
-          
-          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
-            DOWNLOAD_URL="${{ env.SUPABASE_URL }}/storage/v1/object/public/app-releases/android/$FILE_NAME"
-            echo "Registering app version in Supabase database..."
-            curl -s -X POST \
-              "${{ env.SUPABASE_URL }}/rest/v1/app_versions" \
-              -H "apikey: ${{ env.SUPABASE_SERVICE_ROLE_KEY }}" \
-              -H "Authorization: Bearer ${{ env.SUPABASE_SERVICE_ROLE_KEY }}" \
-              -H "Content-Type: application/json" \
-              -H "Prefer: return=minimal" \
-              -d @- <<JSON
-            {
-              "app_type": "staff_app",
-              "platform": "android",
-              "version_name": "1.0.0",
-              "build_number": ${{ github.run_number }},
-              "min_supported_build": 1,
-              "download_url": "$DOWNLOAD_URL",
-              "release_notes": "Automated Android release build",
-              "is_mandatory": false,
-              "file_size_bytes": $FILE_SIZE
-            }
-          JSON
-            echo "Successfully registered in Supabase!"
-          else
-            echo "Warning: Storage upload returned status $HTTP_STATUS"
-          fi
-
-  # ============================================================================
-  # 2. Build Customer App Android APK (Ubuntu Runner)
-  # ============================================================================
-  build-customer-android:
-    name: Build Customer App APK
-    runs-on: ubuntu-latest
-    if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
-    steps:
-      - name: Free Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          df -h
-
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Build Customer App APK
-        run: |
-          cd apps/customer_app
-          flutter pub get
-          flutter build apk --release --split-per-abi --no-tree-shake-icons --build-number=${{ github.run_number }}
-
-      - name: Archive Customer App APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: customer-app-android-apk
-          path: apps/customer_app/build/app/outputs/flutter-apk/*.apk
-
-  # ============================================================================
-  # 3. Build Customer App Web (Ubuntu Runner)
-  # ============================================================================
-  build-customer-web:
-    name: Build Customer App Web
-    runs-on: ubuntu-latest
-    if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'customer_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
-    steps:
-      - name: Free Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
-          sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
-          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          df -h
-
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Enable Flutter Web
-        run: flutter config --enable-web
-
-      - name: Build Customer App Web
-        run: |
-          cd apps/customer_app
-          flutter pub get
-          flutter build web --release --build-number=${{ github.run_number }}
-
-      - name: Archive Customer App Web
-        uses: actions/upload-artifact@v4
-        with:
-          name: customer-app-web
-          path: apps/customer_app/build/web
-
-  # ============================================================================
-  # 4. Build Staff App Windows Executable (Windows Runner)
-  # ============================================================================
-  build-staff-windows:
-    name: Build Staff App Windows
+  # ===========================================================================
+  # 2. Build and publish each target through scripts/publish_release.ps1
+  # ===========================================================================
+  release:
+    name: ${{ matrix.app }} / ${{ matrix.platform }}
+    needs: plan
     runs-on: windows-latest
-    if: github.event.inputs.app_type == 'all' || github.event.inputs.app_type == 'staff_app' || github.event.inputs.app_type == '' || github.event_name == 'push'
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.1'
           channel: 'stable'
           cache: true
 
-      - name: Enable Windows Desktop
-        run: flutter config --enable-windows-desktop
+      - name: Cache Gradle
+        if: matrix.platform == 'android'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
 
-      - name: Build Staff App Windows Release
-        run: |
-          cd apps/staff_app
-          flutter pub get
-          flutter build windows --release --build-number=${{ github.run_number }}
-
-      - name: Package Windows Release into ZIP
+      - name: Configure Android signing
+        if: matrix.platform == 'android'
         shell: pwsh
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          $zipName = "staff_app_windows_b${{ github.run_number }}.zip"
-          Compress-Archive -Path "apps\staff_app\build\windows\x64\runner\Release\*" -DestinationPath "$zipName" -Force
+          if ([string]::IsNullOrWhiteSpace($env:ANDROID_KEYSTORE_BASE64)) {
+            Write-Host '::warning::ANDROID_KEYSTORE_BASE64 is not set. The APK will be debug-signed; the publish script will refuse unless allow_debug_signing is enabled.'
+            exit 0
+          }
 
-      - name: Archive Windows Release as GitHub Artifact
+          foreach ($name in @('ANDROID_KEYSTORE_PASSWORD', 'ANDROID_KEY_PASSWORD', 'ANDROID_KEY_ALIAS')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Secret $name is required when ANDROID_KEYSTORE_BASE64 is set."
+            }
+          }
+
+          $keystorePath = Join-Path $env:RUNNER_TEMP 'vip-release.jks'
+          [IO.File]::WriteAllBytes($keystorePath, [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64))
+
+          $properties = @(
+            "storePassword=$env:ANDROID_KEYSTORE_PASSWORD",
+            "keyPassword=$env:ANDROID_KEY_PASSWORD",
+            "keyAlias=$env:ANDROID_KEY_ALIAS",
+            "storeFile=$($keystorePath.Replace('\', '/'))"
+          ) -join "`n"
+
+          $keyPropertiesPath = "apps/${{ matrix.app }}/android/key.properties"
+          [IO.File]::WriteAllText($keyPropertiesPath, $properties, [Text.Encoding]::ASCII)
+          Write-Host "Wrote $keyPropertiesPath (keystore: $keystorePath)"
+
+      - name: Build and publish
+        shell: pwsh
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ANDROID_ABI: ${{ inputs.android_abi }}
+          MIN_SUPPORTED_BUILD: ${{ inputs.min_supported_build }}
+          MAX_UPLOAD_MB: ${{ inputs.max_upload_mb }}
+          IS_MANDATORY: ${{ inputs.is_mandatory }}
+          ALLOW_DEBUG_SIGNING: ${{ inputs.allow_debug_signing }}
+          ALLOWED_SIGNER_SHA256: ${{ inputs.allowed_signer_sha256 || vars.ANDROID_SIGNER_SHA256 }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          $scriptArgs = @(
+            '-AppType', '${{ matrix.app }}',
+            '-Platform', '${{ matrix.platform }}',
+            '-Version', $env:VERSION
+          )
+
+          if ($env:PLATFORM -eq 'android' -and -not [string]::IsNullOrWhiteSpace($env:ANDROID_ABI)) {
+            $scriptArgs += @('-AndroidAbi', $env:ANDROID_ABI)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:MIN_SUPPORTED_BUILD)) {
+            $scriptArgs += @('-MinSupportedBuild', $env:MIN_SUPPORTED_BUILD)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:MAX_UPLOAD_MB)) {
+            $scriptArgs += @('-MaxUploadMB', $env:MAX_UPLOAD_MB)
+          }
+          if ($env:IS_MANDATORY -eq 'true') {
+            $scriptArgs += '-IsMandatory'
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:RELEASE_NOTES)) {
+            $scriptArgs += @('-Notes', $env:RELEASE_NOTES)
+          }
+          if ($env:ALLOW_DEBUG_SIGNING -eq 'true') {
+            $scriptArgs += '-AllowDebugSigning'
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:ALLOWED_SIGNER_SHA256)) {
+            $scriptArgs += @('-AllowedSignerSha256', $env:ALLOWED_SIGNER_SHA256)
+          }
+
+          Write-Host "Running: ./scripts/publish_release.ps1 $($scriptArgs -join ' ')"
+          & pwsh -NoProfile -File ./scripts/publish_release.ps1 @scriptArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "publish_release.ps1 failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload artifact backup
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: staff-app-windows-zip
-          path: staff_app_windows_*.zip
+          name: ${{ matrix.app }}-${{ matrix.platform }}
+          path: |
+            apps/${{ matrix.app }}/build/*.apk
+            apps/${{ matrix.app }}/build/*.zip
+          if-no-files-found: ignore
+          retention-days: 14
 
-      - name: Upload Windows ZIP to Supabase
+      - name: Job summary
+        if: always()
         shell: pwsh
-        if: env.SUPABASE_URL != '' && env.SUPABASE_SERVICE_ROLE_KEY != ''
-        continue-on-error: true
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
-          $zipName = "staff_app_windows_b${{ github.run_number }}.zip"
-          $fileSize = (Get-Item $zipName).Length
-          $uploadUrl = "${{ env.SUPABASE_URL }}/storage/v1/object/app-releases/windows/$zipName"
-          $publicUrl = "${{ env.SUPABASE_URL }}/storage/v1/object/public/app-releases/windows/$zipName"
-
-          Invoke-RestMethod -Uri $uploadUrl -Method Post -Headers @{
-            "apikey"        = "${{ env.SUPABASE_SERVICE_ROLE_KEY }}"
-            "Authorization" = "Bearer ${{ env.SUPABASE_SERVICE_ROLE_KEY }}"
-            "Content-Type"  = "application/zip"
-            "x-upsert"      = "true"
-          } -InFile $zipName
-
-          $body = @{
-            app_type            = "staff_app"
-            platform            = "windows"
-            version_name        = "1.0.0"
-            build_number        = [int]${{ github.run_number }}
-            min_supported_build = 1
-            download_url        = $publicUrl
-            release_notes       = "Automated Windows release build"
-            is_mandatory        = $false
-            file_size_bytes     = $fileSize
-          } | ConvertTo-Json
-
-          Invoke-RestMethod -Uri "${{ env.SUPABASE_URL }}/rest/v1/app_versions" -Method Post -Headers @{
-            "apikey"        = "${{ env.SUPABASE_SERVICE_ROLE_KEY }}"
-            "Authorization" = "Bearer ${{ env.SUPABASE_SERVICE_ROLE_KEY }}"
-            "Content-Type"  = "application/json"
-          } -Body $body
+          @(
+            "### Release: ${{ matrix.app }} / ${{ matrix.platform }}",
+            "",
+            "- Version: $env:VERSION",
+            "- Trigger: ${{ github.event_name }}",
+            "- Workflow run: ${{ github.run_number }}"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

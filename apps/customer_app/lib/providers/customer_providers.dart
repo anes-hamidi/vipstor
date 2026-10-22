@@ -1,12 +1,27 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:data/data.dart';
 import 'package:domain/domain.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+
+import '../models/customer_models.dart';
 import '../services/app_update_service.dart';
 import '../services/customer_device_auth_service.dart';
+import '../services/customer_local_store.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Infrastructure
+// ─────────────────────────────────────────────────────────────────────────────
 
+final sharedPreferencesProvider = Provider<SharedPreferences?>((ref) => null);
+
+final customerLocalStoreProvider = Provider<CustomerLocalStore>((ref) {
+  return CustomerLocalStore(ref.watch(sharedPreferencesProvider));
+});
 
 final customerSupabaseClientProvider = Provider<SupabaseClient>((ref) {
   return Supabase.instance.client;
@@ -17,7 +32,8 @@ final customerSupabaseServiceProvider = Provider<SupabaseService>((ref) {
   return SupabaseService(client);
 });
 
-final customerAppUpdateRepositoryProvider = Provider<IAppUpdateRepository>((ref) {
+final customerAppUpdateRepositoryProvider =
+    Provider<IAppUpdateRepository>((ref) {
   final client = ref.watch(customerSupabaseClientProvider);
   final service = ref.watch(customerSupabaseServiceProvider);
   return AppUpdateRepositoryImpl(client: client, service: service);
@@ -30,7 +46,7 @@ final customerAppUpdateServiceProvider = Provider<AppUpdateService>((ref) {
 
 final _customerDbProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
-  ref.onDispose(() => db.close());
+  ref.onDispose(db.close);
   return db;
 });
 
@@ -38,7 +54,12 @@ final customerProductRepositoryProvider = Provider<IProductRepository>((ref) {
   final client = ref.watch(customerSupabaseClientProvider);
   final service = SupabaseService(client);
   final db = ref.watch(_customerDbProvider);
-  return ProductRepositoryImpl(client: client, service: service, db: db, isCustomerPortal: true);
+  return ProductRepositoryImpl(
+    client: client,
+    service: service,
+    db: db,
+    isCustomerPortal: true,
+  );
 });
 
 final customerOrderRepositoryProvider = Provider<IOrderRepository>((ref) {
@@ -55,95 +76,25 @@ final customerRepositoryProvider = Provider<ICustomerRepository>((ref) {
   return CustomerRepositoryImpl(client: client, service: service, db: db);
 });
 
-const _kProductsCacheKey = 'customer_cached_products_v1';
-const _kPendingOrdersKey = 'customer_pending_orders_v1';
-
-Map<String, dynamic> _productToJson(ProductEntity p) => {
-      'id': p.id,
-      'nameAr': p.nameAr,
-      'nameFr': p.nameFr,
-      'category': p.category,
-      'unit': p.unit,
-      'packSize': p.packSize,
-      'photoUrl': p.photoUrl,
-      'lastUnitCostCentimes': p.lastUnitCostCentimes,
-      'onHandQty': p.onHandQty,
-      'availableQty': p.availableQty,
-      'active': p.active,
-      'barcodes': p.barcodes,
-      'prices': p.prices
-          .map((price) => {
-                'id': price.id,
-                'tier': price.tier.name,
-                'minQty': price.minQty,
-                'priceCentimes': price.priceCentimes,
-              })
-          .toList(),
-    };
-
-ProductEntity _productFromJson(Map<String, dynamic> j) => ProductEntity(
-      id: j['id'] as String,
-      nameAr: (j['nameAr'] as String?) ?? '',
-      nameFr: (j['nameFr'] as String?) ?? '',
-      category: (j['category'] as String?) ?? '',
-      unit: (j['unit'] as String?) ?? 'piece',
-      packSize: (j['packSize'] as num?)?.toInt() ?? 1,
-      photoUrl: j['photoUrl'] as String?,
-      lastUnitCostCentimes: (j['lastUnitCostCentimes'] as num?)?.toInt() ?? 0,
-      onHandQty: (j['onHandQty'] as num?)?.toInt() ?? 0,
-      availableQty: (j['availableQty'] as num?)?.toInt() ?? 0,
-      active: (j['active'] as bool?) ?? true,
-      barcodes: (j['barcodes'] as List? ?? []).cast<String>(),
-      prices: (j['prices'] as List? ?? []).map((p) {
-        final pm = p as Map<String, dynamic>;
-        return ProductPriceTier(
-          id: pm['id'] as String,
-          tier: PriceTier.fromString(pm['tier'] as String),
-          minQty: (pm['minQty'] as num).toInt(),
-          priceCentimes: (pm['priceCentimes'] as num).toInt(),
-        );
-      }).toList(),
-    );
-
-final customerLiveProductsProvider = FutureProvider<List<ProductEntity>>((ref) async {
-  final repo = ref.watch(customerProductRepositoryProvider);
-  // Always resolve prefs — the override is set in main() before runApp so
-  // this will have a value, but we guard defensively.
-  final prefs = ref.watch(sharedPreferencesProvider) ?? await SharedPreferences.getInstance();
-
-  try {
-    final remote = await repo.getProducts(onlyActive: true);
-    // Cache fresh data for offline fallback (Stale-While-Revalidate)
-    try {
-      final jsonList = remote.map(_productToJson).toList();
-      await prefs.setString(_kProductsCacheKey, jsonEncode(jsonList));
-    } catch (_) {
-      // Cache write failure is non-fatal
-    }
-    return remote;
-  } on Exception catch (e) {
-    // Attempt local cache fallback on any network/server error
-    final cached = prefs.getString(_kProductsCacheKey);
-    if (cached != null && cached.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(cached) as List;
-        final products = decoded
-            .map((item) => _productFromJson(item as Map<String, dynamic>))
-            .toList();
-        if (products.isNotEmpty) return products;
-      } catch (_) {
-        // Cache is corrupt — fall through to rethrow
-      }
-    }
-    // Re-throw with a descriptive message so the UI error state is useful
-    throw Exception('فشل تحميل المنتجات: ${e.toString().replaceFirst('Exception: ', '')}');
-  }
+/// Broadcasts connectivity transitions. Polling is started once in `main()`;
+/// this provider also starts it defensively for embedded/preview usage.
+final customerOnlineProvider = StreamProvider<bool>((ref) async* {
+  final service = ConnectivityService.instance;
+  service.startPolling();
+  yield service.isOnline;
+  yield* service.onStatusChange;
 });
 
-// Provider with async loader or safe fallback instance
-final sharedPreferencesProvider = Provider<SharedPreferences?>((ref) => null);
+/// Synchronous convenience read for widgets that only need a boolean.
+final customerIsOnlineProvider = Provider<bool>((ref) {
+  return ref.watch(customerOnlineProvider).valueOrNull ??
+      ConnectivityService.instance.isOnline;
+});
 
-// 3) REPLACE CustomerProfileInfo with:
+// ─────────────────────────────────────────────────────────────────────────────
+// Profile
+// ─────────────────────────────────────────────────────────────────────────────
+
 class CustomerProfileInfo {
   final String? id;
   final String? userId;
@@ -174,13 +125,14 @@ class CustomerProfileInfo {
   static final _phoneRe = RegExp(r'^0[5-7]\d{8}$');
   static bool isValidPhone(String v) => _phoneRe.hasMatch(v.trim());
 
-  /// True only when the customer has entered real, usable delivery info.
   bool get isComplete =>
       name.trim().isNotEmpty &&
       isValidPhone(phone) &&
       wilaya.trim().isNotEmpty &&
       commune.trim().isNotEmpty &&
       addressText.trim().isNotEmpty;
+
+  bool get hasAccount => id != null && id!.isNotEmpty;
 
   Map<String, dynamic> toMap() {
     return {
@@ -218,7 +170,8 @@ class CustomerProfileInfo {
         userId: j['userId'] as String?,
         name: (j['name'] as String?) ?? '',
         phone: (j['phone'] as String?) ?? '',
-        priceTier: PriceTier.fromString((j['priceTier'] as String?) ?? 'retail'),
+        priceTier:
+            PriceTier.fromString((j['priceTier'] as String?) ?? 'retail'),
         wilaya: (j['wilaya'] as String?) ?? '',
         commune: (j['commune'] as String?) ?? '',
         addressText: (j['addressText'] as String?) ?? '',
@@ -256,7 +209,6 @@ class CustomerProfileInfo {
   }
 }
 
-// 4) REPLACE CustomerProfileNotifier with:
 class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
   final Ref ref;
   static const _prefsKey = 'customer_profile_v1';
@@ -272,7 +224,9 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final loaded = _load(prefs);
-      if (loaded.isComplete || loaded.phone.isNotEmpty || loaded.name.isNotEmpty) {
+      if (loaded.isComplete ||
+          loaded.phone.isNotEmpty ||
+          loaded.name.isNotEmpty) {
         state = loaded;
       }
     } catch (_) {}
@@ -283,23 +237,27 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
     final raw = prefs.getString(_prefsKey);
     if (raw == null) return const CustomerProfileInfo();
     try {
-      return CustomerProfileInfo.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      return CustomerProfileInfo.fromJson(
+        jsonDecode(raw) as Map<String, dynamic>,
+      );
     } catch (_) {
       return const CustomerProfileInfo();
     }
   }
 
   /// Single place that updates state AND saves it on the device.
-  void _set(CustomerProfileInfo next) async {
+  void _set(CustomerProfileInfo next) {
     state = next;
     final prefs = ref.read(sharedPreferencesProvider);
     if (prefs != null) {
-      prefs.setString(_prefsKey, jsonEncode(next.toJson()));
+      unawaited(prefs.setString(_prefsKey, jsonEncode(next.toJson())));
     } else {
-      try {
-        final p = await SharedPreferences.getInstance();
-        p.setString(_prefsKey, jsonEncode(next.toJson()));
-      } catch (_) {}
+      unawaited(() async {
+        try {
+          final p = await SharedPreferences.getInstance();
+          await p.setString(_prefsKey, jsonEncode(next.toJson()));
+        } catch (_) {}
+      }());
     }
   }
 
@@ -319,7 +277,8 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
 
   Future<CustomerProfileEntity> syncWithDatabase() async {
     final repo = ref.read(customerRepositoryProvider);
-    final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+    final deviceToken =
+        await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
 
     final entity = await repo.syncCustomerProfile(
       name: state.name,
@@ -342,8 +301,12 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
     if (clean.isEmpty) return false;
 
     final repo = ref.read(customerRepositoryProvider);
-    final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
-    final entity = await repo.getCustomerByPhone(clean, deviceToken: deviceToken);
+    final deviceToken =
+        await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+    final entity = await repo.getCustomerByPhone(
+      clean,
+      deviceToken: deviceToken,
+    );
     if (entity == null) return false;
     _set(_fromEntity(entity));
     return true;
@@ -371,10 +334,14 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
   }
 }
 
-// customerProfileProvider stays exactly as it is.
-final customerProfileProvider = StateNotifierProvider<CustomerProfileNotifier, CustomerProfileInfo>((ref) {
+final customerProfileProvider =
+    StateNotifierProvider<CustomerProfileNotifier, CustomerProfileInfo>((ref) {
   return CustomerProfileNotifier(ref);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cart
+// ─────────────────────────────────────────────────────────────────────────────
 
 class CustomerCartItem {
   final ProductEntity product;
@@ -389,6 +356,9 @@ class CustomerCartItem {
 
   int get unitPrice => product.getPriceForQuantity(tier, quantity);
   int get lineTotal => quantity * unitPrice;
+  bool get isAvailable => product.availableQty > 0;
+  bool get exceedsStock =>
+      product.availableQty > 0 && quantity > product.availableQty;
 
   CustomerCartItem copyWith({
     ProductEntity? product,
@@ -403,37 +373,138 @@ class CustomerCartItem {
   }
 }
 
-class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
-  final Ref ref;
+Map<String, dynamic> _cartItemToJson(CustomerCartItem item) => {
+      'product': productToJson(item.product),
+      'quantity': item.quantity,
+      'tier': item.tier.name,
+    };
 
-  CustomerCartNotifier(this.ref) : super([]);
+CustomerCartItem? _cartItemFromJson(Map<String, dynamic> j) {
+  try {
+    final product = productFromJson(
+      (j['product'] as Map).cast<String, dynamic>(),
+    );
+    return CustomerCartItem(
+      product: product,
+      quantity: (j['quantity'] as num?)?.toInt() ?? 1,
+      tier: PriceTier.fromString(j['tier'] as String? ?? 'wholesale'),
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
+  CustomerCartNotifier(this.ref) : super(_load(ref)) {
+    if (state.isEmpty) _loadAsync();
+  }
+
+  final Ref ref;
+  bool _restoring = false;
+
+  CustomerLocalStore get _store => ref.read(customerLocalStoreProvider);
+
+  static List<CustomerCartItem> _load(Ref ref) {
+    final raw = ref.read(customerLocalStoreProvider).readCartJsonSync();
+    return _decodeCart(raw);
+  }
+
+  Future<void> _loadAsync() async {
+    if (_restoring) return;
+    _restoring = true;
+    try {
+      final raw = await _store.readCartJson();
+      if (raw == null) return;
+      final restored = _decodeCart(raw);
+      if (restored.isNotEmpty && state.isEmpty) {
+        _recalculateTiersInPlace(restored);
+        state = restored;
+      }
+    } finally {
+      _restoring = false;
+    }
+  }
+
+  static List<CustomerCartItem> _decodeCart(String? raw) {
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return list
+          .map((e) => _cartItemFromJson((e as Map).cast<String, dynamic>()))
+          .whereType<CustomerCartItem>()
+          .where((e) => e.quantity > 0)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  PriceTier get _effectiveTier {
+    final profile = ref.read(customerProfileProvider);
+    // Existing accounts keep their negotiated tier even while offline edits
+    // are waiting to sync; only brand-new local profiles fall back to retail.
+    return profile.hasAccount ? profile.priceTier : PriceTier.retail;
+  }
+
+  void _recalculateTiersInPlace(List<CustomerCartItem> items) {
+    final tier = _effectiveTier;
+    for (var i = 0; i < items.length; i++) {
+      items[i] = items[i].copyWith(tier: tier);
+    }
+  }
+
+  void _persist() {
+    if (state.isEmpty) {
+      unawaited(_store.clearCart());
+      return;
+    }
+    final encoded = jsonEncode(state.map(_cartItemToJson).toList());
+    unawaited(_store.writeCartJson(encoded));
+  }
+
+  void _commit(List<CustomerCartItem> next) {
+    state = next;
+    _persist();
+  }
 
   void addProduct(ProductEntity product, {int quantity = 1}) {
-    final profile = ref.read(customerProfileProvider);
-    final effectiveTier = (profile.isComplete && profile.isSynced)
-        ? profile.priceTier
-        : PriceTier.retail;
-
+    if (product.availableQty <= 0) return;
+    final tier = _effectiveTier;
     final idx = state.indexWhere((it) => it.product.id == product.id);
     if (idx != -1) {
       final existing = state[idx];
+      final nextQty = math.min(
+        existing.quantity + quantity,
+        product.availableQty > 0
+            ? product.availableQty
+            : existing.quantity + quantity,
+      );
       final updated = List<CustomerCartItem>.from(state);
       updated[idx] = existing.copyWith(
-        quantity: existing.quantity + quantity,
-        tier: effectiveTier,
+        quantity: nextQty,
+        tier: tier,
+        product: product,
       );
-      state = updated;
+      _commit(updated);
     } else {
-      state = [...state, CustomerCartItem(product: product, quantity: quantity, tier: effectiveTier)];
+      _commit([
+        ...state,
+        CustomerCartItem(
+          product: product,
+          quantity: product.availableQty > 0
+              ? math.min(quantity, product.availableQty)
+              : quantity,
+          tier: tier,
+        ),
+      ]);
     }
   }
 
   void recalculateTiers() {
-    final profile = ref.read(customerProfileProvider);
-    final effectiveTier = (profile.isComplete && profile.isSynced)
-        ? profile.priceTier
-        : PriceTier.retail;
-    state = state.map((it) => it.copyWith(tier: effectiveTier)).toList();
+    if (state.isEmpty) return;
+    final next = List<CustomerCartItem>.from(state);
+    _recalculateTiersInPlace(next);
+    _commit(next);
   }
 
   void updateQuantity(String productId, int quantity) {
@@ -441,142 +512,197 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
       removeProduct(productId);
       return;
     }
-    state = state.map((it) {
-      if (it.product.id == productId) {
-        return it.copyWith(quantity: quantity);
-      }
-      return it;
+    final next = state.map((it) {
+      if (it.product.id != productId) return it;
+      final max = it.product.availableQty;
+      return it.copyWith(
+        quantity: max > 0 ? math.min(quantity, max) : quantity,
+      );
     }).toList();
+    _commit(next);
   }
 
   void removeProduct(String productId) {
-    state = state.where((it) => it.product.id != productId).toList();
+    _commit(state.where((it) => it.product.id != productId).toList());
   }
 
   void clear() {
-    state = [];
+    _commit([]);
   }
 
   int get totalCentimes => state.fold(0, (sum, item) => sum + item.lineTotal);
 
-  Future<String> submitOrder({
-    required String customerId,
-    required Map<String, dynamic> address,
-  }) async {
-    final orderRepo = ref.read(customerOrderRepositoryProvider);
-    final prefs = ref.read(sharedPreferencesProvider) ?? await SharedPreferences.getInstance();
+  int get totalQuantity => state.fold(0, (sum, item) => sum + item.quantity);
 
-    final itemsPayload = state.map((it) {
-      return {
-        'product_id': it.product.id,
-        'quantity': it.quantity,
-      };
-    }).toList();
-
-    final clientId = const Uuid().v4();
-    try {
-      final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
-      final orderId = await orderRepo.submitCustomerOrder(
-        customerId: customerId,
-        address: address,
-        items: itemsPayload,
-        clientId: clientId,
-        deviceToken: deviceToken,
-      );
-
-      clear();
-      ref.invalidate(customerLiveProductsProvider);
-      ref.invalidate(customerOrdersProvider);
-      return orderId;
-    } catch (e) {
-      // Offline fallback: save order to pending outbox with the same client
-      // UUID, so retrying is idempotent if the first request actually landed.
-      final tempId = clientId;
-      final totalAmount = totalCentimes;
-
-      final pendingOrder = {
-        'id': tempId,
-        'client_id': tempId,
-        'order_number': null,
-        'customer_id': customerId,
-        'delivery_address': address,
-        'total_amount': totalAmount,
-        'paid_amount': 0,
-        'status': 'submitted',
-        'is_offline_pending': true,
-        'created_at': DateTime.now().toIso8601String(),
-        'items': itemsPayload,
-      };
-
-      final existingRaw = prefs.getString(_kPendingOrdersKey);
-      List<dynamic> list = [];
-      if (existingRaw != null && existingRaw.isNotEmpty) {
-        try {
-          list = jsonDecode(existingRaw) as List;
-        } catch (_) {}
+  /// Updates cart lines with fresh catalogue data (price, stock, photo).
+  void reconcileCatalog(List<ProductEntity> products) {
+    if (state.isEmpty) return;
+    final byId = {for (final p in products) p.id: p};
+    final tier = _effectiveTier;
+    var changed = false;
+    final next = state.map((item) {
+      final fresh = byId[item.product.id];
+      if (fresh == null) return item;
+      final capped = fresh.availableQty > 0
+          ? math.min(item.quantity, fresh.availableQty)
+          : item.quantity;
+      if (fresh == item.product &&
+          capped == item.quantity &&
+          tier == item.tier) {
+        return item;
       }
-      list.add(pendingOrder);
-      await prefs.setString(_kPendingOrdersKey, jsonEncode(list));
+      changed = true;
+      return item.copyWith(
+        product: fresh,
+        quantity: capped,
+        tier: tier,
+      );
+    }).toList();
+    if (changed) _commit(next);
+  }
 
-      clear();
-      ref.invalidate(customerOrdersProvider);
-      return tempId;
+  /// Adds every still-available line from a past order to the cart.
+  ({int added, int skipped}) reorder(
+    OrderEntity order,
+    List<ProductEntity> catalog,
+  ) {
+    final byId = {for (final p in catalog) p.id: p};
+    final tier = _effectiveTier;
+    final next = List<CustomerCartItem>.from(state);
+    var added = 0;
+    var skipped = 0;
+
+    for (final item in order.items) {
+      final product = byId[item.productId];
+      if (product == null || product.availableQty <= 0) {
+        skipped++;
+        continue;
+      }
+      final idx = next.indexWhere((it) => it.product.id == product.id);
+      if (idx >= 0) {
+        final existing = next[idx];
+        next[idx] = existing.copyWith(
+          product: product,
+          quantity: math.min(
+            existing.quantity + item.quantity,
+            product.availableQty,
+          ),
+          tier: tier,
+        );
+      } else {
+        next.add(CustomerCartItem(
+          product: product,
+          quantity: math.min(item.quantity, product.availableQty),
+          tier: tier,
+        ));
+      }
+      added++;
     }
+
+    if (added > 0) _commit(next);
+    return (added: added, skipped: skipped);
   }
 
   Future<void> syncPendingOrders() async {
-    final prefs = ref.read(sharedPreferencesProvider) ?? await SharedPreferences.getInstance();
-    final raw = prefs.getString(_kPendingOrdersKey);
-    if (raw == null || raw.isEmpty) return;
-
-    try {
-      final list = jsonDecode(raw) as List;
-      if (list.isEmpty) return;
-
-      final orderRepo = ref.read(customerOrderRepositoryProvider);
-      final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
-      final remaining = <dynamic>[];
-
-      for (final item in list) {
-        final orderMap = item as Map<String, dynamic>;
-        try {
-          final items = (orderMap['items'] as List).cast<Map<String, dynamic>>();
-          await orderRepo.submitCustomerOrder(
-            customerId: orderMap['customer_id'] as String,
-            address: orderMap['delivery_address'] as Map<String, dynamic>,
-            items: items,
-            clientId: orderMap['client_id'] as String?,
-            deviceToken: deviceToken,
-          );
-        } catch (_) {
-          remaining.add(orderMap);
-        }
-      }
-
-      await prefs.setString(_kPendingOrdersKey, jsonEncode(remaining));
-      ref.invalidate(customerOrdersProvider);
-    } catch (_) {}
+    await ref.read(customerSyncCoordinatorProvider).syncPendingOrders();
   }
 
-  Future<String> checkout({
+  Future<CheckoutOutcome> checkout({
     required CustomerProfileInfo profile,
   }) async {
-    String effectiveCustomerId = profile.id ?? '';
-    
-    // Sync profile to ensure database record exists
-    try {
-      final synced = await ref.read(customerProfileProvider.notifier).syncWithDatabase();
-      effectiveCustomerId = synced.id;
-    } catch (_) {}
+    String? customerId = profile.id;
+
+    // First-time setup needs one online round-trip; an existing account can
+    // keep ordering offline because the id is already known.
+    if (customerId == null || customerId.isEmpty) {
+      try {
+        final synced =
+            await ref.read(customerProfileProvider.notifier).syncWithDatabase();
+        customerId = synced.id;
+      } catch (_) {
+        throw Exception(
+          'أكمل بيانات التوصيل مرة واحدة عبر الإنترنت قبل أول طلبية.',
+        );
+      }
+    }
 
     return submitOrder(
-      customerId: effectiveCustomerId,
+      customerId: customerId,
       address: profile.toMap(),
     );
   }
+
+  Future<CheckoutOutcome> submitOrder({
+    required String customerId,
+    required Map<String, dynamic> address,
+  }) async {
+    if (state.isEmpty) {
+      throw Exception('السلة فارغة.');
+    }
+
+    final pending = PendingOrder(
+      clientId: const Uuid().v4(),
+      customerId: customerId.isEmpty ? null : customerId,
+      deliveryAddress: Map<String, dynamic>.from(address),
+      items: state
+          .map(
+            (it) => PendingOrderItem(
+              productId: it.product.id,
+              name: it.product.nameAr.isNotEmpty
+                  ? it.product.nameAr
+                  : it.product.nameFr,
+              unit: it.product.unit,
+              quantity: it.quantity,
+              unitPriceCentimes: it.unitPrice,
+              unitCostCentimes: it.product.lastUnitCostCentimes,
+            ),
+          )
+          .toList(),
+      totalAmountCentimes: totalCentimes,
+      createdAt: DateTime.now(),
+    );
+
+    final orderRepo = ref.read(customerOrderRepositoryProvider);
+    final online = ConnectivityService.instance.isOnline;
+
+    if (online) {
+      try {
+        final deviceToken =
+            await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+        final orderId = await orderRepo.submitCustomerOrder(
+          customerId: customerId,
+          address: address,
+          items: pending.items
+              .map((i) => {
+                    'product_id': i.productId,
+                    'quantity': i.quantity,
+                  })
+              .toList(),
+          clientId: pending.clientId,
+          deviceToken: deviceToken,
+        );
+        await _store.removePendingOrder(pending.clientId);
+        clear();
+        unawaited(
+            ref.read(customerOrdersProvider.notifier).refresh(silent: true));
+        unawaited(
+          ref.read(customerCatalogProvider.notifier).refresh(silent: true),
+        );
+        return CheckoutOutcome(orderId: orderId, queued: false);
+      } catch (e) {
+        debugPrint('[Checkout] online submit failed, queueing: $e');
+      }
+    }
+
+    await _store.upsertPendingOrder(pending);
+    clear();
+    unawaited(ref.read(customerOrdersProvider.notifier).refresh(silent: true));
+    return CheckoutOutcome(orderId: pending.clientId, queued: true);
+  }
 }
 
-final customerCartProvider = StateNotifierProvider<CustomerCartNotifier, List<CustomerCartItem>>((ref) {
+final customerCartProvider =
+    StateNotifierProvider<CustomerCartNotifier, List<CustomerCartItem>>((ref) {
   final notifier = CustomerCartNotifier(ref);
   ref.listen<CustomerProfileInfo>(customerProfileProvider, (prev, next) {
     if (prev?.isSynced != next.isSynced || prev?.priceTier != next.priceTier) {
@@ -586,72 +712,673 @@ final customerCartProvider = StateNotifierProvider<CustomerCartNotifier, List<Cu
   return notifier;
 });
 
-final customerOrdersProvider = FutureProvider<List<OrderEntity>>((ref) async {
-  final profile = ref.watch(customerProfileProvider);
-  final prefs = ref.watch(sharedPreferencesProvider) ?? await SharedPreferences.getInstance();
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalogue
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // 1. Read locally queued pending orders
-  final List<OrderEntity> pendingEntities = [];
-  final rawPending = prefs.getString(_kPendingOrdersKey);
-  if (rawPending != null && rawPending.isNotEmpty) {
+class CustomerCatalogNotifier extends AsyncNotifier<CatalogSnapshot> {
+  late final CustomerLocalStore _store;
+  bool _disposed = false;
+  bool _booting = false;
+  bool _refreshing = false;
+
+  @override
+  Future<CatalogSnapshot> build() async {
+    _store = ref.read(customerLocalStoreProvider);
+    ref.onDispose(() => _disposed = true);
+    _booting = true;
     try {
-      final list = jsonDecode(rawPending) as List;
-      for (final p in list) {
-        final pm = p as Map<String, dynamic>;
-        final itemsList = (pm['items'] as List? ?? []).map((i) {
-          final im = i as Map<String, dynamic>;
-          return OrderItemEntity(
-            id: im['product_id'] as String? ?? '',
-            productId: im['product_id'] as String? ?? '',
-            productName: (im['product_name'] as String?) ?? 'منتج',
-            quantity: (im['quantity'] as num?)?.toInt() ?? 1,
-            // unit_price may be absent in orders saved before this fix
-            unitPriceCentimes: (im['unit_price'] as num?)?.toInt() ?? 0,
-            unitCostCentimes: (im['unit_cost'] as num?)?.toInt() ?? 0,
+      final cached = await _store.readCatalog();
+      if (cached != null && cached.products.isNotEmpty) {
+        Future<void>.delayed(
+          const Duration(milliseconds: 300),
+          () => refresh(silent: true),
+        );
+        return cached;
+      }
+      return await _load(force: true);
+    } finally {
+      _booting = false;
+    }
+  }
+
+  Future<CatalogSnapshot> _load({required bool force}) async {
+    final repo = ref.read(customerProductRepositoryProvider);
+    final online = ConnectivityService.instance.isOnline;
+    String? refreshError;
+
+    if (force && online) {
+      try {
+        await repo.refreshProducts();
+      } catch (e) {
+        refreshError = _prettyError(e);
+      }
+    }
+
+    var products = const <ProductEntity>[];
+    try {
+      products = await repo.getProducts(onlyActive: true);
+    } catch (e) {
+      refreshError ??= _prettyError(e);
+    }
+
+    final cached = await _store.readCatalog();
+    if (products.isEmpty && cached != null) {
+      products = cached.products;
+    }
+
+    if (products.isEmpty) {
+      if (!online) {
+        throw Exception('لا يوجد اتصال ولا نسخة محفوظة من المنتجات بعد.');
+      }
+      throw Exception('تعذر تحميل المنتجات. حاول مرة أخرى.');
+    }
+
+    final syncedAt = await repo.getLastProductsSyncAt() ?? cached?.syncedAt;
+
+    final snapshot = CatalogSnapshot(
+      products: products,
+      syncedAt: syncedAt,
+      isOffline: !online,
+      lastError: refreshError,
+      affinity: await _store.readAffinity(),
+    );
+
+    await _store.writeCatalog(snapshot);
+    _reconcileCart(products);
+    return snapshot;
+  }
+
+  Future<void> refresh({bool silent = false}) async {
+    if (_disposed || _booting || _refreshing) return;
+    _refreshing = true;
+    try {
+      final snapshot = await _load(force: true);
+      if (!_disposed) state = AsyncData(snapshot);
+    } catch (e, st) {
+      if (_disposed) return;
+      if (state.hasValue) {
+        state = AsyncData(
+          state.requireValue.copyWith(
+            isOffline: true,
+            lastError: _prettyError(e),
+          ),
+        );
+      } else if (!silent) {
+        state = AsyncError(e, st);
+      }
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  void _reconcileCart(List<ProductEntity> products) {
+    try {
+      ref.read(customerCartProvider.notifier).reconcileCatalog(products);
+    } catch (e) {
+      debugPrint('[Catalog] cart reconciliation skipped: $e');
+    }
+  }
+
+  ProductEntity? productById(String id) {
+    final snapshot = state.valueOrNull;
+    if (snapshot == null) return null;
+    for (final product in snapshot.products) {
+      if (product.id == id) return product;
+    }
+    return null;
+  }
+}
+
+final customerCatalogProvider =
+    AsyncNotifierProvider<CustomerCatalogNotifier, CatalogSnapshot>(
+  CustomerCatalogNotifier.new,
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orders
+// ─────────────────────────────────────────────────────────────────────────────
+
+class CustomerOrdersNotifier extends AsyncNotifier<OrdersSnapshot> {
+  late final CustomerLocalStore _store;
+  bool _disposed = false;
+  bool _booting = false;
+  bool _refreshing = false;
+
+  @override
+  Future<OrdersSnapshot> build() async {
+    _store = ref.read(customerLocalStoreProvider);
+    ref.onDispose(() => _disposed = true);
+    final customerId = ref.watch(customerProfileProvider.select((p) => p.id));
+    _booting = true;
+    try {
+      final cached = await _store.readOrders();
+      if (cached != null && cached.customerId == customerId) {
+        Future<void>.delayed(
+          const Duration(milliseconds: 300),
+          () => refresh(silent: true),
+        );
+        return cached;
+      }
+      return await _load(customerId);
+    } finally {
+      _booting = false;
+    }
+  }
+
+  Future<OrdersSnapshot> _load(String? customerId) async {
+    final profile = ref.read(customerProfileProvider);
+    final store = _store;
+    final online = ConnectivityService.instance.isOnline;
+    String? error;
+
+    if (online) {
+      try {
+        await ref.read(customerSyncCoordinatorProvider).syncPendingOrders();
+      } catch (e) {
+        debugPrint('[Orders] pending sync failed: $e');
+      }
+    }
+
+    List<PendingOrder> pending = const [];
+    try {
+      pending = await store.readPendingOrders();
+    } catch (e) {
+      debugPrint('[Orders] pending read failed: $e');
+    }
+
+    var remote = const <OrderEntity>[];
+    if (customerId != null && customerId.isNotEmpty && online) {
+      try {
+        remote = await ref.read(customerOrderRepositoryProvider).getOrders(
+              customerId: customerId,
+              limit: 120,
+            );
+        unawaited(store.recordOrderAffinity(remote));
+      } catch (e) {
+        error = _prettyError(e);
+      }
+    }
+
+    final cached = await store.readOrders();
+    if (remote.isEmpty &&
+        error != null &&
+        cached != null &&
+        cached.customerId == customerId) {
+      remote = cached.orders;
+    }
+
+    final merged = _mergeOrders(remote, pending, profile);
+
+    final snapshot = OrdersSnapshot(
+      customerId: customerId,
+      orders: merged,
+      pendingCount: pending.length,
+      fetchedAt: DateTime.now(),
+      isOffline: !online,
+      lastError: error,
+    );
+
+    await store.writeOrders(
+      OrdersSnapshot(
+        customerId: customerId,
+        orders: remote,
+        fetchedAt: snapshot.fetchedAt,
+      ),
+    );
+
+    return snapshot;
+  }
+
+  List<OrderEntity> _mergeOrders(
+    List<OrderEntity> remote,
+    List<PendingOrder> pending,
+    CustomerProfileInfo profile,
+  ) {
+    final pendingClientIds =
+        pending.map((p) => p.clientId).where((id) => id.isNotEmpty).toSet();
+    final filteredRemote = remote
+        .where(
+            (o) => o.clientId == null || !pendingClientIds.contains(o.clientId))
+        .toList();
+
+    final pendingEntities = pending
+        .map((p) => p.toOrderEntity(
+              customerName: profile.name,
+              customerPhone: profile.phone,
+            ))
+        .toList();
+
+    return <OrderEntity>[...pendingEntities, ...filteredRemote]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  Future<void> refresh({bool silent = false}) async {
+    if (_disposed || _booting || _refreshing) return;
+    _refreshing = true;
+    try {
+      final customerId = ref.read(customerProfileProvider).id;
+      final snapshot = await _load(customerId);
+      if (!_disposed) state = AsyncData(snapshot);
+    } catch (e, st) {
+      if (_disposed) return;
+      if (state.hasValue) {
+        state = AsyncData(
+          state.requireValue.copyWith(
+            isOffline: true,
+            lastError: _prettyError(e),
+          ),
+        );
+      } else if (!silent) {
+        state = AsyncError(e, st);
+      }
+    } finally {
+      _refreshing = false;
+    }
+  }
+}
+
+final customerOrdersProvider =
+    AsyncNotifierProvider<CustomerOrdersNotifier, OrdersSnapshot>(
+  CustomerOrdersNotifier.new,
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wallet
+// ─────────────────────────────────────────────────────────────────────────────
+
+class CustomerWalletNotifier extends AsyncNotifier<WalletSnapshot> {
+  late final CustomerLocalStore _store;
+  bool _disposed = false;
+  bool _booting = false;
+  bool _refreshing = false;
+
+  @override
+  Future<WalletSnapshot> build() async {
+    _store = ref.read(customerLocalStoreProvider);
+    ref.onDispose(() => _disposed = true);
+    final customerId = ref.watch(customerProfileProvider.select((p) => p.id));
+    _booting = true;
+    try {
+      final cached = await _store.readWallet();
+      if (cached != null && cached.customerId == customerId) {
+        Future<void>.delayed(
+          const Duration(milliseconds: 350),
+          () => refresh(silent: true),
+        );
+        return cached;
+      }
+      return await _load(customerId);
+    } finally {
+      _booting = false;
+    }
+  }
+
+  Future<WalletSnapshot> _load(String? customerId) async {
+    final store = _store;
+    final profile = ref.read(customerProfileProvider);
+    final cachedRaw = await store.readWallet();
+    final cached = cachedRaw != null && cachedRaw.customerId == customerId
+        ? cachedRaw
+        : null;
+    final online = ConnectivityService.instance.isOnline;
+
+    var name = cached?.customerName ?? '';
+    if (name.isEmpty) name = profile.name;
+
+    var limit = cached?.creditLimitCentimes ?? 0;
+    var debt = cached?.currentDebtCentimes ?? 0;
+    var ledger = cached?.ledger ?? const <CustomerLedgerEntryEntity>[];
+    var unpaid = cached?.unpaidOrders ?? const <CustomerUnpaidOrderEntity>[];
+    String? error;
+
+    if (customerId != null && customerId.isNotEmpty && online) {
+      final repo = ref.read(customerRepositoryProvider);
+      try {
+        final entity = await repo.getCustomerById(customerId);
+        if (entity != null) {
+          name = entity.name;
+          limit = entity.creditLimitCentimes;
+          debt = entity.currentDebtCentimes;
+        }
+      } catch (e) {
+        error = _prettyError(e);
+      }
+      try {
+        final freshLedger = await repo.getCustomerLedger(customerId);
+        if (freshLedger.isNotEmpty || ledger.isEmpty) ledger = freshLedger;
+      } catch (e) {
+        error ??= _prettyError(e);
+      }
+      try {
+        final freshUnpaid = await repo.getCustomerUnpaidOrders(customerId);
+        if (freshUnpaid.isNotEmpty || unpaid.isEmpty) unpaid = freshUnpaid;
+      } catch (e) {
+        error ??= _prettyError(e);
+      }
+    }
+
+    final snapshot = WalletSnapshot(
+      customerId: customerId,
+      customerName: name,
+      creditLimitCentimes: limit,
+      currentDebtCentimes: debt,
+      ledger: ledger,
+      unpaidOrders: unpaid,
+      fetchedAt: DateTime.now(),
+      isOffline: !online,
+      lastError: error,
+    );
+
+    if (customerId != null && customerId.isNotEmpty) {
+      await store.writeWallet(snapshot);
+    }
+    return snapshot;
+  }
+
+  Future<void> refresh({bool silent = false}) async {
+    if (_disposed || _booting || _refreshing) return;
+    _refreshing = true;
+    try {
+      final customerId = ref.read(customerProfileProvider).id;
+      final snapshot = await _load(customerId);
+      if (!_disposed) state = AsyncData(snapshot);
+    } catch (e, st) {
+      if (_disposed) return;
+      if (state.hasValue) {
+        state = AsyncData(
+          state.requireValue.copyWith(
+            isOffline: true,
+            lastError: _prettyError(e),
+          ),
+        );
+      } else if (!silent) {
+        state = AsyncError(e, st);
+      }
+    } finally {
+      _refreshing = false;
+    }
+  }
+}
+
+final customerWalletProvider =
+    AsyncNotifierProvider<CustomerWalletNotifier, WalletSnapshot>(
+  CustomerWalletNotifier.new,
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sync coordinator
+// ─────────────────────────────────────────────────────────────────────────────
+
+class CustomerSyncCoordinator {
+  CustomerSyncCoordinator(this.ref);
+
+  final Ref ref;
+  bool _syncing = false;
+
+  /// Replays locally queued checkouts. Idempotent thanks to `client_id`.
+  Future<bool> syncPendingOrders() async {
+    if (_syncing) return false;
+    if (!ConnectivityService.instance.isOnline) return false;
+
+    _syncing = true;
+    try {
+      final store = ref.read(customerLocalStoreProvider);
+      final pending = await store.readPendingOrders();
+      if (pending.isEmpty) return false;
+
+      final repo = ref.read(customerOrderRepositoryProvider);
+      final profile = ref.read(customerProfileProvider);
+      String? token;
+      try {
+        token =
+            await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+      } catch (_) {}
+
+      var changed = false;
+      for (final order in pending) {
+        final customerId = order.customerId ?? profile.id;
+        if (customerId == null || customerId.isEmpty) {
+          // Wait until the profile is bound to a server account; submitting
+          // anonymously would hide the order from the customer's history.
+          continue;
+        }
+        try {
+          await repo.submitCustomerOrder(
+            customerId: customerId,
+            address: order.deliveryAddress,
+            items: order.items
+                .map((i) => {
+                      'product_id': i.productId,
+                      'quantity': i.quantity,
+                    })
+                .toList(),
+            clientId: order.clientId,
+            deviceToken: token,
           );
-        }).toList();
-
-        pendingEntities.add(OrderEntity(
-          id: pm['id'] as String,
-          orderNumber: null,
-          channel: OrderChannel.online,
-          customerId: pm['customer_id'] as String?,
-          customerName: profile.name,
-          customerPhone: profile.phone,
-          status: OrderStatus.submitted,
-          totalAmountCentimes: (pm['total_amount'] as num?)?.toInt() ?? 0,
-          paidAmountCentimes: 0,
-          deliveryAddress: pm['delivery_address'] as Map<String, dynamic>?,
-          items: itemsList,
-          createdAt: DateTime.tryParse(pm['created_at'] as String? ?? '') ?? DateTime.now(),
-          notes: 'في انتظار المزامنة (محفوظ محلياً)',
-        ));
+          await store.removePendingOrder(order.clientId);
+          changed = true;
+        } catch (e) {
+          await store.markPendingError(order.clientId, _prettyError(e));
+        }
       }
-    } catch (_) {
-      // Malformed pending store — ignore so remote orders still load
+      return changed;
+    } finally {
+      _syncing = false;
     }
   }
 
-  // 2. Fetch remote orders from Supabase if customer has an id
-  List<OrderEntity> remoteOrders = [];
-  if (profile.id != null && profile.id!.isNotEmpty) {
-    final repo = ref.watch(customerOrderRepositoryProvider);
+  /// Syncs a profile edited while offline once connectivity returns.
+  Future<void> syncProfileIfNeeded() async {
+    final profile = ref.read(customerProfileProvider);
+    if (!profile.isComplete || profile.isSynced) return;
+    if (!ConnectivityService.instance.isOnline) return;
     try {
-      remoteOrders = await repo.getOrders(customerId: profile.id);
-      // Background sync of any pending offline orders
-      if (pendingEntities.isNotEmpty) {
-        ref.read(customerCartProvider.notifier).syncPendingOrders();
-      }
-    } on Exception catch (e) {
-      // If we have at least the pending local orders, return those with an
-      // appended note. Otherwise propagate so the UI shows an error state.
-      if (pendingEntities.isEmpty) {
-        throw Exception('فشل جلب الطلبيات: ${e.toString().replaceFirst('Exception: ', '')}');
-      }
-      // Fall through: return pending-only list so the user isn't left blank
+      await ref.read(customerProfileProvider.notifier).syncWithDatabase();
+    } catch (e) {
+      debugPrint('[Sync] profile sync failed: $e');
     }
   }
 
-  // Merge: pending offline at the top, remote below
-  return [...pendingEntities, ...remoteOrders];
+  Future<void> refreshAll() async {
+    await syncProfileIfNeeded();
+    await syncPendingOrders();
+    await Future.wait([
+      ref.read(customerCatalogProvider.notifier).refresh(silent: true),
+      ref.read(customerOrdersProvider.notifier).refresh(silent: true),
+      ref.read(customerWalletProvider.notifier).refresh(silent: true),
+    ]);
+  }
+}
+
+final customerSyncCoordinatorProvider =
+    Provider<CustomerSyncCoordinator>((ref) {
+  return CustomerSyncCoordinator(ref);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Live order tracking (RPC with graceful direct-query fallback)
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool _rpcUnavailable = false;
+
+bool _isTerminalStatus(OrderStatus status) =>
+    status == OrderStatus.delivered ||
+    status == OrderStatus.settled ||
+    status == OrderStatus.cancelled ||
+    status == OrderStatus.refused;
+
+final customerLiveOrderProvider =
+    StreamProvider.autoDispose.family<LiveOrderUpdate, String>((ref, orderId) {
+  final client = ref.watch(customerSupabaseClientProvider);
+
+  return (() async* {
+    String? token;
+    try {
+      token = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+    } catch (_) {}
+
+    while (true) {
+      if (!ConnectivityService.instance.isOnline) {
+        yield LiveOrderUpdate(orderId: orderId, isOffline: true);
+        await Future<void>.delayed(const Duration(seconds: 8));
+        continue;
+      }
+
+      LiveOrderUpdate? update;
+      if (!_rpcUnavailable && token != null && token.isNotEmpty) {
+        try {
+          final res = await client.rpc(
+            'rpc_get_customer_order_live',
+            params: {
+              'p_order_id': orderId,
+              'p_device_token': token,
+            },
+          );
+          update = _liveFromRpc(orderId, res);
+        } catch (e) {
+          // Only permanently disable the RPC when the function is missing;
+          // transient network failures should retry on the next poll.
+          if (_isMissingRpc(e)) _rpcUnavailable = true;
+          debugPrint('[Tracking] live RPC unavailable: $e');
+        }
+      }
+
+      update ??= await _liveFromTables(client, orderId);
+
+      yield update;
+      if (update.found &&
+          update.status != null &&
+          _isTerminalStatus(update.status!)) {
+        return;
+      }
+
+      await Future<void>.delayed(const Duration(seconds: 12));
+    }
+  })();
+});
+
+LiveOrderUpdate _liveFromRpc(String orderId, dynamic response) {
+  if (response is! Map) {
+    return LiveOrderUpdate(orderId: orderId, error: 'استجابة غير صالحة');
+  }
+  final map = response.cast<String, dynamic>();
+  if (map['found'] != true) {
+    return LiveOrderUpdate(
+      orderId: orderId,
+      error: map['error'] as String? ?? 'الطلب غير متوفر',
+    );
+  }
+  return LiveOrderUpdate(
+    orderId: orderId,
+    found: true,
+    status: OrderStatus.fromString(map['status'] as String? ?? 'submitted'),
+    orderNumber: (map['order_number'] as num?)?.toInt(),
+    driverId: map['driver_id'] as String?,
+    driverName: map['driver_name'] as String?,
+    driverPhone: map['driver_phone'] as String?,
+    driverLat: _asDouble(map['driver_lat']),
+    driverLng: _asDouble(map['driver_lng']),
+    driverUpdatedAt: _parseDate(map['driver_updated_at']),
+    destinationLat: _asDouble(map['destination_lat']),
+    destinationLng: _asDouble(map['destination_lng']),
+    confirmedAt: _parseDate(map['confirmed_at']),
+    deliveredAt: _parseDate(map['delivered_at']),
+    settledAt: _parseDate(map['settled_at']),
+  );
+}
+
+Future<LiveOrderUpdate> _liveFromTables(
+  SupabaseClient client,
+  String orderId,
+) async {
+  try {
+    final rows = await client.from('orders').select('''
+          order_number, status, driver_id, delivery_address,
+          confirmed_at, delivered_at, settled_at
+        ''').eq('id', orderId).limit(1);
+
+    if ((rows as List).isEmpty) {
+      return LiveOrderUpdate(orderId: orderId, error: 'الطلب غير موجود');
+    }
+
+    final row = (rows.first as Map).cast<String, dynamic>();
+    final address =
+        (row['delivery_address'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final driverId = row['driver_id'] as String?;
+
+    String? driverName;
+    String? driverPhone;
+    double? lat;
+    double? lng;
+    DateTime? updatedAt;
+
+    if (driverId != null && driverId.isNotEmpty) {
+      try {
+        final driverRows = await client
+            .from('users')
+            .select('name, phone')
+            .eq('id', driverId)
+            .limit(1);
+        if ((driverRows as List).isNotEmpty) {
+          final driver = (driverRows.first as Map).cast<String, dynamic>();
+          driverName = driver['name'] as String?;
+          driverPhone = driver['phone'] as String?;
+        }
+      } catch (_) {}
+
+      try {
+        final locations = await client
+            .from('driver_locations')
+            .select('latitude, longitude, updated_at')
+            .eq('driver_id', driverId)
+            .limit(1);
+        if ((locations as List).isNotEmpty) {
+          final location = (locations.first as Map).cast<String, dynamic>();
+          lat = _asDouble(location['latitude']);
+          lng = _asDouble(location['longitude']);
+          updatedAt = _parseDate(location['updated_at']);
+        }
+      } catch (_) {}
+    }
+
+    return LiveOrderUpdate(
+      orderId: orderId,
+      found: true,
+      status: OrderStatus.fromString(row['status'] as String? ?? 'submitted'),
+      orderNumber: (row['order_number'] as num?)?.toInt(),
+      driverId: driverId,
+      driverName: driverName,
+      driverPhone: driverPhone,
+      driverLat: lat,
+      driverLng: lng,
+      driverUpdatedAt: updatedAt,
+      destinationLat: _asDouble(address['latitude']),
+      destinationLng: _asDouble(address['longitude']),
+      confirmedAt: _parseDate(row['confirmed_at']),
+      deliveredAt: _parseDate(row['delivered_at']),
+      settledAt: _parseDate(row['settled_at']),
+    );
+  } catch (e) {
+    return LiveOrderUpdate(orderId: orderId, error: _prettyError(e));
+  }
+}
+
+double? _asDouble(dynamic value) {
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value);
+  return null;
+}
+
+DateTime? _parseDate(dynamic value) =>
+    value is String && value.isNotEmpty ? DateTime.tryParse(value) : null;
+
+String _prettyError(Object error) =>
+    error.toString().replaceFirst('Exception: ', '').trim();
+
+bool _isMissingRpc(Object error) {
+  final message = error.toString().toLowerCase();
+  return message.contains('could not find the function') ||
+      message.contains('pgrst202') ||
+      message.contains('function public.rpc_get_customer_order_live');
+}

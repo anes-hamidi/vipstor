@@ -4,16 +4,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:ui_kit/ui_kit.dart';
 import '../../providers/customer_providers.dart';
-import '../catalog/catalog_screen.dart';
-
-/// App entry — allows guest browsing immediately.
-class ProfileGate extends StatelessWidget {
-  final VoidCallback? onExit;
-  const ProfileGate({super.key, this.onExit});
-
-  @override
-  Widget build(BuildContext context) => CatalogScreen(onExit: onExit);
-}
 
 /// Profile / delivery details form.
 ///
@@ -154,7 +144,11 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
+
     final notifier = ref.read(customerProfileProvider.notifier);
+    final hadAccount = ref.read(customerProfileProvider).hasAccount;
+    final online = ref.read(customerIsOnlineProvider);
+
     notifier.updateProfile(
       name: _name.text.trim(),
       phone: _phone.text.trim(),
@@ -164,6 +158,23 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
       latitude: _lat,
       longitude: _lng,
     );
+
+    // Existing accounts can be edited offline: the local change is kept and
+    // the sync coordinator pushes it once connectivity returns.
+    if (!online) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      if (hadAccount) {
+        _toast('حُفظت التعديلات على جهازك وستُزامن تلقائياً عند عودة الاتصال.');
+        if (!widget.isSetup && Navigator.of(context).canPop()) {
+          Navigator.pop(context);
+        }
+      } else {
+        _toast('إنشاء حساب جديد يحتاج اتصالاً بالإنترنت. تحقق من الشبكة ثم أعد المحاولة.');
+      }
+      return;
+    }
+
     try {
       await notifier.syncWithDatabase();
       if (!mounted) return;
@@ -172,6 +183,13 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
+      if (hadAccount) {
+        _toast('تعذر الاتصال بالمتجر. حُفظت التعديلات محلياً وستُزامن لاحقاً.');
+        if (!widget.isSetup && Navigator.of(context).canPop()) {
+          Navigator.pop(context);
+        }
+        return;
+      }
       final msg = e.toString().replaceFirst('Exception: ', '');
       _toast(msg.isNotEmpty ? msg : 'تعذر حفظ البيانات');
     }

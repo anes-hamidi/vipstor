@@ -24,6 +24,9 @@ class ProductRepositoryImpl implements IProductRepository {
 
   static const _staleDuration = Duration(minutes: 5);
 
+  /// Guards against overlapping background/full catalogue syncs.
+  Future<void>? _inFlightSync;
+
   ProductRepositoryImpl({
     required this.client,
     required this.service,
@@ -53,6 +56,28 @@ class ProductRepositoryImpl implements IProductRepository {
     return _buildEntitiesFromCache(search, category, onlyActive,
         cached: cached);
   }
+
+  @override
+  Future<void> refreshProducts({bool onlyActive = true}) async {
+    if (!ConnectivityService.instance.isOnline) {
+      throw Exception('لا يوجد اتصال بالإنترنت');
+    }
+    final existing = _inFlightSync;
+    if (existing != null) {
+      await existing;
+      return;
+    }
+    final future = _syncProductsFromRemote(rethrow: true);
+    _inFlightSync = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_inFlightSync, future)) _inFlightSync = null;
+    }
+  }
+
+  @override
+  Future<DateTime?> getLastProductsSyncAt() => db.getLastSync('products');
 
   @override
   Future<ProductEntity?> getProductByBarcode(String barcode) async {
@@ -142,7 +167,7 @@ class ProductRepositoryImpl implements IProductRepository {
     }
   }
 
-  Future<void> _syncProductsFromRemote() async {
+  Future<void> _syncProductsFromRemote({bool rethrow = false}) async {
     try {
       if (isCustomerPortal) {
         await _syncCustomerPortalProducts();
@@ -151,7 +176,10 @@ class ProductRepositoryImpl implements IProductRepository {
       }
       await db.setLastSync('products', DateTime.now());
     } catch (_) {
-      // Sync failure is silent — cached data remains available
+      // Sync failure is silent for background refresh — cached data remains
+      // available. Interactive refreshes pass [rethrow] so the UI can show a
+      // meaningful message while keeping the cached catalogue visible.
+      if (rethrow) rethrow;
     }
   }
 
@@ -213,20 +241,36 @@ class ProductRepositoryImpl implements IProductRepository {
     if ((viewRows as List).isEmpty) return;
     final ids = viewRows.map((r) => r['product_id'] as String).toList();
 
-    List priceRows = [];
-    try {
-      priceRows = await client
-          .from('product_prices')
-          .select('id, product_id, tier, min_qty, price')
-          .inFilter('product_id', ids);
-    } catch (_) {
-      priceRows = [];
-    }
-
-    final barcodeRows = await client
-        .from('product_barcodes')
-        .select('product_id, barcode')
-        .inFilter('product_id', ids);
+    // Fetch price tiers and barcodes in parallel — halves the cold-start
+    // latency of the customer catalogue.
+    List priceRows = const [];
+    List barcodeRows = const [];
+    final results = await Future.wait<List>([
+      () async {
+        try {
+          final rows = await client
+              .from('product_prices')
+              .select('id, product_id, tier, min_qty, price')
+              .inFilter('product_id', ids);
+          return rows as List;
+        } catch (_) {
+          return const <dynamic>[];
+        }
+      }(),
+      () async {
+        try {
+          final rows = await client
+              .from('product_barcodes')
+              .select('product_id, barcode')
+              .inFilter('product_id', ids);
+          return rows as List;
+        } catch (_) {
+          return const <dynamic>[];
+        }
+      }(),
+    ]);
+    priceRows = results[0];
+    barcodeRows = results[1];
 
     final pricesMap = <String, List<Map<String, dynamic>>>{};
     for (final p in priceRows) {
@@ -234,7 +278,7 @@ class ProductRepositoryImpl implements IProductRepository {
         .add(Map<String, dynamic>.from(p));
     }
     final barcodesMap = <String, List<String>>{};
-    for (final b in barcodeRows as List) {
+    for (final b in barcodeRows) {
       barcodesMap.putIfAbsent(b['product_id'] as String, () => [])
         .add(b['barcode'] as String);
     }
@@ -282,6 +326,10 @@ class ProductRepositoryImpl implements IProductRepository {
     }).toList();
 
     await db.upsertProducts(companions);
+    // Prune products that no longer exist / are no longer visible to the
+    // customer portal so stale cached rows (e.g. renamed or deactivated
+    // items) never resurface while offline.
+    await db.pruneProducts(companions.map((c) => c.id.value).toSet());
   }
 
   // ── Entity assembly ───────────────────────────────────────────────────────

@@ -100,6 +100,10 @@ class OrderItemEntity extends Equatable {
 
 class OrderEntity extends Equatable {
   final String id;
+
+  /// Client-generated idempotency key. Lets the customer app reconcile an
+  /// offline-queued order with the row created on the server once it syncs.
+  final String? clientId;
   final int? orderNumber;
   final OrderChannel channel;
   final String? customerId;
@@ -120,11 +124,14 @@ class OrderEntity extends Equatable {
   final String? photoBase64;
   final double? deliveryLat;
   final double? deliveryLng;
+  final DateTime? confirmedAt;
   final DateTime? deliveredAt;
+  final DateTime? settledAt;
   final String? notes;
 
   const OrderEntity({
     required this.id,
+    this.clientId,
     this.orderNumber,
     required this.channel,
     this.customerId,
@@ -146,7 +153,9 @@ class OrderEntity extends Equatable {
     this.photoBase64,
     this.deliveryLat,
     this.deliveryLng,
+    this.confirmedAt,
     this.deliveredAt,
+    this.settledAt,
     this.notes,
   }) : customerSnapshot = customerSnapshot ?? deliveryAddress;
 
@@ -154,8 +163,60 @@ class OrderEntity extends Equatable {
 
   int get dueAmountCentimes => totalAmountCentimes - paidAmountCentimes;
 
+  /// True while the order is still being processed / delivered.
+  bool get isOpen {
+    switch (status) {
+      case OrderStatus.submitted:
+      case OrderStatus.confirmed:
+      case OrderStatus.preparing:
+      case OrderStatus.ready:
+      case OrderStatus.assigned:
+      case OrderStatus.accepted:
+      case OrderStatus.outForDelivery:
+      case OrderStatus.requiresManagerReview:
+        return true;
+      case OrderStatus.delivered:
+      case OrderStatus.settled:
+      case OrderStatus.cancelled:
+      case OrderStatus.refused:
+        return false;
+    }
+  }
+
+  bool get isFinished =>
+      status == OrderStatus.delivered || status == OrderStatus.settled;
+
+  bool get isCancelled =>
+      status == OrderStatus.cancelled || status == OrderStatus.refused;
+
+  /// Progress step for the customer timeline (0..4), -1 when cancelled.
+  int get timelineStep {
+    switch (status) {
+      case OrderStatus.submitted:
+        return 0;
+      case OrderStatus.confirmed:
+        return 1;
+      case OrderStatus.preparing:
+        return 2;
+      case OrderStatus.ready:
+      case OrderStatus.assigned:
+      case OrderStatus.accepted:
+      case OrderStatus.outForDelivery:
+        return 3;
+      case OrderStatus.delivered:
+      case OrderStatus.settled:
+        return 4;
+      case OrderStatus.requiresManagerReview:
+        return 1;
+      case OrderStatus.cancelled:
+      case OrderStatus.refused:
+        return -1;
+    }
+  }
+
   OrderEntity copyWith({
     String? id,
+    String? clientId,
     int? orderNumber,
     OrderChannel? channel,
     String? customerId,
@@ -176,11 +237,14 @@ class OrderEntity extends Equatable {
     String? photoBase64,
     double? deliveryLat,
     double? deliveryLng,
+    DateTime? confirmedAt,
     DateTime? deliveredAt,
+    DateTime? settledAt,
     String? notes,
   }) {
     return OrderEntity(
       id: id ?? this.id,
+      clientId: clientId ?? this.clientId,
       orderNumber: orderNumber ?? this.orderNumber,
       channel: channel ?? this.channel,
       customerId: customerId ?? this.customerId,
@@ -201,7 +265,9 @@ class OrderEntity extends Equatable {
       photoBase64: photoBase64 ?? this.photoBase64,
       deliveryLat: deliveryLat ?? this.deliveryLat,
       deliveryLng: deliveryLng ?? this.deliveryLng,
+      confirmedAt: confirmedAt ?? this.confirmedAt,
       deliveredAt: deliveredAt ?? this.deliveredAt,
+      settledAt: settledAt ?? this.settledAt,
       notes: notes ?? this.notes,
     );
   }
@@ -209,6 +275,7 @@ class OrderEntity extends Equatable {
   @override
   List<Object?> get props => [
         id,
+        clientId,
         orderNumber,
         channel,
         customerId,
@@ -229,7 +296,9 @@ class OrderEntity extends Equatable {
         photoBase64,
         deliveryLat,
         deliveryLng,
+        confirmedAt,
         deliveredAt,
+        settledAt,
         notes,
       ];
 }

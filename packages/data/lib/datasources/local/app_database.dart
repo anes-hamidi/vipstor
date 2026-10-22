@@ -102,6 +102,17 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> clearProducts() => delete(cachedProducts).go();
 
+  /// Removes locally cached products that no longer exist in the fresh remote
+  /// snapshot. Keeps the cache a true mirror of the server catalogue (avoids
+  /// stale/removed items lingering forever). No-op for an empty keep set so a
+  /// bad/empty remote response can never wipe the offline catalogue.
+  Future<int> pruneProducts(Set<String> keepIds) async {
+    if (keepIds.isEmpty) return 0;
+    return (delete(cachedProducts)
+          ..where((p) => p.id.isNotIn(keepIds.toList())))
+        .go();
+  }
+
   // ── Customers DAO ─────────────────────────────────────────────────────────
 
   Future<List<CachedCustomer>> getAllCustomers() =>

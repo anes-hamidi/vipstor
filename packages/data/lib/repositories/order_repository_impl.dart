@@ -41,6 +41,10 @@ class OrderRepositoryImpl implements IOrderRepository {
       paid_amount,
       notes,
       created_at,
+      confirmed_at,
+      delivered_at,
+      settled_at,
+      client_id,
       order_items (
         id,
         product_id,
@@ -109,6 +113,7 @@ class OrderRepositoryImpl implements IOrderRepository {
 
       return OrderEntity(
         id: row['id'] as String,
+        clientId: row['client_id'] as String?,
         orderNumber: (row['order_number'] as num?)?.toInt(),
         channel: row['channel'] == 'online' ? OrderChannel.online : OrderChannel.store,
         customerId: row['customer_id'] as String?,
@@ -123,6 +128,9 @@ class OrderRepositoryImpl implements IOrderRepository {
         deliveryAddress: deliveryAddr,
         items: itemsList,
         createdAt: DateTime.parse(row['created_at'] as String),
+        confirmedAt: _parseOptionalDate(row['confirmed_at']),
+        deliveredAt: _parseOptionalDate(row['delivered_at']),
+        settledAt: _parseOptionalDate(row['settled_at']),
         notes: row['notes'] as String?,
       );
     }).toList();
@@ -145,6 +153,10 @@ class OrderRepositoryImpl implements IOrderRepository {
           paid_amount,
           notes,
           created_at,
+          confirmed_at,
+          delivered_at,
+          settled_at,
+          client_id,
           order_items (
             id,
             product_id,
@@ -182,6 +194,7 @@ class OrderRepositoryImpl implements IOrderRepository {
 
     return OrderEntity(
       id: row['id'] as String,
+      clientId: row['client_id'] as String?,
       orderNumber: (row['order_number'] as num?)?.toInt(),
       channel: row['channel'] == 'online' ? OrderChannel.online : OrderChannel.store,
       customerId: row['customer_id'] as String?,
@@ -196,6 +209,9 @@ class OrderRepositoryImpl implements IOrderRepository {
       deliveryAddress: deliveryAddr,
       items: itemsList,
       createdAt: DateTime.parse(row['created_at'] as String),
+      confirmedAt: _parseOptionalDate(row['confirmed_at']),
+      deliveredAt: _parseOptionalDate(row['delivered_at']),
+      settledAt: _parseOptionalDate(row['settled_at']),
       notes: row['notes'] as String?,
     );
   }
@@ -456,9 +472,10 @@ class OrderRepositoryImpl implements IOrderRepository {
         .select('''
           id, order_number, channel, customer_id, status, driver_id,
           cashier_id, delivery_address, total_amount, paid_amount, notes,
-          created_at,
+          created_at, confirmed_at, delivered_at, settled_at, client_id,
           order_items ( id, product_id, quantity, unit_price, unit_cost,
-            products ( name_ar, name_fr, unit ) )
+            products ( name_ar, name_fr, unit ) ),
+          users!orders_driver_id_fkey ( name, phone )
         ''');
 
     // Apply filters BEFORE ordering/limiting (required by PostgrestFilterBuilder)
@@ -494,7 +511,7 @@ class OrderRepositoryImpl implements IOrderRepository {
         .select('''
           id, order_number, channel, customer_id, status, driver_id,
           cashier_id, delivery_address, total_amount, paid_amount, notes,
-          created_at,
+          created_at, confirmed_at, delivered_at, settled_at, client_id,
           order_items ( id, product_id, quantity, unit_price, unit_cost,
             products ( name_ar, name_fr, unit ) ),
           users!orders_driver_id_fkey ( name, phone )
@@ -560,6 +577,7 @@ class OrderRepositoryImpl implements IOrderRepository {
 
       return OrderEntity(
         id: row['id'] as String,
+        clientId: row['client_id'] as String?,
         orderNumber: (row['order_number'] as num?)?.toInt(),
         channel: row['channel'] == 'online'
             ? OrderChannel.online
@@ -578,8 +596,16 @@ class OrderRepositoryImpl implements IOrderRepository {
         deliveryAddress: deliveryAddr,
         items: itemsList,
         createdAt: DateTime.parse(row['created_at'] as String),
+        confirmedAt: _parseOptionalDate(row['confirmed_at']),
+        deliveredAt: _parseOptionalDate(row['delivered_at']),
+        settledAt: _parseOptionalDate(row['settled_at']),
         notes: row['notes'] as String?,
       );
     }).toList();
+  }
+
+  static DateTime? _parseOptionalDate(dynamic value) {
+    if (value is! String || value.isEmpty) return null;
+    return DateTime.tryParse(value);
   }
 }
