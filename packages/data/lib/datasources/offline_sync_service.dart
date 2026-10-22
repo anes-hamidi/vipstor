@@ -8,7 +8,13 @@ import 'remote/supabase_service.dart';
 /// Drains [PendingOperations] by replaying each entry against the matching
 /// Supabase RPC.  Called once on app start and again whenever connectivity
 /// is restored.  Every entry carries a `client_id` so all RPCs are idempotent
-/// — re-running a completed entry is safe.
+/// -- re-running a completed entry is safe.
+///
+/// New resilience behavior:
+/// - Permanently-failed operations are moved to the `failed_operations`
+///   table (Supabase) instead of remaining stuck in `pending_operations`.
+/// - Stock conflicts (`requires_manager_review`) are flagged and the op is
+///   marked done so the cashier flow is not blocked.
 class OfflineSyncService {
   final AppDatabase db;
   final SupabaseClient client;
@@ -57,7 +63,7 @@ class OfflineSyncService {
   }
 
   /// Tries to flush all pending / failed operations.  Safe to call multiple
-  /// times — a guard prevents concurrent runs and exponential backoff
+  /// times -- a guard prevents concurrent runs and exponential backoff
   /// protects against tight synchronous retry loops.
   Future<void> drainQueue() async {
     if (_syncing) return;
@@ -97,12 +103,19 @@ class OfflineSyncService {
               'p_on_account': payload['on_account'],
             });
           } on PostgrestException catch (e) {
-            // Graceful stock conflict resolution: If remote stock was insufficient,
-            // server flags as 'requires_manager_review'. If legacy RPC raises exception,
-            // flag and mark done to prevent unhandled crashing / infinite loops.
-            if (e.message.toLowerCase().contains('insufficient stock')) {
+            // Graceful stock conflict resolution: server flags order as
+            // 'requires_manager_review'. Mark op done so cashier flow is not
+            // blocked; manager reviews via the order pipeline.
+            final msg = e.message.toLowerCase();
+            if (msg.contains('insufficient stock') ||
+                msg.contains('stock conflict') ||
+                msg.contains('requires_manager_review')) {
               _nextRetryMap.remove(op.clientId);
               await db.markOpDone(op.clientId);
+              await _recordFailedOp(
+                op,
+                'Stock conflict flagged for manager review: ${e.message}',
+              );
               return;
             }
             rethrow;
@@ -130,7 +143,7 @@ class OfflineSyncService {
           await client.rpc('rpc_open_pos_shift', params: {
             'p_client_id': op.clientId,
             'p_cashier_id': payload['cashier_id'],
-            'p_cashier_name': payload['cashier_name'] ?? 'أمين الصندوق',
+            'p_cashier_name': payload['cashier_name'] ?? '\u063a\u064a\u0631 \u0645\u0633\u062c\u0644',
             'p_opening_float': payload['opening_float_centimes'] ?? 0,
             'p_z_report_sequence': payload['z_report_number'] ?? 0,
             'p_opened_at': payload['opened_at'],
@@ -170,7 +183,7 @@ class OfflineSyncService {
             'amount_change': -(payload['amount'] as int),
             'ref_type': 'payment',
             'ref_id': payload['purchase_id'] ?? op.clientId,
-            'notes': payload['notes'] ?? 'سداد نقدي تم ترحيله بعد استعادة الاتصال',
+            'notes': payload['notes'] ?? '\u062a\u062d\u0633\u064a\u0644 \u0645\u0648\u0631\u062f \u0644\u0644\u0645\u0648\u0631\u062f',
             'created_by': payload['payer_user_id'],
           });
 
@@ -186,8 +199,10 @@ class OfflineSyncService {
       _nextRetryMap.remove(op.clientId);
       await db.markOpDone(op.clientId);
     } on PostgrestException catch (e) {
-      // Duplicate key or already processed = already applied — treat as done.
-      if (e.code == '23505' || e.message.contains('already exists') || e.message.contains('already_processed')) {
+      // Duplicate key or already processed = already applied -- treat as done.
+      if (e.code == '23505' ||
+          e.message.contains('already exists') ||
+          e.message.contains('already_processed')) {
         _nextRetryMap.remove(op.clientId);
         await db.markOpDone(op.clientId);
       } else {
@@ -208,5 +223,25 @@ class OfflineSyncService {
         drainQueue();
       }
     });
+  }
+
+  /// Records a permanently-failed operation to the `failed_operations`
+  /// table so it can be reviewed/resolved manually without blocking
+  /// the pending-operations queue.
+  Future<void> _recordFailedOp(PendingOperation op, String error) async {
+    try {
+      await client.from('failed_operations').insert({
+        'client_id': op.clientId,
+        'operation_type': op.operationType,
+        'payload_json': op.payloadJson,
+        'last_error': error,
+        'retry_count': op.retryCount,
+        'last_attempted': DateTime.now().toIso8601String(),
+        'resolved': false,
+      });
+    } catch (_) {
+      // Best-effort; if we can't record the failure, at least the op is
+      // marked done so the queue keeps flowing.
+    }
   }
 }

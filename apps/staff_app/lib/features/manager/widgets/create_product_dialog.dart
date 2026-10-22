@@ -1,5 +1,5 @@
 import 'dart:math';
-import 'package:core/constants/dzd_formatter.dart';
+import 'package:core/core.dart';
 import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
@@ -464,23 +464,41 @@ class _CreateProductDialogState extends ConsumerState<CreateProductDialog>
       if (_selectedImageBytes != null) {
         try {
           final client = ref.read(supabaseClientProvider);
-          final path = 'products/$productId.jpg';
+          final webpBytes = await ImageCompressionService.compressToWebP(
+            _selectedImageBytes!,
+            quality: 85,
+          );
+          final path = 'products/$productId.webp';
           await client.storage.from('product-images').uploadBinary(
                 path,
-                _selectedImageBytes!,
+                webpBytes,
                 fileOptions:
-                    const FileOptions(upsert: true, contentType: 'image/jpeg'),
+                    const FileOptions(upsert: true, contentType: 'image/webp'),
               );
           photoUrl =
               '${client.storage.from('product-images').getPublicUrl(path)}'
               '?v=${DateTime.now().millisecondsSinceEpoch}';
         } catch (_) {
-          if (mounted) {
-            _showWarning('تعذر رفع الصورة — سيتم الحفظ بدون تحديث الصورة');
+          // Fallback: upload original bytes as JPEG if WebP conversion/upload fails.
+          try {
+            final client = ref.read(supabaseClientProvider);
+            final path = 'products/$productId.jpg';
+            await client.storage.from('product-images').uploadBinary(
+                  path,
+                  _selectedImageBytes!,
+                  fileOptions:
+                      const FileOptions(upsert: true, contentType: 'image/jpeg'),
+                );
+            photoUrl =
+                '${client.storage.from('product-images').getPublicUrl(path)}'
+                '?v=${DateTime.now().millisecondsSinceEpoch}';
+          } catch (__) {
+            if (mounted) {
+              _showWarning('تعذر رفع الصورة — سيتم الحفظ بدون تحديث الصورة');
           }
         }
-      }
-
+      } 
+}
       final nameAr = _nameArController.text.trim();
       final nameFr = _nameFrController.text.trim().isNotEmpty
           ? _nameFrController.text.trim()

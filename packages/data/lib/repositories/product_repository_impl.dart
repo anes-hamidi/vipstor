@@ -373,4 +373,82 @@ class ProductRepositoryImpl implements IProductRepository {
     } catch (_) {}
     return '11111111-1111-1111-1111-111111111111';
   }
+
+  // ------------------------------------------------------------------
+  // Delta sync: products updated since [since]. Used for incremental
+  // catalogue sync instead of fetching the full catalogue every session.
+  // ------------------------------------------------------------------
+  @override
+  Future<List<ProductEntity>> getProductsSince({
+    required DateTime since,
+    int limit = 200,
+  }) async {
+    final rows = await client
+        .from('products')
+        .select('''
+          id, name_ar, name_fr, category, unit, pack_size,
+          last_unit_cost, min_stock_alert, active, photo_url, updated_at
+        ''')
+        .eq('active', true)
+        .gt('updated_at', since.toIso8601String())
+        .order('updated_at', ascending: false)
+        .limit(limit);
+
+    return _buildEntitiesFromSqlRows(rows as List);
+  }
+
+  // ------------------------------------------------------------------
+  // Paginated product fetch. Returns [pageSize] rows starting at offset
+  // ((page - 1) * pageSize). Used to avoid loading the entire catalogue
+  // when only a subset is needed.
+  // ------------------------------------------------------------------
+  @override
+  Future<List<ProductEntity>> getProductsPage({
+    int page = 1,
+    int pageSize = 50,
+    String? search,
+    String? category,
+  }) async {
+    var query = client
+        .from('products')
+        .select('''
+          id, name_ar, name_fr, category, unit, pack_size,
+          last_unit_cost, min_stock_alert, active, photo_url, updated_at
+        ''')
+        .eq('active', true);
+
+    if (search != null && search.isNotEmpty) {
+      query = query.or('name_ar.ilike.%$search%,name_fr.ilike.%$search%');
+    }
+    if (category != null && category.isNotEmpty) {
+      query = query.eq('category', category);
+    }
+
+    final from = (page - 1) * pageSize;
+    final to = from + pageSize - 1;
+    final rows = await query.order('name_ar').range(from, to);
+
+    return _buildEntitiesFromSqlRows(rows as List);
+  }
+
+  /// Builds [ProductEntity] list from raw Supabase rows (used by delta/page methods).
+  List<ProductEntity> _buildEntitiesFromSqlRows(List rows) {
+    return rows.map((r) {
+      return ProductEntity(
+        id: r['id'] as String,
+        nameAr: r['name_ar'] as String? ?? '',
+        nameFr: r['name_fr'] as String? ?? '',
+        category: r['category'] as String? ?? '',
+        unit: r['unit'] as String? ?? 'piece',
+        packSize: (r['pack_size'] as num?)?.toInt() ?? 1,
+        lastUnitCostCentimes: (r['last_unit_cost'] as num?)?.toInt() ?? 0,
+        onHandQty: (r['on_hand_qty'] as num?)?.toInt() ?? 0,
+        availableQty: (r['available_qty'] as num?)?.toInt() ?? 0,
+        active: r['active'] as bool? ?? true,
+        photoUrl: r['photo_url'] as String?,
+        barcodes: const [],
+        prices: const [],
+      );
+    }).toList();
+  }
 }

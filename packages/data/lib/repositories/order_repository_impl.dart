@@ -22,8 +22,13 @@ class OrderRepositoryImpl implements IOrderRepository {
   @override
   Future<List<OrderEntity>> getOrders({
     OrderStatus? status,
+    List<OrderStatus>? statuses,
     String? driverId,
     String? customerId,
+    OrderChannel? channel,
+    DateTime? createdFrom,
+    DateTime? createdTo,
+    int? limit,
   }) async {
     var query = client.from('orders').select('''
       id,
@@ -49,7 +54,12 @@ class OrderRepositoryImpl implements IOrderRepository {
       users!orders_driver_id_fkey ( name, phone )
     ''');
 
-    if (status != null) {
+    if (statuses != null && statuses.isNotEmpty) {
+      query = query.inFilter(
+        'status',
+        statuses.map((s) => s.dbValue).toList(growable: false),
+      );
+    } else if (status != null) {
       query = query.eq('status', status.dbValue);
     }
     if (driverId != null) {
@@ -58,8 +68,28 @@ class OrderRepositoryImpl implements IOrderRepository {
     if (customerId != null) {
       query = query.eq('customer_id', customerId);
     }
+    if (channel != null) {
+      query = query.eq('channel', channel.name);
+    }
+    if (createdFrom != null) {
+      query = query.gte(
+        'created_at',
+        createdFrom.toUtc().toIso8601String(),
+      );
+    }
+    if (createdTo != null) {
+      query = query.lte(
+        'created_at',
+        createdTo.toUtc().toIso8601String(),
+      );
+    }
 
-    final rows = await query.order('created_at', ascending: false);
+    var orderedQuery = query.order('created_at', ascending: false);
+    if (limit != null) {
+      orderedQuery = orderedQuery.limit(limit);
+    }
+
+    final rows = await orderedQuery;
 
     return (rows as List).map<OrderEntity>((row) {
       final itemsList = (row['order_items'] as List? ?? []).map((i) {
@@ -429,5 +459,146 @@ class OrderRepositoryImpl implements IOrderRepository {
       }),
       createdAt: DateTime.now(),
     ));
+  }
+
+  // ------------------------------------------------------------------
+  // Delta sync: orders created/updated since [since].
+  // ------------------------------------------------------------------
+  @override
+  Future<List<OrderEntity>> getOrdersSince({
+    required DateTime since,
+    String? customerId,
+    int limit = 200,
+  }) async {
+    var query = client
+        .from('orders')
+        .select('''
+          id, order_number, channel, customer_id, status, driver_id,
+          cashier_id, delivery_address, total_amount, paid_amount, notes,
+          created_at,
+          order_items ( id, product_id, quantity, unit_price, unit_cost,
+            products ( name_ar, name_fr, unit ) )
+        ''');
+
+    // Apply filters BEFORE ordering/limiting (required by PostgrestFilterBuilder)
+    if (customerId != null) {
+      query = query.eq('customer_id', customerId);
+    }
+
+    final rows = await query
+        .gt('created_at', since.toIso8601String())
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    return _buildOrderEntities(rows as List);
+  }
+
+  // ------------------------------------------------------------------
+  // Paginated order fetch.
+  // ------------------------------------------------------------------
+  @override
+  Future<List<OrderEntity>> getOrdersPage({
+    int page = 1,
+    int pageSize = 50,
+    OrderStatus? status,
+    List<OrderStatus>? statuses,
+    String? driverId,
+    String? customerId,
+    OrderChannel? channel,
+    DateTime? createdFrom,
+    DateTime? createdTo,
+  }) async {
+    var query = client
+        .from('orders')
+        .select('''
+          id, order_number, channel, customer_id, status, driver_id,
+          cashier_id, delivery_address, total_amount, paid_amount, notes,
+          created_at,
+          order_items ( id, product_id, quantity, unit_price, unit_cost,
+            products ( name_ar, name_fr, unit ) ),
+          users!orders_driver_id_fkey ( name, phone )
+        ''');
+
+    if (statuses != null && statuses.isNotEmpty) {
+      query = query.inFilter(
+        'status',
+        statuses.map((s) => s.dbValue).toList(growable: false),
+      );
+    } else if (status != null) {
+      query = query.eq('status', status.dbValue);
+    }
+    if (driverId != null) {
+      query = query.eq('driver_id', driverId);
+    }
+    if (customerId != null) {
+      query = query.eq('customer_id', customerId);
+    }
+    if (channel != null) {
+      query = query.eq('channel', channel.name);
+    }
+    if (createdFrom != null) {
+      query = query.gte(
+        'created_at',
+        createdFrom.toUtc().toIso8601String(),
+      );
+    }
+    if (createdTo != null) {
+      query = query.lte(
+        'created_at',
+        createdTo.toUtc().toIso8601String(),
+      );
+    }
+
+    final from = (page - 1) * pageSize;
+    final to = from + pageSize - 1;
+    final rows = await query.order('created_at', ascending: false).range(from, to);
+
+    return _buildOrderEntities(rows as List);
+  }
+
+  List<OrderEntity> _buildOrderEntities(List rows) {
+    return rows.map((row) {
+      final itemsList = (row['order_items'] as List? ?? []).map((i) {
+        final productMap = i['products'] as Map<String, dynamic>?;
+        final name = productMap != null
+            ? (productMap['name_ar'] ?? productMap['name_fr'] ?? '')
+            : '';
+        return OrderItemEntity(
+          id: i['id'] as String,
+          productId: i['product_id'] as String,
+          productName: name,
+          quantity: (i['quantity'] as num).toInt(),
+          unitPriceCentimes: (i['unit_price'] as num).toInt(),
+          unitCostCentimes: (i['unit_cost'] as num?)?.toInt() ?? 0,
+          unit: productMap?['unit'] as String?,
+        );
+      }).toList();
+
+      final driverMap = row['users'] as Map<String, dynamic>?;
+      final deliveryAddr = row['delivery_address'] as Map<String, dynamic>?;
+
+      return OrderEntity(
+        id: row['id'] as String,
+        orderNumber: (row['order_number'] as num?)?.toInt(),
+        channel: row['channel'] == 'online'
+            ? OrderChannel.online
+            : OrderChannel.store,
+        customerId: row['customer_id'] as String?,
+        customerName: deliveryAddr?['customer_name']
+            ?? deliveryAddr?['store_name'],
+        customerPhone: deliveryAddr?['customer_phone']
+            ?? deliveryAddr?['phone'],
+        status: OrderStatus.fromString(row['status'] as String),
+        driverId: row['driver_id'] as String?,
+        driverName: driverMap?['name'] as String?,
+        driverPhone: driverMap?['phone'] as String?,
+        totalAmountCentimes: (row['total_amount'] as num).toInt(),
+        paidAmountCentimes: (row['paid_amount'] as num).toInt(),
+        deliveryAddress: deliveryAddr,
+        items: itemsList,
+        createdAt: DateTime.parse(row['created_at'] as String),
+        notes: row['notes'] as String?,
+      );
+    }).toList();
   }
 }

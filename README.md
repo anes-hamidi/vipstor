@@ -8,14 +8,20 @@ An offline-resilient, high-throughput Point of Sale (POS), Wholesale Shop Manage
 
 To maintain consistency and follow the development process without architectural deviations or merge conflicts, refer to the following comprehensive documentation:
 
-1. **[CONTEXT.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/CONTEXT.md)**:
+1. **[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md)**:
+   - As-built overview of the monorepo, backend schema/RPCs, auth, offline sync, workflows, and known risks.
+   - Generated from the current source; prefer it over older docs when they disagree.
+2. **[DATABASE_USAGE_ESTIMATE.md](DATABASE_USAGE_ESTIMATE.md)**:
+   - Capacity model for 5,000 monthly users, 100 online orders/day, and 500 POS sales/day.
+   - Storage, audit-log growth, write throughput, egress, and Supabase sizing recommendations.
+3. **[CONTEXT.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/CONTEXT.md)**:
    - Complete system vision, domain models, business workflows, and directory hierarchy.
    - Non-negotiable architectural rules (Zero-Editable State, Centimes Integer Precision, Result Pattern).
    - Module specifications (Cashier POS, Manager Purchases, Driver Deliveries, Moderator Audits).
-2. **[CHANGELOG_AUDIT.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/CHANGELOG_AUDIT.md)**:
+4. **[CHANGELOG_AUDIT.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/CHANGELOG_AUDIT.md)**:
    - Full chronological audit log of all release milestones, migrations, and file mutations.
    - Verification benchmarks, test results, and guidelines to avoid regressions.
-3. **[DEVELOPER_GUIDE.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/DEVELOPER_GUIDE.md)**:
+5. **[DEVELOPER_GUIDE.md](file:///c:/Users/fethi/Desktop/vipSmock/vip/DEVELOPER_GUIDE.md)**:
    - Technical guide covering PostgreSQL single-transaction RPC procedures, dynamic ledger balance views, and role-based access control (RBAC).
 
 ---

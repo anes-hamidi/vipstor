@@ -57,33 +57,37 @@ class _OnlineOrdersPipelineViewState
 
   void _refreshOrders() {
     ref.invalidate(managerOnlineOrdersProvider);
+    ref
+        .read(managerOnlineOrderHistoryProvider.notifier)
+        .refresh();
     ref.invalidate(liveProductsProvider);
   }
 
   // ─── Stage Counts ─────────────────────────────────────────────────────────
 
-  Map<_PipelineStage, int> _stageCounts(List<OrderEntity> orders) => {
-        _PipelineStage.verify:
-            orders.where((o) => o.status == OrderStatus.submitted).length,
-        _PipelineStage.prepare: orders
+  Map<_PipelineStage, int> _stageCounts(
+    List<OrderEntity> liveOrders,
+    List<OrderEntity> historyOrders,
+  ) =>
+      {
+        _PipelineStage.verify: liveOrders
+            .where((o) =>
+                o.status == OrderStatus.submitted ||
+                o.status == OrderStatus.requiresManagerReview)
+            .length,
+        _PipelineStage.prepare: liveOrders
             .where((o) =>
                 o.status == OrderStatus.confirmed ||
                 o.status == OrderStatus.preparing)
             .length,
-        _PipelineStage.dispatch: orders
+        _PipelineStage.dispatch: liveOrders
             .where((o) =>
                 o.status == OrderStatus.ready ||
                 o.status == OrderStatus.assigned ||
                 o.status == OrderStatus.accepted ||
                 o.status == OrderStatus.outForDelivery)
             .length,
-        _PipelineStage.history: orders
-            .where((o) =>
-                o.status == OrderStatus.delivered ||
-                o.status == OrderStatus.settled ||
-                o.status == OrderStatus.refused ||
-                o.status == OrderStatus.cancelled)
-            .length,
+        _PipelineStage.history: historyOrders.length,
       };
 
   // ─── Dialogs ──────────────────────────────────────────────────────────────
@@ -577,10 +581,18 @@ class _OnlineOrdersPipelineViewState
     ref.listen<AsyncValue<List<OrderEntity>>>(managerOnlineOrdersProvider, (prev, next) {
       final prevList = prev?.value ?? [];
       final nextList = next.value ?? [];
-      final prevSubmitted = prevList.where((o) => o.status == OrderStatus.submitted).length;
-      final nextSubmitted = nextList.where((o) => o.status == OrderStatus.submitted).length;
+      final prevPending = prevList
+          .where((o) =>
+              o.status == OrderStatus.submitted ||
+              o.status == OrderStatus.requiresManagerReview)
+          .length;
+      final nextPending = nextList
+          .where((o) =>
+              o.status == OrderStatus.submitted ||
+              o.status == OrderStatus.requiresManagerReview)
+          .length;
 
-      if (prev != null && nextSubmitted > prevSubmitted) {
+      if (prev != null && nextPending > prevPending) {
         SystemSound.play(SystemSoundType.alert);
         HapticFeedback.mediumImpact();
         if (mounted) {
@@ -591,7 +603,7 @@ class _OnlineOrdersPipelineViewState
                   const Icon(Icons.notifications_active_rounded, color: Colors.amber),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text('🔔 طلبية زبون جديدة وردت الآن! ($nextSubmitted بانتظار التدقيق)'),
+                    child: Text('🔔 طلبية زبون جديدة وردت الآن! ($nextPending بانتظار التدقيق)'),
                   ),
                 ],
               ),
@@ -604,35 +616,47 @@ class _OnlineOrdersPipelineViewState
       }
     });
 
-    final ordersAsync = ref.watch(managerOnlineOrdersProvider);
+    final liveAsync = ref.watch(managerOnlineOrdersProvider);
+    final historyState = ref.watch(managerOnlineOrderHistoryProvider);
     final productsAsync = ref.watch(liveProductsProvider);
     final staffAsync = ref.watch(staffMembersProvider);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
+    final liveOrders = liveAsync.value ?? const <OrderEntity>[];
+    final historyOrders = historyState.orders;
+    final products = productsAsync.value ?? [];
+    final staff = staffAsync.value ?? [];
+
+    final submitted = liveOrders
+        .where((o) =>
+            o.status == OrderStatus.submitted ||
+            o.status == OrderStatus.requiresManagerReview)
+        .toList();
+    final confirming = liveOrders
+        .where((o) =>
+            o.status == OrderStatus.confirmed ||
+            o.status == OrderStatus.preparing)
+        .toList();
+    final ready = liveOrders
+        .where((o) =>
+            o.status == OrderStatus.ready ||
+            o.status == OrderStatus.assigned ||
+            o.status == OrderStatus.accepted ||
+            o.status == OrderStatus.outForDelivery)
+        .toList();
+
     return Column(
       children: [
         // ── Pipeline Tab Bar ─────────────────────────────────────────
-        ordersAsync.when(
-          skipLoadingOnReload: true,
-          data: (orders) => _PipelineTabBar(
-            controller: _tabCtrl,
-            stages: _PipelineStage.values,
-            counts: _stageCounts(orders),
-            isDark: isDark,
-          ),
-          loading: () => _PipelineTabBar(
-            controller: _tabCtrl,
-            stages: _PipelineStage.values,
-            counts: const {},
-            isDark: isDark,
-          ),
-          error: (_, __) => _PipelineTabBar(
-            controller: _tabCtrl,
-            stages: _PipelineStage.values,
-            counts: const {},
-            isDark: isDark,
-          ),
+        _PipelineTabBar(
+          controller: _tabCtrl,
+          stages: _PipelineStage.values,
+          counts: _stageCounts(liveOrders, historyOrders),
+          plusCounts: historyState.hasMore
+              ? const {_PipelineStage.history}
+              : const {},
+          isDark: isDark,
         ),
 
         Container(
@@ -643,139 +667,318 @@ class _OnlineOrdersPipelineViewState
 
         // ── Tab Content ──────────────────────────────────────────────
         Expanded(
-          child: ordersAsync.when(
-            skipLoadingOnReload: true,
-            data: (orders) {
-              final submitted = orders
-                  .where((o) => o.status == OrderStatus.submitted)
-                  .toList();
-              final confirming = orders
-                  .where((o) =>
-                      o.status == OrderStatus.confirmed ||
-                      o.status == OrderStatus.preparing)
-                  .toList();
-              final ready = orders
-                  .where((o) =>
-                      o.status == OrderStatus.ready ||
-                      o.status == OrderStatus.assigned ||
-                      o.status == OrderStatus.accepted ||
-                      o.status == OrderStatus.outForDelivery)
-                  .toList();
-              final history = orders
-                  .where((o) =>
-                      o.status == OrderStatus.delivered ||
-                      o.status == OrderStatus.settled ||
-                      o.status == OrderStatus.refused ||
-                      o.status == OrderStatus.cancelled)
-                  .toList();
-
-              final products = productsAsync.value ?? [];
-              final staff = staffAsync.value ?? [];
-
-              return TabBarView(
-                controller: _tabCtrl,
-                children: [
-                  // Stage 1: Verify
-                  _buildOrderList(
-                    orders: submitted,
-                    emptyIcon: Icons.inbox_outlined,
-                    emptyTitle: 'لا طلبيات واردة جديدة',
-                    emptyDesc: 'ستظهر هنا طلبيات الزبائن الجديدة.',
-                    actionBuilder: (o) => GoldButton.icon(
-                      icon: Icons.verified_rounded,
-                      label: 'تدقيق وتأكيد',
-                      onPressed: () =>
-                          _showValidationDialog(o, products),
-                      compact: true,
-                    ),
-                  ),
-                  // Stage 2: Prepare
-                  _buildOrderList(
-                    orders: confirming,
-                    emptyIcon: Icons.inventory_2_outlined,
-                    emptyTitle: 'لا طلبيات قيد التحضير',
-                    emptyDesc:
-                        'الطلبيات المؤكدة تنتظر التجهيز هنا.',
-                    actionBuilder: (o) => OutlinedButton.icon(
-                      onPressed: () => _showPreparationDialog(o),
-                      icon: const Icon(Icons.inventory_2_outlined,
-                          size: 16),
-                      label: const Text('تجهيز السلع'),
-                    ),
-                  ),
-                  // Stage 3: Dispatch
-                  _buildOrderList(
-                    orders: ready,
-                    emptyIcon: Icons.local_shipping_outlined,
-                    emptyTitle: 'لا طلبيات جاهزة للإرسال',
-                    emptyDesc:
-                        'الطلبيات الجاهزة للتوصيل ستظهر هنا.',
-                    actionBuilder: (o) => Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.xs,
-                      alignment: WrapAlignment.end,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        GoldIconButton(
-                          icon: Icons.print_outlined,
-                          tooltip: 'طباعة وصل التسليم',
-                          onPressed: () =>
-                              PdfInvoiceService.printDeliverySlip(o),
-                          size: 32,
-                        ),
-                        if (o.status == OrderStatus.ready ||
-                            o.driverId == null)
-                          OutlinedButton.icon(
-                            onPressed: () =>
-                                _showAssignDriverDialog(o, staff),
-                            icon: const Icon(
-                                Icons.person_pin_circle_outlined,
-                                size: 16),
-                            label: const Text('تعيين سائق'),
-                          )
-                        else
-                          OutlinedButton.icon(
-                            onPressed: () =>
-                                _showAssignDriverDialog(o, staff),
-                            icon: const Icon(Icons.sync_alt_rounded,
-                                size: 16),
-                            label: Text(
-                              o.driverName != null
-                                  ? 'تغيير: ${o.driverName}'
-                                  : 'تغيير السائق',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  // Stage 4: History
-                  _buildOrderList(
-                    orders: history,
-                    emptyIcon: Icons.history_rounded,
-                    emptyTitle: 'سجل الطلبيات فارغ',
-                    emptyDesc:
-                        'الطلبيات المُسلَّمة والمرفوضة ستظهر هنا.',
-                    actionBuilder: (o) => OutlinedButton.icon(
+          child: TabBarView(
+            controller: _tabCtrl,
+            children: [
+              // Stage 1: Verify
+              _buildLiveStage(
+                liveAsync: liveAsync,
+                orders: submitted,
+                emptyIcon: Icons.inbox_outlined,
+                emptyTitle: 'لا طلبيات واردة جديدة',
+                emptyDesc: 'ستظهر هنا طلبيات الزبائن الجديدة.',
+                actionBuilder: (o) => GoldButton.icon(
+                  icon: Icons.verified_rounded,
+                  label: 'تدقيق وتأكيد',
+                  onPressed: () => _showValidationDialog(o, products),
+                  compact: true,
+                ),
+              ),
+              // Stage 2: Prepare
+              _buildLiveStage(
+                liveAsync: liveAsync,
+                orders: confirming,
+                emptyIcon: Icons.inventory_2_outlined,
+                emptyTitle: 'لا طلبيات قيد التحضير',
+                emptyDesc: 'الطلبيات المؤكدة تنتظر التجهيز هنا.',
+                actionBuilder: (o) => OutlinedButton.icon(
+                  onPressed: () => _showPreparationDialog(o),
+                  icon: const Icon(Icons.inventory_2_outlined, size: 16),
+                  label: const Text('تجهيز السلع'),
+                ),
+              ),
+              // Stage 3: Dispatch
+              _buildLiveStage(
+                liveAsync: liveAsync,
+                orders: ready,
+                emptyIcon: Icons.local_shipping_outlined,
+                emptyTitle: 'لا طلبيات جاهزة للإرسال',
+                emptyDesc: 'الطلبيات الجاهزة للتوصيل ستظهر هنا.',
+                actionBuilder: (o) => Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.xs,
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    GoldIconButton(
+                      icon: Icons.print_outlined,
+                      tooltip: 'طباعة وصل التسليم',
                       onPressed: () =>
                           PdfInvoiceService.printDeliverySlip(o),
-                      icon: const Icon(Icons.print_outlined, size: 16),
-                      label: const Text('طباعة الوصل'),
+                      size: 32,
                     ),
-                  ),
-                ],
-              );
-            },
-            loading: () => AppStates.loading(
-                message: 'جاري تحميل طلبيات الزبائن...'),
-            error: (err, _) => AppStates.error(
-              'تعذر تحميل الطلبيات',
-              onRetry: _refreshOrders,
-            ),
+                    if (o.status == OrderStatus.ready ||
+                        o.driverId == null)
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            _showAssignDriverDialog(o, staff),
+                        icon: const Icon(
+                            Icons.person_pin_circle_outlined,
+                            size: 16),
+                        label: const Text('تعيين سائق'),
+                      )
+                    else
+                      OutlinedButton.icon(
+                        onPressed: () =>
+                            _showAssignDriverDialog(o, staff),
+                        icon: const Icon(Icons.sync_alt_rounded,
+                            size: 16),
+                        label: Text(
+                          o.driverName != null
+                              ? 'تغيير: ${o.driverName}'
+                              : 'تغيير السائق',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // Stage 4: Date-filtered history
+              _buildHistoryTab(historyState),
+            ],
           ),
         ),
       ],
     );
+  }
+
+  Widget _buildLiveStage({
+    required AsyncValue<List<OrderEntity>> liveAsync,
+    required List<OrderEntity> orders,
+    required IconData emptyIcon,
+    required String emptyTitle,
+    required String emptyDesc,
+    required Widget Function(OrderEntity) actionBuilder,
+  }) {
+    if (!liveAsync.hasValue && liveAsync.isLoading) {
+      return AppStates.loading(
+        message: 'جاري تحميل طلبيات الزبائن...',
+      );
+    }
+    if (!liveAsync.hasValue && liveAsync.hasError) {
+      return AppStates.error(
+        'تعذر تحميل الطلبيات',
+        onRetry: _refreshOrders,
+      );
+    }
+    return _buildOrderList(
+      orders: orders,
+      emptyIcon: emptyIcon,
+      emptyTitle: emptyTitle,
+      emptyDesc: emptyDesc,
+      actionBuilder: actionBuilder,
+    );
+  }
+
+  Widget _buildHistoryTab(ManagerOrderHistoryState state) {
+    return Column(
+      children: [
+        _buildHistoryFilterCard(state),
+        if (state.isLoading && state.orders.isNotEmpty)
+          const LinearProgressIndicator(minHeight: 2),
+        Expanded(
+          child: state.isLoading && state.orders.isEmpty
+              ? AppStates.loading(
+                  message: 'جاري تحميل سجل الطلبيات...',
+                )
+              : state.error != null && state.orders.isEmpty
+                  ? AppStates.error(
+                      'تعذر تحميل سجل الطلبيات',
+                      onRetry: () => ref
+                          .read(managerOnlineOrderHistoryProvider.notifier)
+                          .refresh(),
+                    )
+                  : state.orders.isEmpty
+                      ? AppStates.empty(
+                          icon: Icons.history_rounded,
+                          title: 'لا توجد طلبيات في هذه الفترة',
+                          description:
+                              'غيّر فترة التاريخ لعرض طلبيات أخرى.',
+                        )
+                      : RefreshIndicator(
+                          onRefresh: () => ref
+                              .read(managerOnlineOrderHistoryProvider.notifier)
+                              .refresh(),
+                          child: ListView.separated(
+                            physics:
+                                const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsetsDirectional.all(
+                                AppSpacing.lg),
+                            itemCount: state.orders.length +
+                                (state.hasMore ? 1 : 0),
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: AppSpacing.md),
+                            itemBuilder: (context, i) {
+                              if (i == state.orders.length) {
+                                return _buildHistoryLoadMore(state);
+                              }
+                              final order = state.orders[i];
+                              return _OrderCard(
+                                order: order,
+                                actionBuilder: (o) =>
+                                    OutlinedButton.icon(
+                                  onPressed: () =>
+                                      PdfInvoiceService.printDeliverySlip(
+                                          o),
+                                  icon: const Icon(
+                                      Icons.print_outlined,
+                                      size: 16),
+                                  label: const Text('طباعة الوصل'),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHistoryFilterCard(ManagerOrderHistoryState state) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsetsDirectional.fromSTEB(
+          AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
+      child: LuxuryCard(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Row(
+          children: [
+            Icon(
+              Icons.date_range_rounded,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'فترة سجل الطلبيات',
+                    style: theme.textTheme.labelMedium,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${_formatHistoryDate(state.rangeStart)}  —  ${_formatHistoryDate(state.rangeEnd)}',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Wrap(
+              spacing: AppSpacing.xs,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _pickHistoryDateRange,
+                  icon: const Icon(Icons.edit_calendar_outlined,
+                      size: 16),
+                  label: const Text('تغيير الفترة'),
+                ),
+                GoldIconButton(
+                  icon: Icons.refresh_rounded,
+                  tooltip: 'تحديث السجل',
+                  onPressed: () => ref
+                      .read(managerOnlineOrderHistoryProvider.notifier)
+                      .refresh(),
+                  size: 32,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHistoryLoadMore(ManagerOrderHistoryState state) {
+    if (state.isLoadingMore) {
+      return const Padding(
+        padding: EdgeInsets.all(AppSpacing.lg),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (state.error != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+        child: Center(
+          child: TextButton.icon(
+            onPressed: () => ref
+                .read(managerOnlineOrderHistoryProvider.notifier)
+                .loadMore(),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('إعادة محاولة تحميل المزيد'),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+      child: Center(
+        child: OutlinedButton.icon(
+          onPressed: () => ref
+              .read(managerOnlineOrderHistoryProvider.notifier)
+              .loadMore(),
+          icon: const Icon(Icons.expand_more_rounded, size: 18),
+          label: const Text('تحميل المزيد'),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickHistoryDateRange() async {
+    final state = ref.read(managerOnlineOrderHistoryProvider);
+    final now = DateTime.now();
+    final firstDate = DateTime(2020);
+    final lastDate = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      23,
+      59,
+      59,
+      999,
+    );
+    final initialStart = state.rangeStart.isBefore(firstDate)
+        ? firstDate
+        : state.rangeStart;
+    final initialEnd =
+        state.rangeEnd.isAfter(lastDate) ? lastDate : state.rangeEnd;
+
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: firstDate,
+      lastDate: lastDate,
+      initialDateRange: DateTimeRange(
+        start: initialStart,
+        end: initialEnd,
+      ),
+      helpText: 'اختر فترة سجل الطلبيات',
+      saveText: 'تطبيق',
+      cancelText: 'إلغاء',
+    );
+    if (picked == null) return;
+
+    await ref
+        .read(managerOnlineOrderHistoryProvider.notifier)
+        .setRange(start: picked.start, end: picked.end);
+  }
+
+  String _formatHistoryDate(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
   }
 
   // ─── Order List ───────────────────────────────────────────────────────────
@@ -1030,12 +1233,14 @@ class _PipelineTabBar extends StatelessWidget {
   final TabController controller;
   final List<_PipelineStage> stages;
   final Map<_PipelineStage, int> counts;
+  final Set<_PipelineStage> plusCounts;
   final bool isDark;
 
   const _PipelineTabBar({
     required this.controller,
     required this.stages,
     required this.counts,
+    this.plusCounts = const {},
     required this.isDark,
   });
 
@@ -1062,6 +1267,8 @@ class _PipelineTabBar extends StatelessWidget {
               indicatorWeight: 2.5,
               tabs: stages.map((stage) {
                 final count = counts[stage] ?? 0;
+                final countLabel =
+                    plusCounts.contains(stage) ? '$count+' : '$count';
                 return Tab(
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1079,7 +1286,7 @@ class _PipelineTabBar extends StatelessWidget {
                             borderRadius: AppRadius.pillAll,
                           ),
                           child: Text(
-                            '$count',
+                            countLabel,
                             style: const TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,

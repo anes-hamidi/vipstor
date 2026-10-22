@@ -155,7 +155,10 @@ class ManagerCommandCenterView extends ConsumerWidget {
                   ordersAsync.when(
                     data: (orders) {
                       final pendingCount = orders
-                          .where((o) => o.status == OrderStatus.submitted)
+                          .where((o) =>
+                              o.status == OrderStatus.submitted ||
+                              o.status ==
+                                  OrderStatus.requiresManagerReview)
                           .length;
                       return _MetricCard(
                         title: 'طلبيات تنتظر التأكيد',

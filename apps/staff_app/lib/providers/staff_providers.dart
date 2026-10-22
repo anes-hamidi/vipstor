@@ -466,68 +466,366 @@ final suppliersWithBalancesProvider = FutureProvider<List<SupplierProfileEntity>
   return repo.getSuppliersWithBalances();
 });
 
-/// Real-time stream of all orders for the Manager (live synchronization via Supabase Realtime + polling fallback).
-final managerOnlineOrdersProvider = StreamProvider<List<OrderEntity>>((ref) async* {
-  final repo = ref.watch(orderRepositoryProvider);
-  final client = ref.watch(supabaseClientProvider);
+/// Orders that still need manager/cashier action. These stay live and are
+/// never limited by the history date filter.
+const Set<OrderStatus> _activeOnlineStatuses = {
+  OrderStatus.submitted,
+  OrderStatus.requiresManagerReview,
+  OrderStatus.confirmed,
+  OrderStatus.preparing,
+  OrderStatus.ready,
+  OrderStatus.assigned,
+  OrderStatus.accepted,
+  OrderStatus.outForDelivery,
+};
 
-  // 1. Initial snapshot
-  List<OrderEntity> currentOrders = await repo.getOrders();
-  yield currentOrders;
+/// Orders that belong in the date-filtered history.
+const Set<OrderStatus> _terminalOnlineStatuses = {
+  OrderStatus.delivered,
+  OrderStatus.settled,
+  OrderStatus.refused,
+  OrderStatus.cancelled,
+};
 
-  final controller = StreamController<List<OrderEntity>>.broadcast();
-  bool isReloading = false;
+bool _isActiveOnlineStatus(OrderStatus status) =>
+    _activeOnlineStatuses.contains(status);
 
-  Future<void> reloadOrders() async {
-    if (isReloading) return;
-    isReloading = true;
+/// Incremented when an online order enters or leaves terminal history.
+/// The history provider listens to this and refreshes with a debounce.
+final managerHistoryRevisionProvider = StateProvider<int>((ref) => 0);
+
+class ManagerOrderHistoryState {
+  final DateTime rangeStart;
+  final DateTime rangeEnd;
+  final List<OrderEntity> orders;
+  final bool isLoading;
+  final bool isLoadingMore;
+  final Object? error;
+  final bool hasMore;
+
+  const ManagerOrderHistoryState({
+    required this.rangeStart,
+    required this.rangeEnd,
+    this.orders = const [],
+    this.isLoading = false,
+    this.isLoadingMore = false,
+    this.error,
+    this.hasMore = true,
+  });
+
+  ManagerOrderHistoryState copyWith({
+    DateTime? rangeStart,
+    DateTime? rangeEnd,
+    List<OrderEntity>? orders,
+    bool? isLoading,
+    bool? isLoadingMore,
+    Object? error,
+    bool clearError = false,
+    bool? hasMore,
+  }) {
+    return ManagerOrderHistoryState(
+      rangeStart: rangeStart ?? this.rangeStart,
+      rangeEnd: rangeEnd ?? this.rangeEnd,
+      orders: orders ?? this.orders,
+      isLoading: isLoading ?? this.isLoading,
+      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      error: clearError ? null : (error ?? this.error),
+      hasMore: hasMore ?? this.hasMore,
+    );
+  }
+}
+
+class ManagerOnlineOrderHistoryNotifier
+    extends StateNotifier<ManagerOrderHistoryState> {
+  ManagerOnlineOrderHistoryNotifier({
+    required IOrderRepository repository,
+    required DateTime initialStart,
+    required DateTime initialEnd,
+  })  : _repository = repository,
+        super(ManagerOrderHistoryState(
+          rangeStart: _startOfDay(initialStart),
+          rangeEnd: _endOfDay(initialEnd),
+          isLoading: true,
+        )) {
+    unawaited(refresh());
+  }
+
+  static const int pageSize = 100;
+
+  final IOrderRepository _repository;
+  int _requestToken = 0;
+
+  Future<void> setRange({
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    state = state.copyWith(
+      rangeStart: _startOfDay(start),
+      rangeEnd: _endOfDay(end),
+      orders: const [],
+      isLoading: true,
+      isLoadingMore: false,
+      hasMore: true,
+      clearError: true,
+    );
+    await refresh();
+  }
+
+  Future<void> refresh() async {
+    final token = ++_requestToken;
+    state = state.copyWith(
+      isLoading: true,
+      isLoadingMore: false,
+      clearError: true,
+    );
+    await _fetch(page: 1, replace: true, token: token);
+  }
+
+  Future<void> loadMore() async {
+    if (state.isLoading || state.isLoadingMore || !state.hasMore) return;
+    final token = _requestToken;
+    state = state.copyWith(isLoadingMore: true, clearError: true);
+    final nextPage = (state.orders.length ~/ pageSize) + 1;
+    await _fetch(page: nextPage, replace: false, token: token);
+  }
+
+  Future<void> _fetch({
+    required int page,
+    required bool replace,
+    required int token,
+  }) async {
     try {
-      final fresh = await repo.getOrders();
-      currentOrders = fresh;
-      if (!controller.isClosed) {
-        controller.add(fresh);
-      }
+      final rows = await _repository.getOrdersPage(
+        page: page,
+        pageSize: pageSize,
+        channel: OrderChannel.online,
+        statuses: _terminalOnlineStatuses.toList(growable: false),
+        createdFrom: state.rangeStart,
+        createdTo: state.rangeEnd,
+      );
+      if (!mounted || token != _requestToken) return;
+
+      final orders = replace ? rows : [...state.orders, ...rows];
+      state = state.copyWith(
+        orders: orders,
+        isLoading: false,
+        isLoadingMore: false,
+        hasMore: rows.length == pageSize,
+        clearError: true,
+      );
     } catch (e) {
-      debugPrint('[managerOnlineOrdersProvider] Live reload error: $e');
-    } finally {
-      isReloading = false;
+      if (!mounted || token != _requestToken) return;
+      state = state.copyWith(
+        isLoading: false,
+        isLoadingMore: false,
+        error: e,
+      );
     }
   }
 
-  // 2. Real-time PostgreSQL changes on 'orders' and 'order_items'
-  final channel = client.channel('manager_orders_live_${DateTime.now().millisecondsSinceEpoch}')
-    ..onPostgresChanges(
+  static DateTime _startOfDay(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
+
+  static DateTime _endOfDay(DateTime date) =>
+      DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+}
+
+/// Date-filtered, paginated online-order history.
+final managerOnlineOrderHistoryProvider = StateNotifierProvider<
+    ManagerOnlineOrderHistoryNotifier, ManagerOrderHistoryState>((ref) {
+  final repository = ref.watch(orderRepositoryProvider);
+  final now = DateTime.now();
+  final notifier = ManagerOnlineOrderHistoryNotifier(
+    repository: repository,
+    initialStart: DateTime(now.year, now.month, now.day - 29),
+    initialEnd: DateTime(now.year, now.month, now.day),
+  );
+
+  Timer? refreshDebounce;
+  ref.listen<int>(managerHistoryRevisionProvider, (_, __) {
+    refreshDebounce?.cancel();
+    refreshDebounce = Timer(const Duration(milliseconds: 600), () {
+      if (notifier.mounted) unawaited(notifier.refresh());
+    });
+  });
+  ref.onDispose(() => refreshDebounce?.cancel());
+
+  return notifier;
+});
+
+/// Real-time stream of active online orders for the Manager.
+///
+/// There is no row limit and no date filter here: every active online order
+/// stays live. Terminal orders are removed from this list and served by the
+/// date-filtered history provider instead.
+final managerOnlineOrdersProvider =
+    StreamProvider<List<OrderEntity>>((ref) async* {
+  final repo = ref.watch(orderRepositoryProvider);
+  final client = ref.watch(supabaseClientProvider);
+
+  var isDisposed = false;
+  ref.onDispose(() => isDisposed = true);
+
+  // 1. Initial snapshot: all active online orders.
+  List<OrderEntity> currentOrders = await repo.getOrders(
+    channel: OrderChannel.online,
+    statuses: _activeOnlineStatuses.toList(growable: false),
+  );
+  if (isDisposed) return;
+  yield currentOrders;
+
+  final controller = StreamController<List<OrderEntity>>.broadcast();
+  final pendingOrderIds = <String>{};
+  Timer? debounceTimer;
+  Timer? historyRevisionTimer;
+  bool isWindowLoading = false;
+
+  void publish(List<OrderEntity> orders) {
+    if (!isDisposed && !controller.isClosed) controller.add(orders);
+  }
+
+  void scheduleHistoryRevision() {
+    if (isDisposed) return;
+    historyRevisionTimer?.cancel();
+    historyRevisionTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!isDisposed) {
+        ref.read(managerHistoryRevisionProvider.notifier).state++;
+      }
+    });
+  }
+
+  List<OrderEntity> mergeActiveOrders(Iterable<OrderEntity> updates) {
+    final byId = <String, OrderEntity>{
+      for (final order in currentOrders) order.id: order,
+    };
+    for (final order in updates) {
+      if (order.channel != OrderChannel.online) continue;
+      if (_isActiveOnlineStatus(order.status)) {
+        byId[order.id] = order;
+      } else {
+        byId.remove(order.id);
+      }
+    }
+    return byId.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  Future<void> fetchOrder(String orderId) async {
+    try {
+      final order = await repo.getOrderById(orderId);
+      if (order.channel != OrderChannel.online) return;
+      currentOrders = mergeActiveOrders([order]);
+      publish(currentOrders);
+      if (!_isActiveOnlineStatus(order.status)) {
+        scheduleHistoryRevision();
+      }
+    } catch (e) {
+      // The order may have been deleted, or the row may not be visible yet.
+      // The 60-second fallback reconciles the live list.
+      debugPrint('[managerOnlineOrders] Single-order fetch failed: $e');
+    }
+  }
+
+  void scheduleOrderFetch(String orderId) {
+    pendingOrderIds.add(orderId);
+    debounceTimer?.cancel();
+    debounceTimer = Timer(const Duration(milliseconds: 250), () {
+      final ids = pendingOrderIds.toList(growable: false);
+      pendingOrderIds.clear();
+      for (final id in ids) {
+        unawaited(fetchOrder(id));
+      }
+    });
+  }
+
+  Future<void> refreshActiveOrders() async {
+    if (isWindowLoading || isDisposed) return;
+    isWindowLoading = true;
+    try {
+      final fresh = await repo.getOrders(
+        channel: OrderChannel.online,
+        statuses: _activeOnlineStatuses.toList(growable: false),
+      );
+      if (isDisposed) return;
+      currentOrders = fresh;
+      publish(currentOrders);
+    } catch (e) {
+      debugPrint('[managerOnlineOrders] Live refresh failed: $e');
+    } finally {
+      isWindowLoading = false;
+    }
+  }
+
+  // 2. Realtime: order headers only. POS/store events are ignored, and
+  // order_items is not subscribed because a single order fetch already
+  // includes its items.
+  final channel = client.channel(
+    'manager_online_orders_${DateTime.now().millisecondsSinceEpoch}',
+  )..onPostgresChanges(
       event: PostgresChangeEvent.all,
       schema: 'public',
       table: 'orders',
       callback: (payload) {
-        debugPrint('[Realtime:orders] Event: ${payload.eventType}');
-        reloadOrders();
-      },
-    )
-    ..onPostgresChanges(
-      event: PostgresChangeEvent.all,
-      schema: 'public',
-      table: 'order_items',
-      callback: (payload) {
-        debugPrint('[Realtime:order_items] Event: ${payload.eventType}');
-        reloadOrders();
+        if (isDisposed) return;
+
+        if (payload.eventType == PostgresChangeEvent.delete) {
+          final id = payload.oldRecord['id'] as String?;
+          if (id == null) return;
+          final wasTracked = currentOrders.any((o) => o.id == id);
+          if (!wasTracked) return;
+          currentOrders = currentOrders.where((o) => o.id != id).toList();
+          publish(currentOrders);
+          scheduleHistoryRevision();
+          return;
+        }
+
+        final record = payload.newRecord;
+        final id = record['id'] as String?;
+        if (id == null) return;
+
+        final channelValue = record['channel'] as String?;
+        final isTracked = currentOrders.any((o) => o.id == id);
+        if (!isTracked && channelValue != 'online') return;
+
+        final statusValue = record['status'] as String?;
+        final status = statusValue == null
+            ? null
+            : OrderStatus.fromString(statusValue);
+
+        // Terminal order: remove it from the live pipeline immediately and
+        // let the date-filtered history provider refresh.
+        if (status != null && !_isActiveOnlineStatus(status)) {
+          if (isTracked) {
+            currentOrders =
+                currentOrders.where((o) => o.id != id).toList();
+            publish(currentOrders);
+          }
+          scheduleHistoryRevision();
+          return;
+        }
+
+        // New/updated active online order: fetch just this order.
+        scheduleOrderFetch(id);
       },
     );
 
   channel.subscribe((status, [error]) {
     if (status == RealtimeSubscribeStatus.subscribed) {
-      reloadOrders();
+      unawaited(refreshActiveOrders());
     }
   });
 
-  // 3. Fallback timer (every 6 seconds) for guaranteed offline-recovery / network resilience
-  final timer = Timer.periodic(const Duration(seconds: 6), (_) {
-    reloadOrders();
-  });
+  // 3. Fast safety net for missed realtime inserts/updates. Realtime is the
+  // primary path; this only restores the small active-order list.
+  final timer = Timer.periodic(
+    const Duration(seconds: 60),
+    (_) => unawaited(refreshActiveOrders()),
+  );
 
   ref.onDispose(() {
     timer.cancel();
+    debounceTimer?.cancel();
+    historyRevisionTimer?.cancel();
     channel.unsubscribe();
     client.removeChannel(channel);
     controller.close();
@@ -536,10 +834,14 @@ final managerOnlineOrdersProvider = StreamProvider<List<OrderEntity>>((ref) asyn
   yield* controller.stream;
 });
 
-/// Count of submitted / unverified orders awaiting manager review
+/// Count of online orders awaiting manager review.
 final unverifiedOrdersCountProvider = Provider<int>((ref) {
   final orders = ref.watch(managerOnlineOrdersProvider).value ?? [];
-  return orders.where((o) => o.status == OrderStatus.submitted).length;
+  return orders
+      .where((o) =>
+          o.status == OrderStatus.submitted ||
+          o.status == OrderStatus.requiresManagerReview)
+      .length;
 });
 
 // Customer Debt & Ledger Providers

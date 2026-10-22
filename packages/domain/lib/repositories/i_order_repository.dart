@@ -1,7 +1,16 @@
 import '../entities/order_entity.dart';
 
 abstract class IOrderRepository {
-  Future<List<OrderEntity>> getOrders({OrderStatus? status, String? driverId, String? customerId});
+  Future<List<OrderEntity>> getOrders({
+    OrderStatus? status,
+    List<OrderStatus>? statuses,
+    String? driverId,
+    String? customerId,
+    OrderChannel? channel,
+    DateTime? createdFrom,
+    DateTime? createdTo,
+    int? limit,
+  });
   Future<OrderEntity> getOrderById(String orderId);
   Future<String> createInStoreSale({
     required String cashierId,
@@ -46,5 +55,25 @@ abstract class IOrderRepository {
     double? deliveryLng,
     String? notes,
     required String clientId,
+  });
+
+  // Delta sync: orders created/updated since [since].
+  Future<List<OrderEntity>> getOrdersSince({
+    required DateTime since,
+    String? customerId,
+    int limit,
+  });
+
+  // Paginated, date-filtered order fetch.
+  Future<List<OrderEntity>> getOrdersPage({
+    int page,
+    int pageSize,
+    OrderStatus? status,
+    List<OrderStatus>? statuses,
+    String? driverId,
+    String? customerId,
+    OrderChannel? channel,
+    DateTime? createdFrom,
+    DateTime? createdTo,
   });
 }
