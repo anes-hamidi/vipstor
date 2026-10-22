@@ -451,7 +451,23 @@ final driverOrdersProvider = FutureProvider<List<OrderEntity>>((ref) async {
   final repo = ref.watch(orderRepositoryProvider);
   final user = ref.watch(authStateProvider);
   if (user == null) return [];
-  return repo.getOrders(driverId: user.id);
+
+  // Keep every active task (limited only by what is assigned to the driver)
+  // while bounding the completed history. A single `limit` on all orders could
+  // hide an old active task behind newer completed ones.
+  final results = await Future.wait<List<OrderEntity>>([
+    repo.getOrders(
+      driverId: user.id,
+      statuses: _activeOnlineStatuses.toList(growable: false),
+    ),
+    repo.getOrders(
+      driverId: user.id,
+      statuses: _terminalOnlineStatuses.toList(growable: false),
+      limit: 60,
+    ),
+  ]);
+
+  return [...results[0], ...results[1]];
 });
 
 final driverWalletBalanceProvider = FutureProvider<int>((ref) async {
