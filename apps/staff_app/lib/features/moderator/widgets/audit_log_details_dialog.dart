@@ -40,6 +40,7 @@ class AuditLogDetailsDialog extends StatelessWidget {
 
     final beforeState = log['before_state'];
     final afterState = log['after_state'];
+    final hasPayload = beforeState != null || afterState != null;
 
     Color badgeColor = colors.info;
     if (action == 'INSERT') badgeColor = colors.success;
@@ -127,9 +128,13 @@ class AuditLogDetailsDialog extends StatelessWidget {
                             ),
                             const SizedBox(height: AppSpacing.md),
                             if (targetedChanges.isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 4),
-                                child: Text('تم تسجيل العملية بنجاح بدون تعديل في الحقول الأساسية.'),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Text(
+                                  hasPayload
+                                      ? 'تم تسجيل العملية بنجاح بدون تعديل في الحقول الأساسية.'
+                                      : 'تم تسجيل العملية. تفاصيل الحالة الكاملة محجوبة لأسباب أمنية.',
+                                ),
                               )
                             else
                               ...targetedChanges.map((change) => _buildChangeRow(context, change)),
@@ -171,27 +176,29 @@ class AuditLogDetailsDialog extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.md),
+                    if (hasPayload) ...[
+                      const SizedBox(height: AppSpacing.md),
 
-                    // 3. Technical Raw Data (Expandable accordion for advanced inspection)
-                    Theme(
-                      data: theme.copyWith(dividerColor: Colors.transparent),
-                      child: ExpansionTile(
-                        tilePadding: EdgeInsets.zero,
-                        title: Text(
-                          'عرض البيانات التقنية الكاملة (JSON)',
-                          style: TextStyle(fontSize: 12, color: theme.colorScheme.outline),
-                        ),
-                        children: [
-                          if (beforeState != null) ...[
-                            _buildJsonDump(context, 'الحالة السابقة (Before)', beforeState, colors.warning),
-                            const SizedBox(height: AppSpacing.sm),
+                      // 3. Technical Raw Data (Expandable accordion for advanced inspection)
+                      Theme(
+                        data: theme.copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          title: Text(
+                            'عرض البيانات التقنية الكاملة (JSON)',
+                            style: TextStyle(fontSize: 12, color: theme.colorScheme.outline),
+                          ),
+                          children: [
+                            if (beforeState != null) ...[
+                              _buildJsonDump(context, 'الحالة السابقة (Before)', beforeState, colors.warning),
+                              const SizedBox(height: AppSpacing.sm),
+                            ],
+                            if (afterState != null)
+                              _buildJsonDump(context, 'الحالة الناتجة (After)', afterState, colors.success),
                           ],
-                          if (afterState != null)
-                            _buildJsonDump(context, 'الحالة الناتجة (After)', afterState, colors.success),
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),

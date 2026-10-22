@@ -6,8 +6,6 @@ import '../datasources/remote/supabase_service.dart';
 import '../datasources/local/app_database.dart';
 import '../datasources/local/connectivity_service.dart';
 
-import 'customer_repository_impl.dart';
-
 class OrderRepositoryImpl implements IOrderRepository {
   final SupabaseClient client;
   final SupabaseService service;
@@ -236,6 +234,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     if (ConnectivityService.instance.isOnline) {
       try {
         final res = await service.postStoreSale(
+          clientId: clientId,
           cashierId: effectiveCashierId,
           customerId: customerId,
           items: items,
@@ -265,39 +264,21 @@ class OrderRepositoryImpl implements IOrderRepository {
     return clientId;
   }
 
-  Future<String?> _resolveValidCustomerId(String? candidateId, Map<String, dynamic> address) async {
-    if (candidateId != null && candidateId.isNotEmpty && candidateId != '22222222-2222-2222-2222-222222222222') {
-      try {
-        final rows = await client.from('customers').select('id').eq('id', candidateId).limit(1);
-        if ((rows as List).isNotEmpty) {
-          return candidateId;
-        }
-      } catch (_) {}
-    }
-
-    final phone = (address['customer_phone'] ?? address['phone'])?.toString();
-    final name = (address['customer_name'] ?? address['store_name'])?.toString();
-    if (phone != null && phone.trim().isNotEmpty) {
-      try {
-        final custRepo = CustomerRepositoryImpl(client: client, service: service, db: db);
-        final synced = await custRepo.syncCustomerProfile(
-          name: name ?? 'زبون',
-          phone: phone,
-          wilaya: address['wilaya']?.toString() ?? '',
-          commune: address['commune']?.toString() ?? '',
-          addressText: address['address_text']?.toString() ?? address['address']?.toString() ?? '',
-          latitude: (address['latitude'] as num?)?.toDouble(),
-          longitude: (address['longitude'] as num?)?.toDouble(),
-          existingCustomerId: candidateId,
-        );
-        return synced.id;
-      } catch (_) {}
+  Future<String?> _resolveValidCustomerId(String? candidateId) async {
+    if (candidateId == null ||
+        candidateId.isEmpty ||
+        candidateId == '22222222-2222-2222-2222-222222222222') {
+      return null;
     }
 
     try {
-      final rows = await client.from('customers').select('id').limit(1);
+      final rows = await client
+          .from('customers')
+          .select('id')
+          .eq('id', candidateId)
+          .limit(1);
       if ((rows as List).isNotEmpty) {
-        return rows.first['id'] as String;
+        return candidateId;
       }
     } catch (_) {}
 
@@ -312,7 +293,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     String? clientId,
     String? deviceToken,
   }) async {
-    final validCustomerId = await _resolveValidCustomerId(customerId, address);
+    final validCustomerId = await _resolveValidCustomerId(customerId);
 
     // Only send product_id and quantity to the server
     final cleanItems = items.map((it) {
@@ -324,7 +305,7 @@ class OrderRepositoryImpl implements IOrderRepository {
 
     return await service.submitCustomerOrder(
       clientId: clientId,
-      customerId: validCustomerId ?? customerId,
+      customerId: validCustomerId,
       address: address,
       items: cleanItems,
       deviceToken: deviceToken,

@@ -48,6 +48,7 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
   final _amountController = TextEditingController();
   final _notesController = TextEditingController();
   final _searchController = TextEditingController();
+  final _pinController = TextEditingController();
 
   SupplierProfileEntity? _selectedSupplier;
   bool _autoPrintVoucher = true;
@@ -69,6 +70,7 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
     _amountController.dispose();
     _notesController.dispose();
     _searchController.dispose();
+    _pinController.dispose();
     super.dispose();
   }
 
@@ -113,6 +115,17 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('يرجى إدخال مبلغ صحيح لسداد مستحقات المورد'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+      return;
+    }
+
+    final callerPin = _pinController.text.trim();
+    if (callerPin.length < 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('يرجى إدخال رمز PIN الخاص بك (4 أرقام على الأقل)'),
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
@@ -202,6 +215,7 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
         payerUserId: widget.payerId,
         payerName: widget.payerName,
         payerRole: widget.payerRole,
+        callerPin: callerPin,
         notes: notes,
       );
 
@@ -742,6 +756,27 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
                   ),
                 ),
               ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+
+          // Caller PIN confirmation
+          Text('رمز PIN الخاص بك لتأكيد الصرف:',
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _pinController,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            maxLength: 8,
+            decoration: const InputDecoration(
+              hintText: '••••',
+              prefixIcon: Icon(Icons.lock_outline_rounded),
+              helperText: 'مطلوب لمنع أي عملية صرف غير مصرح بها',
+              counterText: '',
+              isDense: true,
+              border: OutlineInputBorder(borderRadius: AppRadius.mdAll),
             ),
           ),
           const SizedBox(height: AppSpacing.md),

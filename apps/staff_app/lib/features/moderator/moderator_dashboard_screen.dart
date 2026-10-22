@@ -177,9 +177,6 @@ final auditTrailLogsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) 
                                     .contains(r['actor_role'])
                                         ? 'staff'
                                         : 'system'),
-        'before_state':     r['before_state'],
-        'after_state':      r['after_state'],
-        'ip_address':       r['ip_address'],
       };
     }).toList();
   } catch (_) {

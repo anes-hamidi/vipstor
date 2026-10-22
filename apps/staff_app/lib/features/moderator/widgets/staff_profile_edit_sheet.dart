@@ -71,7 +71,7 @@ class _StaffProfileEditSheetState
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _phone;
-  late final TextEditingController _oldPinCtrl;
+  late final TextEditingController _callerPinCtrl;
   late final TextEditingController _newPinCtrl;
   late String _role;
   late bool _active;
@@ -92,7 +92,7 @@ class _StaffProfileEditSheetState
     super.initState();
     _name = TextEditingController(text: widget.initialName);
     _phone = TextEditingController(text: widget.initialPhone);
-    _oldPinCtrl = TextEditingController();
+    _callerPinCtrl = TextEditingController();
     _newPinCtrl = TextEditingController();
     _role = widget.initialRole;
     _active = widget.initialActive;
@@ -103,7 +103,7 @@ class _StaffProfileEditSheetState
   void dispose() {
     _name.dispose();
     _phone.dispose();
-    _oldPinCtrl.dispose();
+    _callerPinCtrl.dispose();
     _newPinCtrl.dispose();
     super.dispose();
   }
@@ -116,67 +116,50 @@ class _StaffProfileEditSheetState
     });
     try {
       final currentUser = ref.read(authStateProvider);
-      final isModerator = currentUser?.role == UserRole.moderator;
-
-      // 1. Change PIN if requested
-      if (_changePin && _oldPinCtrl.text.isNotEmpty && _newPinCtrl.text.isNotEmpty) {
-        if (_newPinCtrl.text.trim().length < 4) {
-          throw Exception('رمز PIN الجديد يجب أن يتكون من 4 أرقام على الأقل');
-        }
-        final authRepo = ref.read(authRepositoryProvider);
-        final pinOk = await authRepo.changePin(
-          userId: widget.userId,
-          oldPin: _oldPinCtrl.text.trim(),
-          newPin: _newPinCtrl.text.trim(),
-        );
-        if (!pinOk) {
-          throw Exception('رمز PIN الحالي غير صحيح، تعذر تغيير الرمز');
-        }
+      if (currentUser == null) {
+        throw Exception('تعذر تحديد المستخدم الحالي');
       }
 
-      // 2. Update user profile via SECURITY DEFINER RPC
+      final isModerator = currentUser.role == UserRole.moderator;
+      final callerPin = _callerPinCtrl.text.trim();
+      if (callerPin.length < 4) {
+        throw Exception('يرجى إدخال رمز PIN الخاص بك لتأكيد الحفظ');
+      }
+
+      final newPin = _changePin ? _newPinCtrl.text.trim() : null;
+      if (_changePin && (newPin == null || newPin.length < 4)) {
+        throw Exception('رمز PIN الجديد يجب أن يتكون من 4 أرقام على الأقل');
+      }
+
+      // One RPC verifies the caller, enforces the moderator/self rule,
+      // protects the last active moderator, and optionally resets the
+      // target's PIN. No direct table update is attempted.
       final client = ref.read(supabaseClientProvider);
-      final updateData = <String, dynamic>{
-        'name': _name.text.trim(),
-        'phone': _phone.text.trim(),
-        'language': _language,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+      final res = await client.rpc('rpc_save_user_profile', params: {
+        'p_caller_id': currentUser.id,
+        'p_caller_pin': callerPin,
+        'p_target_user_id': widget.userId,
+        'p_name': _name.text.trim(),
+        'p_phone': _phone.text.trim(),
+        'p_language': _language,
+        'p_role': isModerator ? _role : null,
+        'p_active': isModerator ? _active : null,
+        'p_new_pin': newPin,
+      });
 
-      if (isModerator) {
-        updateData['role'] = _role;
-        updateData['active'] = _active;
+      if (res is! Map || res['status'] != 'success') {
+        throw Exception(
+          (res is Map ? res['message'] : null)?.toString() ??
+              'تعذر حفظ التعديلات',
+        );
       }
 
-      bool rpcSuccess = false;
-      if (currentUser != null) {
-        try {
-          final res = await client.rpc('rpc_update_user_profile', params: {
-            'p_caller_id': currentUser.id,
-            'p_caller_pin': _oldPinCtrl.text.trim().isNotEmpty ? _oldPinCtrl.text.trim() : '0000',
-            'p_target_user_id': widget.userId,
-            'p_name': _name.text.trim(),
-            'p_phone': _phone.text.trim(),
-            'p_language': _language,
-            'p_role': isModerator ? _role : null,
-            'p_active': isModerator ? _active : null,
-          });
-          if (res is Map && res['status'] == 'success') {
-            rpcSuccess = true;
-          }
-        } catch (_) {}
-      }
-
-      if (!rpcSuccess) {
-        await client.from('users').update(updateData).eq('id', widget.userId);
-      }
-
-      // 3. Immediately update in-memory auth state if editing self
-      if (currentUser != null && currentUser.id == widget.userId) {
+      // Immediately update in-memory auth state if editing self.
+      if (currentUser.id == widget.userId) {
         ref.read(authStateProvider.notifier).state = currentUser.copyWith(
-          name: _name.text.trim(),
-          phone: _phone.text.trim(),
-          language: _language,
+          name: res['name'] as String? ?? _name.text.trim(),
+          phone: res['phone'] as String? ?? _phone.text.trim(),
+          language: res['language'] as String? ?? _language,
           role: isModerator ? UserRole.fromString(_role) : currentUser.role,
           active: isModerator ? _active : currentUser.active,
         );
@@ -452,7 +435,59 @@ class _StaffProfileEditSheetState
                       const SizedBox(height: AppSpacing.lg),
                     ],
 
-                    // Optional PIN Change Section
+                    // Caller PIN confirmation (always required)
+                    LuxuryCard(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.verified_user_outlined,
+                                  size: 20, color: Color(0xFFD4AF37)),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'تأكيد هويتك',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            isModerator
+                                ? 'أدخل رمز PIN الخاص بك لتأكيد تعديل بيانات الموظف.'
+                                : 'أدخل رمز PIN الخاص بك لتأكيد حفظ ملفك الشخصي.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          TextFormField(
+                            controller: _callerPinCtrl,
+                            keyboardType: TextInputType.number,
+                            obscureText: true,
+                            maxLength: 8,
+                            decoration: const InputDecoration(
+                              labelText: 'رمز PIN الخاص بك *',
+                              prefixIcon: Icon(Icons.lock_outline),
+                              counterText: '',
+                            ),
+                            validator: (v) {
+                              if (v == null || v.trim().length < 4) {
+                                return 'يرجى إدخال رمز PIN الخاص بك (4 أرقام على الأقل)';
+                              }
+                              return null;
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+
+                    // Optional new PIN for the target account
                     LuxuryCard(
                       padding: const EdgeInsets.all(AppSpacing.md),
                       child: Column(
@@ -460,22 +495,21 @@ class _StaffProfileEditSheetState
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.pin_outlined, size: 20, color: Color(0xFFD4AF37)),
+                              const Icon(Icons.pin_outlined,
+                                  size: 20, color: Color(0xFFD4AF37)),
                               const SizedBox(width: 8),
                               const Expanded(
                                 child: Text(
-                                  'تغيير رمز PIN السري للدخول',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  'تعيين رمز PIN جديد للموظف',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold, fontSize: 13),
                                 ),
                               ),
                               Switch.adaptive(
                                 value: _changePin,
                                 onChanged: (v) => setState(() {
                                   _changePin = v;
-                                  if (!v) {
-                                    _oldPinCtrl.clear();
-                                    _newPinCtrl.clear();
-                                  }
+                                  if (!v) _newPinCtrl.clear();
                                 }),
                               ),
                             ],
@@ -483,35 +517,21 @@ class _StaffProfileEditSheetState
                           if (_changePin) ...[
                             const SizedBox(height: AppSpacing.md),
                             TextFormField(
-                              controller: _oldPinCtrl,
-                              keyboardType: TextInputType.number,
-                              obscureText: true,
-                              maxLength: 6,
-                              decoration: const InputDecoration(
-                                labelText: 'رمز PIN الحالي *',
-                                prefixIcon: Icon(Icons.lock_outline),
-                                counterText: '',
-                              ),
-                              validator: (v) {
-                                if (!_changePin) return null;
-                                if (v == null || v.trim().isEmpty) return 'يرجى إدخال رمز PIN الحالي';
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: AppSpacing.sm),
-                            TextFormField(
                               controller: _newPinCtrl,
                               keyboardType: TextInputType.number,
                               obscureText: true,
-                              maxLength: 6,
+                              maxLength: 8,
                               decoration: const InputDecoration(
-                                labelText: 'رمز PIN الجديد (4 أرقام على الأقل) *',
+                                labelText:
+                                    'رمز PIN الجديد (4 أرقام على الأقل) *',
                                 prefixIcon: Icon(Icons.lock_reset),
                                 counterText: '',
                               ),
                               validator: (v) {
                                 if (!_changePin) return null;
-                                if (v == null || v.trim().length < 4) return 'يجب أن يكون الرمز 4 أرقام على الأقل';
+                                if (v == null || v.trim().length < 4) {
+                                  return 'يجب أن يكون الرمز 4 أرقام على الأقل';
+                                }
                                 return null;
                               },
                             ),

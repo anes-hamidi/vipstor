@@ -20,7 +20,7 @@ class SupabaseService {
   /// Submit Customer Order (Server-side price and cost resolution with device authentication)
   Future<String> submitCustomerOrder({
     required String? clientId,
-    required String customerId,
+    required String? customerId,
     required Map<String, dynamic> address,
     required List<Map<String, dynamic>> items,
     String? deviceToken,
@@ -37,6 +37,7 @@ class SupabaseService {
 
   /// Post Counter Sale
   Future<Map<String, dynamic>> postStoreSale({
+    required String clientId,
     String? cashierId,
     String? customerId,
     required List<Map<String, dynamic>> items,
@@ -44,6 +45,7 @@ class SupabaseService {
     required int onAccountCentimes,
   }) async {
     final response = await client.rpc('rpc_post_store_sale', params: {
+      'p_client_id': clientId,
       'p_cashier_id': cashierId,
       'p_customer_id': customerId,
       'p_items': items,

@@ -178,21 +178,22 @@ class OfflineSyncService {
           }
 
         case 'manager_supplier_payment':
-          await client.from('supplier_ledger').insert({
-            'supplier_id': payload['supplier_id'],
-            'amount_change': -(payload['amount'] as int),
-            'ref_type': 'payment',
-            'ref_id': payload['purchase_id'] ?? op.clientId,
-            'notes': payload['notes'] ?? '\u062a\u062d\u0633\u064a\u0644 \u0645\u0648\u0631\u062f \u0644\u0644\u0645\u0648\u0631\u062f',
-            'created_by': payload['payer_user_id'],
-          });
+          // Supplier payments now require the payer's PIN at write time,
+          // so a queued payment can no longer be replayed unattended.
+          _nextRetryMap.remove(op.clientId);
+          await db.markOpDone(op.clientId);
+          await _recordFailedOp(
+            op,
+            'Supplier payment requires online PIN confirmation. '
+            'The payment was not applied; please re-enter it online.',
+          );
+          return;
 
         case 'order_status_update':
           await client.from('orders').update({
             'status': payload['status'],
             if (payload['driver_id'] != null) 'driver_id': payload['driver_id'],
             if (payload['notes'] != null) 'notes': payload['notes'],
-            'updated_at': DateTime.now().toIso8601String(),
           }).eq('id', payload['order_id']);
       }
 

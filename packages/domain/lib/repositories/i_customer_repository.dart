@@ -7,21 +7,26 @@ abstract class ICustomerRepository {
   Future<CustomerProfileEntity> createCustomer({
     required String name,
     required String phone,
+    required String callerId,
+    required String callerPin,
     int creditLimitCentimes = 0,
     String priceTier = 'wholesale',
   });
-  Future<CustomerProfileEntity?> getCustomerByPhone(String phone, {String? deviceToken});
+  Future<CustomerProfileEntity?> getCustomerByPhone(
+    String phone, {
+    required String deviceToken,
+  });
   Future<CustomerProfileEntity> syncCustomerProfile({
     required String name,
     required String phone,
     required String wilaya,
     required String commune,
     required String addressText,
+    required String deviceToken,
     double? latitude,
     double? longitude,
     String? existingCustomerId,
     String? existingUserId,
-    String? deviceToken,
   });
   Future<List<CustomerLedgerEntryEntity>> getCustomerLedger(String customerId);
   Future<List<CustomerUnpaidOrderEntity>> getCustomerUnpaidOrders(String customerId);

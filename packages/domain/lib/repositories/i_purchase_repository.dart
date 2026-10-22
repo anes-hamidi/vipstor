@@ -17,6 +17,7 @@ abstract class IPurchaseRepository {
     required String payerUserId,
     required String payerName,
     required String payerRole,
+    required String callerPin,
     String? purchaseId,
     String? notes,
   });

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
 import '../../../providers/staff_providers.dart';
+import '../../../router/staff_router.dart';
 
 class CustomerSelectDialog extends ConsumerStatefulWidget {
   const CustomerSelectDialog({super.key});
@@ -20,6 +21,7 @@ class _CustomerSelectDialogState extends ConsumerState<CustomerSelectDialog> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _creditLimitController = TextEditingController(text: '0');
+  final _pinController = TextEditingController();
   bool _isSaving = false;
 
   @override
@@ -28,16 +30,35 @@ class _CustomerSelectDialogState extends ConsumerState<CustomerSelectDialog> {
     _nameController.dispose();
     _phoneController.dispose();
     _creditLimitController.dispose();
+    _pinController.dispose();
     super.dispose();
   }
 
   Future<void> _handleCreateCustomer() async {
     final name = _nameController.text.trim();
     final phone = _phoneController.text.trim();
+    final pin = _pinController.text.trim();
     if (name.isEmpty || phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('يرجى ملء اسم الزبون ورقم الهاتف'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+      return;
+    }
+
+    final currentUser = ref.read(authStateProvider);
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذر تحديد الموظف الحالي')),
+      );
+      return;
+    }
+    if (pin.length < 4) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('يرجى إدخال رمز PIN الخاص بك (4 أرقام على الأقل)'),
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
@@ -51,6 +72,8 @@ class _CustomerSelectDialogState extends ConsumerState<CustomerSelectDialog> {
       final newCustomer = await repo.createCustomer(
         name: name,
         phone: phone,
+        callerId: currentUser.id,
+        callerPin: pin,
         creditLimitCentimes: (limitDzd * 100).round(),
       );
 
@@ -140,6 +163,18 @@ class _CustomerSelectDialogState extends ConsumerState<CustomerSelectDialog> {
                           decoration: const InputDecoration(
                             labelText: 'سقف الائتمان / الدين المسموح (دج)',
                             prefixIcon: Icon(Icons.credit_card),
+                          ),
+                        ),
+                        AppSpacing.gapMd,
+                        TextField(
+                          controller: _pinController,
+                          keyboardType: TextInputType.number,
+                          obscureText: true,
+                          maxLength: 8,
+                          decoration: const InputDecoration(
+                            labelText: 'رمز PIN الخاص بك لتأكيد العملية *',
+                            prefixIcon: Icon(Icons.lock_outline),
+                            counterText: '',
                           ),
                         ),
                         AppSpacing.gapLg,

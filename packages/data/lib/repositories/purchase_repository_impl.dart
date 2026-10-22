@@ -30,25 +30,13 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     String? companyRegister,
     String? notes,
   }) async {
-    try {
-      final res = await client.rpc('rpc_create_supplier', params: {
-        'p_name': name.trim(),
-        'p_phone': phone.trim(),
-        'p_company_register': companyRegister?.trim(),
-        'p_notes': notes?.trim(),
-      });
-      return Map<String, dynamic>.from(res as Map);
-    } catch (_) {
-      // Fallback for offline or legacy environments
-      final row = await client.from('suppliers').insert({
-        'name': name.trim(),
-        'phone': phone.trim(),
-        'company_register': companyRegister?.trim(),
-        'notes': notes?.trim(),
-      }).select().single();
-
-      return Map<String, dynamic>.from(row);
-    }
+    final res = await client.rpc('rpc_create_supplier', params: {
+      'p_name': name.trim(),
+      'p_phone': phone.trim(),
+      'p_company_register': companyRegister?.trim(),
+      'p_notes': notes?.trim(),
+    });
+    return Map<String, dynamic>.from(res as Map);
   }
 
   @override
@@ -130,77 +118,45 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     required String payerUserId,
     required String payerName,
     required String payerRole,
+    required String callerPin,
     String? purchaseId,
     String? notes,
   }) async {
-    final effectiveUserId = await _resolveValidUserId(payerUserId);
+    if (callerPin.trim().length < 4) {
+      throw Exception('يرجى إدخال رمز PIN الخاص بك لتأكيد سداد المورد');
+    }
+    if (!ConnectivityService.instance.isOnline) {
+      throw Exception(
+        'سداد المورد يتطلب اتصالاً بالإنترنت لتأكيد رمز PIN. '
+        'أعد المحاولة عند توفر الشبكة.',
+      );
+    }
+
     final supplier = await getSupplierById(supplierId);
     final prevBalance = supplier?.currentBalanceCentimes ?? 0;
     final remaining = (prevBalance - amountCentimes).clamp(0, 999999999);
-    final paymentId = 'PAY-SUP-${DateTime.now().millisecondsSinceEpoch % 1000000}';
+    final clientId = const Uuid().v4();
+    final res = await client.rpc('rpc_record_supplier_payment', params: {
+      'p_client_id': clientId,
+      'p_supplier_id': supplierId,
+      'p_amount': amountCentimes,
+      'p_payer_user_id': payerUserId,
+      'p_purchase_id': purchaseId,
+      'p_notes': notes ??
+          'سداد نقدي لمستحقات المورد بواسطة $payerName ($payerRole)',
+      'p_caller_pin': callerPin,
+    });
 
-    // 1. Insert into supplier_ledger or payments if table exists
-    if (ConnectivityService.instance.isOnline) {
-      try {
-        await client.from('supplier_ledger').insert({
-          'supplier_id': supplierId,
-          'amount_change': -amountCentimes,
-          'ref_type': 'payment',
-          'ref_id': purchaseId ?? paymentId,
-          'notes': notes ?? 'سداد نقدي لمستحقات المورد بواسطة $payerName ($payerRole)',
-          'created_by': effectiveUserId,
-        });
-      } catch (_) {
-        try {
-          await client.from('payments').insert({
-            'supplier_id': supplierId,
-            'amount': amountCentimes,
-            'method': 'cash',
-            'received_by': effectiveUserId,
-            'status': 'settled',
-            'notes': notes,
-          });
-        } catch (_) {}
-      }
-    } else if (db != null) {
-      final clientId = const Uuid().v4();
-      await db!.enqueuePendingOp(PendingOperationsCompanion.insert(
-        clientId: clientId,
-        operationType: 'manager_supplier_payment',
-        payloadJson: jsonEncode({
-          'supplier_id': supplierId,
-          'amount': amountCentimes,
-          'payer_user_id': effectiveUserId,
-          'payer_name': payerName,
-          'payer_role': payerRole,
-          'purchase_id': purchaseId,
-          'notes': notes,
-        }),
-        createdAt: DateTime.now(),
-      ));
+    if (res is! Map ||
+        (res['status'] != 'success' && res['status'] != 'already_processed')) {
+      throw Exception(
+        (res is Map ? res['message'] : null)?.toString() ??
+            'تعذر تسجيل سداد المورد',
+      );
     }
 
-    // 2. Audit Trail logging
-    try {
-      await client.from('audit_log').insert({
-        'action': 'SUPPLIER_PAYMENT',
-        'target_table': 'supplier_ledger',
-        'target_id': purchaseId ?? supplierId,
-        'user_id': effectiveUserId,
-        'after_state': {
-          'supplier_id': supplierId,
-          'supplier_name': supplier?.name ?? 'مورد',
-          'amount_centimes': amountCentimes,
-          'payment_method': 'cash',
-          'previous_balance': prevBalance,
-          'remaining_balance': remaining,
-          'purchase_id': purchaseId,
-          'notes': notes,
-          'payer_name': payerName,
-          'payer_role': payerRole,
-        },
-      });
-    } catch (_) {}
+    final paymentId =
+        res['ledger_id']?.toString() ?? 'PAY-SUP-$clientId';
 
     return SupplierPaymentResult(
       paymentId: paymentId,
@@ -211,7 +167,7 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
       remainingBalanceCentimes: remaining,
       paymentMethod: 'cash',
       payerRole: payerRole,
-      payerId: effectiveUserId,
+      payerId: payerUserId,
       payerName: payerName,
       timestamp: DateTime.now(),
       notes: notes,
@@ -400,38 +356,9 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
       });
       return res.toString();
     } catch (_) {
-      try {
-        final purchaseRow = await client.from('purchases').insert({
-          'supplier_id': supplierId,
-          'invoice_no': invoiceNo,
-          'invoice_date': date.toIso8601String().split('T').first,
-          'status': 'draft',
-          'total_amount': total,
-          'created_by': user,
-        }).select('id').single();
-
-        final purchaseId = purchaseRow['id'] as String;
-
-        if (items.isNotEmpty) {
-          final purchaseItemsToInsert = items.map((it) {
-            final unitCost = (it['unit_cost'] ?? it['cost_centimes'] ?? 0) as int;
-            final sellingPrice = (it['selling_price'] != null ? (it['selling_price'] as num).toInt() : unitCost);
-            return {
-              'purchase_id': purchaseId,
-              'product_id': it['product_id'],
-              'quantity': (it['quantity'] ?? it['qty'] ?? 1) as int,
-              'unit_cost': unitCost,
-              'selling_price': sellingPrice >= unitCost ? sellingPrice : unitCost,
-            };
-          }).toList();
-
-          await client.from('purchase_items').insert(purchaseItemsToInsert);
-        }
-
-        return purchaseId;
-      } catch (_) {
-        return 'OFFLINE-${const Uuid().v4()}';
-      }
+      // The RPC is the only supported write path. Return an offline marker
+      // so the caller can retry instead of bypassing the permission model.
+      return 'OFFLINE-${const Uuid().v4()}';
     }
   }
 

@@ -473,12 +473,14 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
       };
     }).toList();
 
+    final clientId = const Uuid().v4();
     try {
       final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
       final orderId = await orderRepo.submitCustomerOrder(
         customerId: customerId,
         address: address,
         items: itemsPayload,
+        clientId: clientId,
         deviceToken: deviceToken,
       );
 
@@ -487,8 +489,9 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
       ref.invalidate(customerOrdersProvider);
       return orderId;
     } catch (e) {
-      // Offline fallback: save order to pending outbox with a client UUID
-      final tempId = const Uuid().v4();
+      // Offline fallback: save order to pending outbox with the same client
+      // UUID, so retrying is idempotent if the first request actually landed.
+      final tempId = clientId;
       final totalAmount = totalCentimes;
 
       final pendingOrder = {
@@ -531,6 +534,7 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
       if (list.isEmpty) return;
 
       final orderRepo = ref.read(customerOrderRepositoryProvider);
+      final deviceToken = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
       final remaining = <dynamic>[];
 
       for (final item in list) {
@@ -542,6 +546,7 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
             address: orderMap['delivery_address'] as Map<String, dynamic>,
             items: items,
             clientId: orderMap['client_id'] as String?,
+            deviceToken: deviceToken,
           );
         } catch (_) {
           remaining.add(orderMap);

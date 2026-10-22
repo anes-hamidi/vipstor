@@ -118,125 +118,44 @@ class CustomerRepositoryImpl implements ICustomerRepository {
   }
 
   @override
-  Future<CustomerProfileEntity?> getCustomerByPhone(String phone, {String? deviceToken}) async {
+  Future<CustomerProfileEntity?> getCustomerByPhone(
+    String phone, {
+    required String deviceToken,
+  }) async {
     final cleanPhone = phone.trim();
     if (cleanPhone.isEmpty) return null;
 
-    // First attempt: secure device-bound lookup via RPC
-    try {
-      final res = await client.rpc('rpc_lookup_customer_by_phone', params: {
-        'p_phone': cleanPhone,
-        'p_device_token': deviceToken,
-      });
+    final res = await client.rpc('rpc_lookup_customer_by_phone', params: {
+      'p_phone': cleanPhone,
+      'p_device_token': deviceToken,
+    });
 
-      if (res is Map) {
-        if (res['device_mismatch'] == true) {
-          throw Exception(res['message'] ?? 'هذا الحساب مرتبط بجهاز آخر لحماية البيانات');
-        }
-        if (res['found'] == true) {
-          return CustomerProfileEntity(
-            id: res['id'] as String,
-            userId: res['user_id'] as String,
-            name: res['name'] as String? ?? 'زبون',
-            phone: res['phone'] as String? ?? cleanPhone,
-            creditLimitCentimes: (res['credit_limit'] as num?)?.toInt() ?? 0,
-            currentDebtCentimes: 0,
-            priceTier: PriceTier.fromString(res['price_tier'] as String? ?? 'wholesale'),
-            wilaya: res['wilaya'] as String?,
-            commune: res['commune'] as String?,
-            addressText: res['address_text'] as String?,
-            latitude: (res['latitude'] as num?)?.toDouble(),
-            longitude: (res['longitude'] as num?)?.toDouble(),
-          );
-        }
+    if (res is Map) {
+      if (res['device_mismatch'] == true) {
+        throw Exception(
+          res['message'] ?? 'هذا الحساب مرتبط بجهاز آخر لحماية البيانات',
+        );
       }
-    } catch (e) {
-      if (e.toString().contains('مرتبط بجهاز آخر')) rethrow;
+      if (res['found'] == true) {
+        return CustomerProfileEntity(
+          id: res['id'] as String,
+          userId: res['user_id'] as String,
+          name: res['name'] as String? ?? 'زبون',
+          phone: res['phone'] as String? ?? cleanPhone,
+          creditLimitCentimes: (res['credit_limit'] as num?)?.toInt() ?? 0,
+          currentDebtCentimes: 0,
+          priceTier:
+              PriceTier.fromString(res['price_tier'] as String? ?? 'wholesale'),
+          wilaya: res['wilaya'] as String?,
+          commune: res['commune'] as String?,
+          addressText: res['address_text'] as String?,
+          latitude: (res['latitude'] as num?)?.toDouble(),
+          longitude: (res['longitude'] as num?)?.toDouble(),
+        );
+      }
     }
 
-    try {
-      // 1. Find user by phone
-      final userRows = await client
-          .from('users')
-          .select('id, name, phone, role')
-          .eq('phone', cleanPhone)
-          .limit(1);
-
-      if ((userRows as List).isEmpty) {
-        return null;
-      }
-
-      final user = userRows.first;
-      final userId = user['id'] as String;
-
-      // 2. Find customer record
-      var customerRows = await client
-          .from('customers')
-          .select('id, credit_limit, price_tier')
-          .eq('user_id', userId)
-          .limit(1);
-
-      String customerId;
-      int creditLimit = 0;
-      String priceTier = 'wholesale';
-
-      if ((customerRows as List).isEmpty) {
-        // Auto-create customer record for this user
-        final newCust = await client.from('customers').insert({
-          'user_id': userId,
-        }).select('id, credit_limit, price_tier').single();
-        customerId = newCust['id'] as String;
-        creditLimit = (newCust['credit_limit'] as num?)?.toInt() ?? 0;
-        priceTier = newCust['price_tier'] as String? ?? 'wholesale';
-      } else {
-        final cust = customerRows.first;
-        customerId = cust['id'] as String;
-        creditLimit = (cust['credit_limit'] as num?)?.toInt() ?? 0;
-        priceTier = cust['price_tier'] as String? ?? 'wholesale';
-      }
-
-      // 3. Fetch default address if exists
-      String? wilaya;
-      String? commune;
-      String? addressText;
-      double? lat;
-      double? lng;
-
-      try {
-        final addrRows = await client
-            .from('addresses')
-            .select('wilaya, commune, address_text, latitude, longitude')
-            .eq('customer_id', customerId)
-            .order('is_default', ascending: false)
-            .limit(1);
-
-        if ((addrRows as List).isNotEmpty) {
-          final addr = addrRows.first;
-          wilaya = addr['wilaya'] as String?;
-          commune = addr['commune'] as String?;
-          addressText = addr['address_text'] as String?;
-          lat = (addr['latitude'] as num?)?.toDouble();
-          lng = (addr['longitude'] as num?)?.toDouble();
-        }
-      } catch (_) {}
-
-      return CustomerProfileEntity(
-        id: customerId,
-        userId: userId,
-        name: user['name'] as String? ?? 'زبون',
-        phone: user['phone'] as String? ?? cleanPhone,
-        creditLimitCentimes: creditLimit,
-        currentDebtCentimes: 0,
-        priceTier: PriceTier.fromString(priceTier),
-        wilaya: wilaya,
-        commune: commune,
-        addressText: addressText,
-        latitude: lat,
-        longitude: lng,
-      );
-    } catch (_) {
-      return null;
-    }
+    return null;
   }
 
   @override
@@ -246,210 +165,54 @@ class CustomerRepositoryImpl implements ICustomerRepository {
     required String wilaya,
     required String commune,
     required String addressText,
+    required String deviceToken,
     double? latitude,
     double? longitude,
     String? existingCustomerId,
     String? existingUserId,
-    String? deviceToken,
   }) async {
     final cleanPhone = phone.trim();
     final cleanName = name.trim().isNotEmpty ? name.trim() : 'زبون متجر الجملة';
 
-    // 1. Try device-bound registration RPC first
-    if (deviceToken != null && deviceToken.isNotEmpty) {
-      try {
-        final res = await client.rpc('rpc_register_or_bind_customer_device', params: {
-          'p_phone': cleanPhone,
-          'p_device_token': deviceToken,
-          'p_name': cleanName,
-          'p_wilaya': wilaya.trim(),
-          'p_commune': commune.trim(),
-          'p_address_text': addressText.trim(),
-          'p_latitude': latitude,
-          'p_longitude': longitude,
-        });
-
-        if (res is Map) {
-          if (res['success'] == false && res['bound_to_other_device'] == true) {
-            throw Exception(res['error'] ?? 'هذا الحساب مرتبط بجهاز آخر بالفعل لحماية البيانات');
-          }
-          if (res['success'] == true) {
-            return CustomerProfileEntity(
-              id: res['customer_id'] as String,
-              userId: res['user_id'] as String,
-              name: res['name'] as String? ?? cleanName,
-              phone: res['phone'] as String? ?? cleanPhone,
-              wilaya: res['wilaya'] as String? ?? wilaya,
-              commune: res['commune'] as String? ?? commune,
-              addressText: res['address_text'] as String? ?? addressText,
-              creditLimitCentimes: (res['credit_limit'] as num?)?.toInt() ?? 0,
-              currentDebtCentimes: 0,
-              priceTier: PriceTier.fromString(res['price_tier'] as String? ?? 'wholesale'),
-              latitude: latitude,
-              longitude: longitude,
-            );
-          }
-        }
-      } catch (e) {
-        if (e.toString().contains('مرتبط بجهاز آخر')) rethrow;
-      }
+    if (deviceToken.trim().isEmpty) {
+      throw Exception('معرف الجهاز مطلوب لمزامنة ملف الزبون');
     }
 
-    try {
-      final res = await client.rpc('rpc_sync_customer_profile', params: {
-        'p_name': cleanName,
-        'p_phone': cleanPhone,
-        'p_wilaya': wilaya.trim(),
-        'p_commune': commune.trim(),
-        'p_address_text': addressText.trim(),
-        'p_latitude': latitude,
-        'p_longitude': longitude,
-        'p_existing_customer_id': existingCustomerId,
-        'p_existing_user_id': existingUserId,
-      });
+    final res = await client.rpc('rpc_register_or_bind_customer_device', params: {
+      'p_phone': cleanPhone,
+      'p_device_token': deviceToken,
+      'p_name': cleanName,
+      'p_wilaya': wilaya.trim(),
+      'p_commune': commune.trim(),
+      'p_address_text': addressText.trim(),
+      'p_latitude': latitude,
+      'p_longitude': longitude,
+    });
 
-      if (res is Map) {
-        return CustomerProfileEntity(
-          id: res['customer_id'] as String,
-          userId: res['user_id'] as String,
-          name: res['name'] as String? ?? cleanName,
-          phone: res['phone'] as String? ?? cleanPhone,
-          wilaya: res['wilaya'] as String? ?? wilaya,
-          commune: res['commune'] as String? ?? commune,
-          addressText: res['address_text'] as String? ?? addressText,
-          creditLimitCentimes: (res['credit_limit'] as num?)?.toInt() ?? 0,
-          currentDebtCentimes: 0,
-          priceTier: PriceTier.fromString(res['price_tier'] as String? ?? 'wholesale'),
-          latitude: latitude,
-          longitude: longitude,
-        );
-      }
-    } catch (_) {}
-
-    String? userId = existingUserId;
-
-    // 1. Try finding existing user by ID or Phone
-    if (userId == null || userId.isEmpty) {
-      try {
-        final existingByPhone = await client
-            .from('users')
-            .select('id')
-            .eq('phone', cleanPhone)
-            .limit(1);
-        if ((existingByPhone as List).isNotEmpty) {
-          userId = existingByPhone.first['id'] as String;
-        }
-      } catch (_) {}
+    if (res is Map && res['success'] == true) {
+      return CustomerProfileEntity(
+        id: res['customer_id'] as String,
+        userId: res['user_id'] as String,
+        name: res['name'] as String? ?? cleanName,
+        phone: res['phone'] as String? ?? cleanPhone,
+        wilaya: res['wilaya'] as String? ?? wilaya,
+        commune: res['commune'] as String? ?? commune,
+        addressText: res['address_text'] as String? ?? addressText,
+        creditLimitCentimes: (res['credit_limit'] as num?)?.toInt() ?? 0,
+        currentDebtCentimes: 0,
+        priceTier: PriceTier.fromString(res['price_tier'] as String? ?? 'wholesale'),
+        latitude: latitude,
+        longitude: longitude,
+      );
     }
 
-    // If still null and existingCustomerId is provided, find user_id from customer
-    if (userId == null && existingCustomerId != null && existingCustomerId.isNotEmpty) {
-      try {
-        final cust = await client
-            .from('customers')
-            .select('user_id')
-            .eq('id', existingCustomerId)
-            .limit(1);
-        if ((cust as List).isNotEmpty) {
-          userId = cust.first['user_id'] as String;
-        }
-      } catch (_) {}
+    if (res is Map && res['bound_to_other_device'] == true) {
+      throw Exception(res['error'] ?? 'هذا الحساب مرتبط بجهاز آخر بالفعل لحماية البيانات');
     }
 
-    // 2. Insert or Update Users table
-    if (userId != null) {
-      try {
-        await client.from('users').update({
-          'name': cleanName,
-          'phone': cleanPhone,
-          'active': true,
-        }).eq('id', userId);
-      } catch (_) {}
-    } else {
-      final userRow = await client.from('users').insert({
-        'name': cleanName,
-        'phone': cleanPhone,
-        'role': 'customer',
-        'language': 'ar',
-        'active': true,
-      }).select('id, name, phone, role, language, active').single();
-      userId = userRow['id'] as String;
-    }
-
-    // 3. Find or Create Customers row
-    String? customerId = existingCustomerId;
-    int creditLimit = 0;
-    String priceTier = 'wholesale';
-
-    try {
-      final custRows = await client
-          .from('customers')
-          .select('id, credit_limit, price_tier')
-          .eq('user_id', userId)
-          .limit(1);
-
-      if ((custRows as List).isNotEmpty) {
-        final c = custRows.first;
-        customerId = c['id'] as String;
-        creditLimit = (c['credit_limit'] as num?)?.toInt() ?? 0;
-        priceTier = c['price_tier'] as String? ?? 'wholesale';
-      } else {
-        final newCust = await client.from('customers').insert({
-          'user_id': userId,
-        }).select('id, credit_limit, price_tier').single();
-        customerId = newCust['id'] as String;
-        creditLimit = (newCust['credit_limit'] as num?)?.toInt() ?? 0;
-        priceTier = newCust['price_tier'] as String? ?? 'wholesale';
-      }
-    } catch (_) {
-      customerId ??= userId;
-    }
-
-    // 4. Upsert Address in addresses table
-    try {
-      final addrRows = await client
-          .from('addresses')
-          .select('id')
-          .eq('customer_id', customerId)
-          .limit(1);
-
-      if ((addrRows as List).isNotEmpty) {
-        final addrId = addrRows.first['id'] as String;
-        await client.from('addresses').update({
-          'wilaya': wilaya,
-          'commune': commune,
-          'address_text': addressText,
-          'latitude': latitude,
-          'longitude': longitude,
-          'is_default': true,
-        }).eq('id', addrId);
-      } else {
-        await client.from('addresses').insert({
-          'customer_id': customerId,
-          'label': 'المحل الرئيسي',
-          'wilaya': wilaya,
-          'commune': commune,
-          'address_text': addressText,
-          'latitude': latitude,
-          'longitude': longitude,
-          'is_default': true,
-        });
-      }
-    } catch (_) {}
-
-    return CustomerProfileEntity(
-      id: customerId,
-      userId: userId,
-      name: cleanName,
-      phone: cleanPhone,
-      creditLimitCentimes: creditLimit,
-      currentDebtCentimes: 0,
-      priceTier: PriceTier.fromString(priceTier),
-      wilaya: wilaya,
-      commune: commune,
-      addressText: addressText,
-      latitude: latitude,
-      longitude: longitude,
+    throw Exception(
+      (res is Map ? res['error'] : null)?.toString() ??
+          'تعذر مزامنة ملف الزبون مع الخادم',
     );
   }
 
@@ -457,33 +220,36 @@ class CustomerRepositoryImpl implements ICustomerRepository {
   Future<CustomerProfileEntity> createCustomer({
     required String name,
     required String phone,
+    required String callerId,
+    required String callerPin,
     int creditLimitCentimes = 0,
     String priceTier = 'wholesale',
   }) async {
-    // 1. Create User
-    final userRow = await client.from('users').insert({
-      'name': name,
-      'phone': phone,
-      'role': 'customer',
-      'language': 'ar',
-      'active': true,
-    }).select('id, name, phone, role, language, active').single();
+    final res = await client.rpc('rpc_create_customer_by_staff', params: {
+      'p_caller_id': callerId,
+      'p_caller_pin': callerPin,
+      'p_name': name.trim(),
+      'p_phone': phone.trim(),
+      'p_credit_limit': creditLimitCentimes,
+      'p_price_tier': priceTier,
+    });
 
-    final userId = userRow['id'] as String;
-
-    // 2. Create Customer record (inserting user_id only per restricted permissions)
-    final customerRow = await client.from('customers').insert({
-      'user_id': userId,
-    }).select('id, credit_limit, price_tier').single();
+    if (res is! Map || res['status'] != 'success') {
+      throw Exception(
+        (res is Map ? res['message'] : null)?.toString() ??
+            'تعذر تسجيل الزبون',
+      );
+    }
 
     return CustomerProfileEntity(
-      id: customerRow['id'] as String,
-      userId: userId,
-      name: name,
-      phone: phone,
-      creditLimitCentimes: creditLimitCentimes,
+      id: res['customer_id'] as String,
+      userId: res['user_id'] as String,
+      name: res['name'] as String? ?? name,
+      phone: res['phone'] as String? ?? phone,
+      creditLimitCentimes:
+          (res['credit_limit'] as num?)?.toInt() ?? creditLimitCentimes,
       currentDebtCentimes: 0,
-      priceTier: PriceTier.fromString(priceTier),
+      priceTier: PriceTier.fromString(res['price_tier'] as String? ?? priceTier),
     );
   }
 
@@ -587,64 +353,33 @@ class CustomerRepositoryImpl implements ICustomerRepository {
       if (referenceNumber != null && referenceNumber.isNotEmpty) 'مرجع: $referenceNumber',
     ].join(' | ');
 
-    try {
-      // 1. Try atomic RPC (p_client_id ensures idempotency on network retry)
-      final rpcRes = await client.rpc('rpc_collect_customer_debt', params: {
-        'p_cashier_id': cashierId,
-        'p_customer_id': customerId,
-        'p_amount': amountCentimes,
-        'p_method': paymentMethod,
-        'p_notes': noteString.isNotEmpty ? noteString : null,
-        'p_client_id': const Uuid().v4(),
-      });
-
-      if (rpcRes != null && rpcRes['status'] == 'success') {
-        return CustomerDebtPaymentResult(
-          paymentId: rpcRes['payment_id'] as String,
-          customerId: customerId,
-          paidAmountCentimes: (rpcRes['paid_amount'] as num).toInt(),
-          previousBalanceCentimes: (rpcRes['previous_balance'] as num).toInt(),
-          remainingBalanceCentimes: (rpcRes['new_balance'] as num).toInt(),
-          paymentMethod: paymentMethod,
-          timestamp: DateTime.tryParse(rpcRes['timestamp'] as String? ?? '') ?? DateTime.now(),
-          notes: noteString.isNotEmpty ? noteString : null,
-        );
-      }
-    } catch (_) {
-      // Fallback: direct table transactions if RPC is not deployed yet
-    }
-
-    // Direct fallback
-    final customer = await getCustomerById(customerId);
-    final prevBalance = customer?.currentDebtCentimes ?? 0;
-    final remaining = (prevBalance - amountCentimes) > 0 ? (prevBalance - amountCentimes) : 0;
-
-    final payRow = await client.from('payments').insert({
-      'customer_id': customerId,
-      'amount': amountCentimes,
-      'method': paymentMethod,
-      'received_by': cashierId,
-      'status': 'settled',
-    }).select().single();
-
-    final paymentId = payRow['id'] as String;
-
-    await client.from('customer_ledger').insert({
-      'customer_id': customerId,
-      'amount_change': -amountCentimes,
-      'ref_type': 'payment',
-      'ref_id': paymentId,
-      'notes': noteString.isNotEmpty ? noteString : 'سداد دين عند الكاشير',
+    // The atomic RPC verifies the cashier, writes the payment and ledger
+    // rows in one transaction, and is idempotent through p_client_id.
+    final rpcRes = await client.rpc('rpc_collect_customer_debt', params: {
+      'p_cashier_id': cashierId,
+      'p_customer_id': customerId,
+      'p_amount': amountCentimes,
+      'p_method': paymentMethod,
+      'p_notes': noteString.isNotEmpty ? noteString : null,
+      'p_client_id': const Uuid().v4(),
     });
 
+    if (rpcRes is! Map || rpcRes['status'] != 'success') {
+      throw Exception(
+        (rpcRes is Map ? rpcRes['message'] : null)?.toString() ??
+            'تعذر تحصيل الدين',
+      );
+    }
+
     return CustomerDebtPaymentResult(
-      paymentId: paymentId,
+      paymentId: rpcRes['payment_id'] as String,
       customerId: customerId,
-      paidAmountCentimes: amountCentimes,
-      previousBalanceCentimes: prevBalance,
-      remainingBalanceCentimes: remaining,
+      paidAmountCentimes: (rpcRes['paid_amount'] as num).toInt(),
+      previousBalanceCentimes: (rpcRes['previous_balance'] as num).toInt(),
+      remainingBalanceCentimes: (rpcRes['new_balance'] as num).toInt(),
       paymentMethod: paymentMethod,
-      timestamp: DateTime.now(),
+      timestamp: DateTime.tryParse(rpcRes['timestamp'] as String? ?? '') ??
+          DateTime.now(),
       notes: noteString.isNotEmpty ? noteString : null,
     );
   }
