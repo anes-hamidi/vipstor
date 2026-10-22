@@ -67,7 +67,7 @@ class ProductRepositoryImpl implements IProductRepository {
       await existing;
       return;
     }
-    final future = _syncProductsFromRemote(rethrow: true);
+    final future = _syncProductsFromRemote(shouldRethrow: true);
     _inFlightSync = future;
     try {
       await future;
@@ -167,7 +167,7 @@ class ProductRepositoryImpl implements IProductRepository {
     }
   }
 
-  Future<void> _syncProductsFromRemote({bool rethrow = false}) async {
+  Future<void> _syncProductsFromRemote({bool shouldRethrow = false}) async {
     try {
       if (isCustomerPortal) {
         await _syncCustomerPortalProducts();
@@ -179,7 +179,7 @@ class ProductRepositoryImpl implements IProductRepository {
       // Sync failure is silent for background refresh — cached data remains
       // available. Interactive refreshes pass [rethrow] so the UI can show a
       // meaningful message while keeping the cached catalogue visible.
-      if (rethrow) rethrow;
+      if (shouldRethrow) rethrow;
     }
   }
 

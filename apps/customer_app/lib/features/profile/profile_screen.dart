@@ -684,12 +684,12 @@ class _WalletMiniCard extends StatelessWidget {
               Container(
                 width: 34,
                 height: 34,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   gradient: AppGradients.gold,
                   borderRadius: AppRadius.smAll,
                   boxShadow: [AppShadows.goldGlowSm],
                 ),
-                child: Icon(Icons.account_balance_wallet_rounded,
+                child: const Icon(Icons.account_balance_wallet_rounded,
                     size: 17, color: Color(0xFF1A1400)),
               ),
               const SizedBox(width: AppSpacing.sm),

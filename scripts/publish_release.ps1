@@ -453,7 +453,7 @@ if (-not $SkipDatabase) {
         throw ('Could not read public.app_versions. Check SUPABASE_URL, the service role key, and that migration 00023_app_versions_and_storage.sql has been applied. Details: {0}' -f $_.Exception.Message)
     }
 
-    if ($rows.Count -gt 0 -and $null -ne $rows[0]) {
+   if ($rows.Count -gt 0 -and $null -ne $rows[0] -and $rows[0].PSObject.Properties.Name -contains 'version_name') {
         $latestRelease = $rows[0]
         Write-Ok ('Latest published: v{0} (build {1})' -f $latestRelease.version_name, $latestRelease.build_number)
     }
