@@ -12,6 +12,7 @@
       - Deletes stale build outputs before building.
       - Refuses to publish a build_number that is not greater than the latest.
       - Verifies the produced APK versionName/versionCode when aapt is available.
+      - Verifies the APK signing certificate; android/key.properties pins it via signerSha256.
       - Sends UTF-8 JSON (Arabic release notes survive Windows PowerShell 5.1).
       - Checks artifact size against the Supabase per-file limit before upload.
       - Uses curl.exe for large uploads with retries.
@@ -51,6 +52,8 @@
     Pin the APK signing certificate by its SHA-256 fingerprint. When set, the
     script fails if the produced APK is signed by a different key, which
     prevents CI runners from silently using their own debug keystore.
+    When omitted, the signerSha256 entry from android/key.properties is used
+    as the pin if that file defines one.
     Example: EA:F6:0F:E4:31:1A:B4:38:69:50:E2:01:42:FE:96:9E:EB:20:88:1C:C8:93:31:E6:E8:67:3D:59:47:E2:A9:4C
 
 .PARAMETER AllowDebugSigning
@@ -520,6 +523,21 @@ if ($Platform -eq 'android') {
 
     if ($hasReleaseKeystore) {
         Write-Ok 'Android signing: android/key.properties found (release keystore).'
+
+        # Auto-pin the signer certificate: when key.properties carries a
+        # signerSha256 entry, treat it as the expected signer unless the caller
+        # passed -AllowedSignerSha256 explicitly. Publishing then fails on any
+        # silent signing key change (regenerated keystore, wrong machine, etc.).
+        if (-not $AllowedSignerSha256) {
+            $keyPropertiesText = Get-Content -LiteralPath $keyPropertiesPath -Raw
+            if ($keyPropertiesText -match '(?m)^\s*signerSha256\s*=\s*([0-9A-Fa-f:]{64,95})\s*$') {
+                $AllowedSignerSha256 = $Matches[1]
+                Write-Ok ('Android signing: signer pinned from key.properties ({0})' -f $AllowedSignerSha256)
+            }
+            else {
+                Write-Warn 'android/key.properties has no signerSha256 entry; the APK signer will not be pinned. Add signerSha256=<certificate SHA-256> to catch accidental signing key changes.'
+            }
+        }
     }
     else {
         $gradleCandidates = @(
@@ -731,7 +749,7 @@ else {
             }
             else {
                 if ($AllowedSignerSha256) {
-                    throw 'apksigner was not found, so -AllowedSignerSha256 could not be verified. Install the Android SDK build-tools or omit the pin.'
+                    throw 'apksigner was not found, so the pinned signer SHA-256 could not be verified. Install the Android SDK build-tools, or remove signerSha256 from android/key.properties (or omit -AllowedSignerSha256) to skip pinning.'
                 }
                 Write-Warn 'apksigner not found; skipping signature verification.'
             }
