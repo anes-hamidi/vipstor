@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:core/core.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
 import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
 import '../moderator/widgets/staff_profile_edit_sheet.dart';
 import 'services/pos_thermal_printer.dart';
+import 'widgets/pos_theme.dart';
 import 'widgets/pos_keyboard_dispatcher.dart';
 import 'widgets/barcode_keyboard_wedge_listener.dart';
 import 'widgets/pos_header_status_bar.dart';
@@ -28,6 +30,7 @@ import 'widgets/printer_settings_dialog.dart';
 import '../common/widgets/headless_barcode_scanner_button.dart';
 import '../common/services/headless_barcode_scanner_service.dart';
 import 'package:flutter/services.dart';
+
 class CounterPosScreen extends ConsumerStatefulWidget {
   const CounterPosScreen({super.key});
 
@@ -95,8 +98,9 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
-            backgroundColor: const Color(0xFF1E3A2F),
+            content: Text(
+                'أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
+            backgroundColor: context.appColors.success,
           ),
         );
       }
@@ -139,11 +143,12 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('الوردية مغلقة! يرجى فتح الوردية وتحديد الرصيد الافتتاحي أولاً لبدء البيع.'),
+          content: const Text(
+              'الوردية مغلقة! يرجى فتح الوردية وتحديد الرصيد الافتتاحي أولاً لبدء البيع.'),
           backgroundColor: Theme.of(context).colorScheme.error,
           action: SnackBarAction(
             label: 'فتح وردية [F10]',
-            textColor: Colors.white,
+            textColor: Theme.of(context).colorScheme.onError,
             onPressed: _openShiftAudit,
           ),
         ),
@@ -160,7 +165,8 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('المنتج "${product.nameAr}" نفذ تمامًا من المخزون!'),
+              content:
+                  Text('المنتج "${product.nameAr}" نفذ تمامًا من المخزون!'),
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
           );
@@ -236,7 +242,9 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
 
     final user = ref.read(authStateProvider);
     final cashierId = user?.id;
-    if (cashierId == null) return; // router guard prevents reaching here unauthenticated
+    if (cashierId == null) {
+      return; // router guard prevents reaching here unauthenticated
+    }
     final cashierName = user?.name ?? 'الكاشير';
 
     final paid = await showDialog<bool>(
@@ -249,7 +257,9 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     );
 
     if (paid == true && mounted) {
-      final updated = await ref.read(customerRepositoryProvider).getCustomerById(customer.id);
+      final updated = await ref
+          .read(customerRepositoryProvider)
+          .getCustomerById(customer.id);
       if (updated != null) {
         ref.read(posActiveCustomerProvider.notifier).state = updated;
       }
@@ -263,9 +273,13 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     if (shift == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('الوردية مغلقة! يرجى فتح الوردية أولاً لإضافة منتج مخصص.'),
+          content: const Text(
+              'الوردية مغلقة! يرجى فتح الوردية أولاً لإضافة منتج مخصص.'),
           backgroundColor: Theme.of(context).colorScheme.error,
-          action: SnackBarAction(label: 'فتح وردية [F10]', textColor: Colors.white, onPressed: _openShiftAudit),
+          action: SnackBarAction(
+              label: 'فتح وردية [F10]',
+              textColor: Theme.of(context).colorScheme.onError,
+              onPressed: _openShiftAudit),
         ),
       );
       _openShiftAudit();
@@ -327,9 +341,13 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     if (shift == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('الوردية مغلقة! يرجى فتح وردية الكاشير أولاً لصرف مستحقات المورد من الدرج.'),
+          content: const Text(
+              'الوردية مغلقة! يرجى فتح وردية الكاشير أولاً لصرف مستحقات المورد من الدرج.'),
           backgroundColor: Theme.of(context).colorScheme.error,
-          action: SnackBarAction(label: 'فتح وردية [F10]', textColor: Colors.white, onPressed: _openShiftAudit),
+          action: SnackBarAction(
+              label: 'فتح وردية [F10]',
+              textColor: Theme.of(context).colorScheme.onError,
+              onPressed: _openShiftAudit),
         ),
       );
       _openShiftAudit();
@@ -351,9 +369,13 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     if (shift == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('الوردية مغلقة! يرجى فتح وردية الكاشير أولاً لتسوية عهدة السائق وإيداع الكاش بالدرج.'),
+          content: const Text(
+              'الوردية مغلقة! يرجى فتح وردية الكاشير أولاً لتسوية عهدة السائق وإيداع الكاش بالدرج.'),
           backgroundColor: Theme.of(context).colorScheme.error,
-          action: SnackBarAction(label: 'فتح وردية [F10]', textColor: Colors.white, onPressed: _openShiftAudit),
+          action: SnackBarAction(
+              label: 'فتح وردية [F10]',
+              textColor: Theme.of(context).colorScheme.onError,
+              onPressed: _openShiftAudit),
         ),
       );
       _openShiftAudit();
@@ -379,18 +401,20 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     final user = ref.read(authStateProvider);
     if (user == null) return;
     await StaffProfileEditSheet.show(
-      context, ref,
-      userId:   user.id,
-      name:     user.name,
-      phone:    user.phone,
-      role:     user.role.name,
-      active:   user.active,
+      context,
+      ref,
+      userId: user.id,
+      name: user.name,
+      phone: user.phone,
+      role: user.role.name,
+      active: user.active,
       language: user.language,
     );
     _ensureBarcodeFocus();
   }
 
-  void _openPinDialog({CashierPinMode mode = CashierPinMode.switchCashier}) async {
+  void _openPinDialog(
+      {CashierPinMode mode = CashierPinMode.switchCashier}) async {
     final user = ref.read(authStateProvider);
     final result = await showDialog<bool>(
       context: context,
@@ -406,7 +430,8 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
         final newUser = ref.read(authStateProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('تم تبديل الكاشير إلى: ${newUser?.name ?? "الكاشير"}'),
+            content:
+                Text('تم تبديل الكاشير إلى: ${newUser?.name ?? "الكاشير"}'),
             backgroundColor: context.appColors.success,
           ),
         );
@@ -435,9 +460,13 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     if (shift == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('الوردية مغلقة. يرجى فتح وردية جديدة أولاً لإتمام البيع.'),
+          content: const Text(
+              'الوردية مغلقة. يرجى فتح وردية جديدة أولاً لإتمام البيع.'),
           backgroundColor: Theme.of(context).colorScheme.error,
-          action: SnackBarAction(label: 'فتح وردية [F10]', textColor: Colors.white, onPressed: _openShiftAudit),
+          action: SnackBarAction(
+              label: 'فتح وردية [F10]',
+              textColor: Theme.of(context).colorScheme.onError,
+              onPressed: _openShiftAudit),
         ),
       );
       _openShiftAudit();
@@ -454,10 +483,14 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
 
     if (result != null && mounted) {
       final user = ref.read(authStateProvider);
+      if (user == null) {
+        _ensureBarcodeFocus();
+        return;
+      }
       final customer = ref.read(posActiveCustomerProvider);
 
       final checkoutRes = await ref.read(posCartProvider.notifier).checkout(
-            cashierId: user!.id,
+            cashierId: user.id,
             customerId: customer?.id,
             paidCashCentimes: result['paidCash'] as int,
             onAccountCentimes: result['onAccount'] as int,
@@ -468,7 +501,8 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('تم تسجيل عملية البيع بنجاح! رقم الوصل: #${orderId.substring(0, 8)}'),
+            content: Text(
+                'تم تسجيل عملية البيع بنجاح! رقم الوصل: #${orderId.substring(0, 8)}'),
             backgroundColor: context.appColors.success,
           ),
         );
@@ -488,13 +522,64 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(checkoutRes.failure?.message ?? 'فشلت عملية تسجيل البيع'),
+            content:
+                Text(checkoutRes.failure?.message ?? 'فشلت عملية تسجيل البيع'),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
       }
     }
     _ensureBarcodeFocus();
+  }
+
+  /// Asks for confirmation before wiping the staged ticket.
+  ///
+  /// Clearing used to happen instantly from the Esc shortcut and the header
+  /// trash icon, which risked destroying a long ticket with a stray key press.
+  Future<void> _confirmClearCart() async {
+    final cart = ref.read(posCartProvider);
+    if (cart.isEmpty) return;
+
+    final notifier = ref.read(posCartProvider.notifier);
+    final customer = ref.read(posActiveCustomerProvider);
+    final total = DzdFormatter.formatCentimes(notifier.totalCentimes);
+    final customerNote =
+        customer == null ? '' : ' وسيتم إلغاء تعيين الزبون "${customer.name}"';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: Icon(
+          Icons.delete_sweep_rounded,
+          color: Theme.of(dialogContext).colorScheme.error,
+        ),
+        title: const Text('تفريغ وصل البيع؟'),
+        content: Text(
+          'سيتم حذف ${cart.length} صنف بقيمة $total$customerNote. '
+          'لا يمكن التراجع عن هذه العملية.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            icon: const Icon(Icons.delete_sweep_rounded, size: 18),
+            label: const Text('تفريغ'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      ref.read(posCartProvider.notifier).clear();
+      _ensureBarcodeFocus();
+    }
   }
 
   void _openMobileCartSheet(int totalCentimes) {
@@ -545,151 +630,169 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     final activeCustomer = ref.watch(posActiveCustomerProvider);
     final shift = ref.watch(posActiveShiftProvider);
     final heldTickets = ref.watch(posHeldTicketsProvider);
-    final isCompact = context.isCompact;
-    final totalCentimes = ref.watch(posCartProvider.notifier).totalCentimes;
     final cart = ref.watch(posCartProvider);
-final topInset = MediaQuery.paddingOf(context).top;
-final bottomInset = MediaQuery.paddingOf(context).bottom;
-final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
+    final isCompact = context.isCompact;
+    final totalCentimes = ref.read(posCartProvider.notifier).totalCentimes;
+    final discountCentimes =
+        ref.read(posCartProvider.notifier).discountCentimes;
+    final topInset = MediaQuery.paddingOf(context).top;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
     return BarcodeKeyboardWedgeListener(
-      onBarcodeScanned: _onBarcodeSubmitted,
-      child: PosKeyboardDispatcher(
-      onF1Search: () => _searchController.selection = TextSelection(baseOffset: 0, extentOffset: _searchController.text.length),
-      onF2Customer: _openCustomerSearch,
-      onF3CustomItem: _openCustomItemModal,
-      onF4HoldCart: () {
-        if (cart.isNotEmpty) {
-          ref.read(posCartProvider.notifier).holdCurrentCart();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('تم تعليق السلة بنجاح [Hold Ticket]'),
-              duration: const Duration(milliseconds: 900),
-              backgroundColor: Theme.of(context).colorScheme.primary,
-            ),
-          );
-        }
-      },
-      onF5ResumeCart: () {
-        if (heldTickets.isNotEmpty) {
-          _openHeldTicketsSheet();
-        }
-      },
-      onF6PrinterSettings: _openPrinterSettings,
-      onF7CollectDebt: _openCustomerDebtModal,
-      onF8SalesHistory: _openSalesHistory,
-      onF9Returns: _openSalesReturns,
-      onF10ZReport: _openShiftAudit,
-      onF11LockScreen: () => _openPinDialog(mode: CashierPinMode.unlockTerminal),
-      onF12Checkout: () => _openCheckoutDialog(totalCentimes),
-      onEscapeClear: () => ref.read(posCartProvider.notifier).clear(),
-      child: Scaffold(
-        appBar:  PreferredSize(
-  preferredSize: Size.fromHeight(kToolbarHeight + 42 + topInset), 
-   child: AnnotatedRegion<SystemUiOverlayStyle>(
-    value: isDarkTheme
-        ? SystemUiOverlayStyle.light
-        : SystemUiOverlayStyle.dark,
-    child: ColoredBox(
-      color: isDarkTheme ? const Color(0xFF141210) : const Color(0xFFFFFDF8),
-      child: Padding(
-        padding: EdgeInsets.only(top: topInset),
-        child: PosHeaderStatusBar(
-          cashierUser: authUser,
-          activeShift: shift,
-          activeCustomer: activeCustomer,
-          heldTicketsCount: heldTickets.length,
-          onOpenShift: _openShiftAudit,
-          onOpenCustomerSearch: _openCustomerSearch,
-          onClearCustomer: () => ref.read(posActiveCustomerProvider.notifier).state = null,
-          onCollectDebt: _openCustomerDebtModal,
-          onOpenHeldTickets: _openHeldTicketsSheet,
-          onOpenSalesHistory: _openSalesHistory,
-          onOpenReturns: _openSalesReturns,
-          onOpenShiftAudit: _openShiftAudit,
-          onOpenPrinterSettings: _openPrinterSettings,
-          onPaySupplier: _openSupplierPaymentModal,
-          onSettleDriver: _openDriverSettlementModal,
-          onFastSwitchCashier: () => _openPinDialog(mode: CashierPinMode.switchCashier),
-          onLockScreen: () => _openPinDialog(mode: CashierPinMode.unlockTerminal),
-          onRefreshStock: () => ref.invalidate(liveProductsProvider),
-          onLogout: () => ref.read(authStateProvider.notifier).state = null,
-          onEditProfile: _openEditProfile,
-          onCheckUpdates: _checkAppUpdatesManually,
-        ),
-
-      ),
-    ),
-  ),
-),
-        bottomNavigationBar: isCompact && cart.isNotEmpty
-            ? Container(
-                padding: EdgeInsetsDirectional.fromSTEB(
-    AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm + bottomInset),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? const Color(0xFF141210)
-                      : const Color(0xFFFFFDF8),
-                  border: Border(
-                    top: BorderSide(
-                        color: const Color(0xFFD4AF37).withValues(alpha: 0.3)),
-                  ),
-                  boxShadow: AppShadows.navDark,
+        onBarcodeScanned: _onBarcodeSubmitted,
+        child: PosKeyboardDispatcher(
+          onF1Search: () => _searchController.selection = TextSelection(
+              baseOffset: 0, extentOffset: _searchController.text.length),
+          onF2Customer: _openCustomerSearch,
+          onF3CustomItem: _openCustomItemModal,
+          onF4HoldCart: () {
+            if (cart.isNotEmpty) {
+              ref.read(posCartProvider.notifier).holdCurrentCart();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('تم تعليق السلة بنجاح [Hold Ticket]'),
+                  duration: const Duration(milliseconds: 900),
+                  backgroundColor: Theme.of(context).colorScheme.primary,
                 ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('${cart.length} منتج في السلة',
-                              style: Theme.of(context).textTheme.bodySmall),
-                          DzdPriceTag.lg(
-                              centimes: totalCentimes, gold: true),
-                        ],
-                      ),
+              );
+            }
+          },
+          onF5ResumeCart: () {
+            if (heldTickets.isNotEmpty) {
+              _openHeldTicketsSheet();
+            }
+          },
+          onF6PrinterSettings: _openPrinterSettings,
+          onF7CollectDebt: _openCustomerDebtModal,
+          onF8SalesHistory: _openSalesHistory,
+          onF9Returns: _openSalesReturns,
+          onF10ZReport: _openShiftAudit,
+          onF11LockScreen: () =>
+              _openPinDialog(mode: CashierPinMode.unlockTerminal),
+          onF12Checkout: () => _openCheckoutDialog(totalCentimes),
+          onEscapeClear: _confirmClearCart,
+          child: Scaffold(
+            appBar: PreferredSize(
+              preferredSize: Size.fromHeight(kToolbarHeight + 42 + topInset),
+              child: AnnotatedRegion<SystemUiOverlayStyle>(
+                value: isDarkTheme
+                    ? SystemUiOverlayStyle.light
+                    : SystemUiOverlayStyle.dark,
+                child: ColoredBox(
+                  color: context.posChrome,
+                  child: Padding(
+                    padding: EdgeInsets.only(top: topInset),
+                    child: PosHeaderStatusBar(
+                      cashierUser: authUser,
+                      activeShift: shift,
+                      activeCustomer: activeCustomer,
+                      heldTicketsCount: heldTickets.length,
+                      onOpenShift: _openShiftAudit,
+                      onOpenCustomerSearch: _openCustomerSearch,
+                      onClearCustomer: () => ref
+                          .read(posActiveCustomerProvider.notifier)
+                          .state = null,
+                      onCollectDebt: _openCustomerDebtModal,
+                      onOpenHeldTickets: _openHeldTicketsSheet,
+                      onOpenSalesHistory: _openSalesHistory,
+                      onOpenReturns: _openSalesReturns,
+                      onOpenShiftAudit: _openShiftAudit,
+                      onOpenPrinterSettings: _openPrinterSettings,
+                      onPaySupplier: _openSupplierPaymentModal,
+                      onSettleDriver: _openDriverSettlementModal,
+                      onFastSwitchCashier: () =>
+                          _openPinDialog(mode: CashierPinMode.switchCashier),
+                      onLockScreen: () =>
+                          _openPinDialog(mode: CashierPinMode.unlockTerminal),
+                      onRefreshStock: () =>
+                          ref.invalidate(liveProductsProvider),
+                      onLogout: () =>
+                          ref.read(authStateProvider.notifier).state = null,
+                      onEditProfile: _openEditProfile,
+                      onCheckUpdates: _checkAppUpdatesManually,
                     ),
-                    GoldButton.icon(
-                      icon: Icons.shopping_cart_checkout_rounded,
-                      label: 'الدفع',
-                      onPressed: () => _openMobileCartSheet(totalCentimes),
-                      height: 48,
-                    ),
-                  ],
+                  ),
                 ),
-              )
-            : null,
-        body: isCompact
-            ? _buildCatalogPane()
-            : Row(
-                children: [
-                  Expanded(
-                    flex: context.isLarge || context.isExtraLarge ? 7 : 6,
-                    child: _buildCatalogPane(),
-                  ),
-                  VerticalDivider(
-                    width: 1,
-                    color: const Color(0xFFD4AF37).withValues(alpha: 0.20),
-                  ),
-                  SizedBox(
-                    width: context.isLarge || context.isExtraLarge ? 460 : 380,
-                    child: _buildCartPanel(),
-                  ),
-                ],
               ),
-      ),
-      )
-      );
-      
+            ),
+            bottomNavigationBar: isCompact && cart.isNotEmpty
+                ? Container(
+                    padding: EdgeInsetsDirectional.fromSTEB(
+                        AppSpacing.md,
+                        AppSpacing.sm,
+                        AppSpacing.md,
+                        AppSpacing.sm + bottomInset),
+                    decoration: BoxDecoration(
+                      color: context.posChrome,
+                      border:
+                          Border(top: BorderSide(color: context.posHairline)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .shadow
+                              .withValues(alpha: 0.10),
+                          blurRadius: 12,
+                          offset: const Offset(0, -2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                discountCentimes > 0
+                                    ? '${cart.length} منتج • خصم ${DzdFormatter.formatCentimes(discountCentimes)}'
+                                    : '${cart.length} منتج في السلة',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              DzdPriceTag.lg(
+                                  centimes: totalCentimes, gold: true),
+                            ],
+                          ),
+                        ),
+                        GoldButton.icon(
+                          icon: Icons.shopping_cart_checkout_rounded,
+                          label: 'الدفع',
+                          onPressed: () => _openMobileCartSheet(totalCentimes),
+                          height: 48,
+                        ),
+                      ],
+                    ),
+                  )
+                : null,
+            body: isCompact
+                ? _buildCatalogPane()
+                : Row(
+                    children: [
+                      Expanded(
+                        flex: context.isLarge || context.isExtraLarge ? 7 : 6,
+                        child: _buildCatalogPane(),
+                      ),
+                      VerticalDivider(
+                        width: 1,
+                        color: context.posHairlineSoft,
+                      ),
+                      SizedBox(
+                        width:
+                            context.isLarge || context.isExtraLarge ? 460 : 380,
+                        child: _buildCartPanel(),
+                      ),
+                    ],
+                  ),
+          ),
+        ));
   }
 
   Widget _buildCatalogPane() {
     final productsAsync = ref.watch(liveProductsProvider);
-    final cart          = ref.watch(posCartProvider);
-    final cartNotifier  = ref.read(posCartProvider.notifier);
-    final theme   = Theme.of(context);
-    final isDark  = theme.brightness == Brightness.dark;
-    final wc      = context.windowClass;
+    final cart = ref.watch(posCartProvider);
+    final cartNotifier = ref.read(posCartProvider.notifier);
+    final wc = context.windowClass;
     final isPhone = wc == WindowClass.compact;
     final showKeys = wc != WindowClass.compact && wc != WindowClass.medium;
 
@@ -697,15 +800,17 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
     // On medium the cart panel is 380 px fixed, leaving ~220 px for the catalog.
     // maxCrossAxisExtent must be > half that so Flutter picks 1 column (~180 px+).
     final maxTileWidth = switch (wc) {
-      WindowClass.compact    => 180.0,
-      WindowClass.medium     => 220.0, // was 200 → forced 2 cols at ~94 px → overflow
-      WindowClass.expanded   => 200.0,
-      WindowClass.large      => 220.0,
+      WindowClass.compact => 180.0,
+      WindowClass.medium =>
+        220.0, // was 200 → forced 2 cols at ~94 px → overflow
+      WindowClass.expanded => 200.0,
+      WindowClass.large => 220.0,
       WindowClass.extraLarge => 240.0,
     };
 
     return Padding(
-      padding: EdgeInsetsDirectional.all(isPhone ? AppSpacing.sm : AppSpacing.md),
+      padding:
+          EdgeInsetsDirectional.all(isPhone ? AppSpacing.sm : AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -713,13 +818,9 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
           Container(
             padding: const EdgeInsetsDirectional.all(AppSpacing.sm),
             decoration: BoxDecoration(
-              color: isDark
-                  ? const Color(0xFF1A1814)
-                  : const Color(0xFFFAF7F0),
+              color: context.posPanel,
               borderRadius: AppRadius.lgAll,
-              border: Border.all(
-                color: const Color(0xFFD4AF37).withValues(alpha: 0.22),
-              ),
+              border: Border.all(color: context.posHairline),
             ),
             child: isPhone
                 // Phone: stacked vertically
@@ -730,19 +831,25 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                         decoration: InputDecoration(
                           isDense: true,
                           hintText: 'ابحث بالاسم أو الفئة...',
-                          prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                          prefixIcon:
+                              const Icon(Icons.search_rounded, size: 18),
                           suffixIcon: _searchController.text.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.clear_rounded, size: 16),
+                                  icon:
+                                      const Icon(Icons.clear_rounded, size: 16),
                                   onPressed: () {
                                     _searchController.clear();
-                                    ref.read(productsSearchQueryProvider.notifier).state = '';
+                                    ref
+                                        .read(productsSearchQueryProvider
+                                            .notifier)
+                                        .state = '';
                                   },
                                 )
                               : null,
                         ),
-                        onChanged: (v) =>
-                            ref.read(productsSearchQueryProvider.notifier).state = v,
+                        onChanged: (v) => ref
+                            .read(productsSearchQueryProvider.notifier)
+                            .state = v,
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Row(
@@ -753,11 +860,13 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                               readOnly: true,
                               controller: _barcodeController,
                               focusNode: _barcodeFocusNode,
-                              
+
                               decoration: InputDecoration(
                                 isDense: true,
                                 hintText: 'مسح الباركود...',
-                                prefixIcon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                                prefixIcon: const Icon(
+                                    Icons.qr_code_scanner_rounded,
+                                    size: 18),
                                 suffixIcon: HeadlessBarcodeScannerButton(
                                   controller: _barcodeController,
                                   onScanned: _onBarcodeSubmitted,
@@ -787,36 +896,50 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       ConstrainedBox(
-                        constraints: const BoxConstraints(minWidth: 200, maxWidth: 340),
+                        constraints:
+                            const BoxConstraints(minWidth: 200, maxWidth: 340),
                         child: TextField(
                           controller: _searchController,
                           decoration: InputDecoration(
                             isDense: true,
-                            hintText: showKeys ? 'ابحث بالاسم أو الفئة [F1]...' : 'ابحث بالاسم أو الفئة...',
-                            prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                            hintText: showKeys
+                                ? 'ابحث بالاسم أو الفئة [F1]...'
+                                : 'ابحث بالاسم أو الفئة...',
+                            prefixIcon:
+                                const Icon(Icons.search_rounded, size: 18),
                             suffixIcon: _searchController.text.isNotEmpty
                                 ? IconButton(
-                                    icon: const Icon(Icons.clear_rounded, size: 16),
+                                    icon: const Icon(Icons.clear_rounded,
+                                        size: 16),
                                     onPressed: () {
                                       _searchController.clear();
-                                      ref.read(productsSearchQueryProvider.notifier).state = '';
+                                      ref
+                                          .read(productsSearchQueryProvider
+                                              .notifier)
+                                          .state = '';
                                     },
                                   )
                                 : null,
                           ),
-                          onChanged: (v) =>
-                              ref.read(productsSearchQueryProvider.notifier).state = v,
+                          onChanged: (v) => ref
+                              .read(productsSearchQueryProvider.notifier)
+                              .state = v,
                         ),
                       ),
                       ConstrainedBox(
-                        constraints:  const BoxConstraints(minWidth: 160, maxWidth: 260),
+                        constraints:
+                            const BoxConstraints(minWidth: 160, maxWidth: 260),
                         child: TextField(
                           controller: _barcodeController,
                           focusNode: _barcodeFocusNode,
                           decoration: InputDecoration(
                             isDense: true,
-                            hintText: showKeys ? 'مسح الباركود [F1]...' : 'مسح الباركود...',
-                            prefixIcon: const Icon(Icons.qr_code_scanner_rounded, size: 18),
+                            hintText: showKeys
+                                ? 'مسح الباركود [F1]...'
+                                : 'مسح الباركود...',
+                            prefixIcon: const Icon(
+                                Icons.qr_code_scanner_rounded,
+                                size: 18),
                             suffixIcon: HeadlessBarcodeScannerButton(
                               controller: _barcodeController,
                               onScanned: _onBarcodeSubmitted,
@@ -839,22 +962,25 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
 
           // ── Category filter bar ───────────────────────────────────
           ref.watch(posCategoryListProvider).when(
-            data: (cats) => PosCategoryFilterBar(
-              selectedCategory: _selectedCategory,
-              onCategorySelected: (cat) => setState(() => _selectedCategory = cat),
-              categories: cats,
-            ),
-            loading: () => PosCategoryFilterBar(
-              selectedCategory: _selectedCategory,
-              onCategorySelected: (cat) => setState(() => _selectedCategory = cat),
-              categories: const [],
-            ),
-            error: (_, __) => PosCategoryFilterBar(
-              selectedCategory: _selectedCategory,
-              onCategorySelected: (cat) => setState(() => _selectedCategory = cat),
-              categories: const [],
-            ),
-          ),
+                data: (cats) => PosCategoryFilterBar(
+                  selectedCategory: _selectedCategory,
+                  onCategorySelected: (cat) =>
+                      setState(() => _selectedCategory = cat),
+                  categories: cats,
+                ),
+                loading: () => PosCategoryFilterBar(
+                  selectedCategory: _selectedCategory,
+                  onCategorySelected: (cat) =>
+                      setState(() => _selectedCategory = cat),
+                  categories: const [],
+                ),
+                error: (_, __) => PosCategoryFilterBar(
+                  selectedCategory: _selectedCategory,
+                  onCategorySelected: (cat) =>
+                      setState(() => _selectedCategory = cat),
+                  categories: const [],
+                ),
+              ),
           const SizedBox(height: AppSpacing.sm),
 
           // ── Product grid ──────────────────────────────────────────
@@ -905,11 +1031,14 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                         final shift = ref.read(posActiveShiftProvider);
                         if (shift == null) {
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: const Text('الوردية مغلقة! افتح وردية أولاً.'),
-                            backgroundColor: Theme.of(context).colorScheme.error,
+                            content:
+                                const Text('الوردية مغلقة! افتح وردية أولاً.'),
+                            backgroundColor:
+                                Theme.of(context).colorScheme.error,
                             action: SnackBarAction(
                                 label: 'فتح [F10]',
-                                textColor: Colors.white,
+                                textColor:
+                                    Theme.of(context).colorScheme.onError,
                                 onPressed: _openShiftAudit),
                           ));
                           _openShiftAudit();
@@ -932,10 +1061,12 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
         ],
       ),
     );
-  
   }
 
-  Widget _buildCartPanel({bool isMobileSheet = false, ScrollController? scrollController, WidgetRef? customRef}) {
+  Widget _buildCartPanel(
+      {bool isMobileSheet = false,
+      ScrollController? scrollController,
+      WidgetRef? customRef}) {
     final effectiveRef = customRef ?? ref;
     final cart = effectiveRef.watch(posCartProvider);
     final cartNotifier = effectiveRef.read(posCartProvider.notifier);
@@ -943,23 +1074,20 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
     final shift = effectiveRef.watch(posActiveShiftProvider);
     final theme = Theme.of(context);
     final colors = context.appColors;
-    final isDark = theme.brightness == Brightness.dark;
     final wcCart = context.windowClass;
-    final showKeys = wcCart != WindowClass.compact && wcCart != WindowClass.medium;
+    final showKeys =
+        wcCart != WindowClass.compact && wcCart != WindowClass.medium;
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0E0C0A) : const Color(0xFFFAF7F2),
+        color: context.posPanel,
         border: BorderDirectional(
-          start: BorderSide(
-            color: const Color(0xFFD4AF37).withValues(alpha: isDark ? 0.18 : 0.12),
-          ),
+          start: BorderSide(color: context.posHairlineSoft),
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-
           // ── Shift-closed banner ─────────────────────────────────────
           if (shift == null)
             Container(
@@ -1009,13 +1137,19 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(
-                    gradient: AppGradients.gold,
+                  decoration: BoxDecoration(
+                    color: context.roleTheme.badgeBackground,
                     borderRadius: AppRadius.smAll,
-                    boxShadow: [AppShadows.goldGlowSm],
+                    border: Border.all(color: context.posHairline),
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.posBrand.withValues(alpha: 0.18),
+                        blurRadius: 10,
+                      ),
+                    ],
                   ),
-                  child: const Icon(Icons.receipt_long_rounded,
-                      size: 16, color: Color(0xFF1A1400)),
+                  child: Icon(Icons.receipt_long_rounded,
+                      size: 16, color: context.roleTheme.badgeText),
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Text(
@@ -1026,15 +1160,16 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                 if (cart.isNotEmpty) ...[
                   const SizedBox(width: AppSpacing.xs),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFD4AF37).withValues(alpha: 0.15),
+                      color: context.roleTheme.badgeBackground,
                       borderRadius: AppRadius.pillAll,
                     ),
                     child: Text(
                       '${cart.length}',
-                      style: const TextStyle(
-                          color: Color(0xFFD4AF37),
+                      style: TextStyle(
+                          color: context.roleTheme.badgeText,
                           fontSize: 11,
                           fontWeight: FontWeight.bold),
                     ),
@@ -1060,9 +1195,10 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                     tooltip: showKeys ? 'تفريغ السلة [Esc]' : 'تفريغ السلة',
                     icon: Icon(Icons.delete_sweep_rounded,
                         color: colors.error, size: 20),
-                    onPressed: () => cartNotifier.clear(),
+                    onPressed: _confirmClearCart,
                     style: IconButton.styleFrom(
-                        minimumSize: const Size(32, 32), padding: EdgeInsets.zero),
+                        minimumSize: const Size(32, 32),
+                        padding: EdgeInsets.zero),
                   ),
                 ],
               ],
@@ -1072,13 +1208,18 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
           const SizedBox(height: AppSpacing.sm),
           Divider(
             height: 1,
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.15),
+            color: context.posHairlineSoft,
           ),
 
           // ── Item list ────────────────────────────────────────────────
           if (cart.isEmpty)
             Expanded(
-              child: _EmptyCartState(onOpenCustomItem: _openCustomItemModal),
+              child: _EmptyCartState(
+                onOpenCustomItem: _openCustomItemModal,
+                onOpenCustomerSearch: _openCustomerSearch,
+                onOpenHeldTickets: _openHeldTicketsSheet,
+                onOpenSalesHistory: _openSalesHistory,
+              ),
             )
           else
             Expanded(
@@ -1095,7 +1236,8 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
                       final res = cartNotifier.updateQuantity(item.id, newQty);
                       if (res.isFailure) {
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(res.failure?.message ?? 'تجاوز المخزون'),
+                          content:
+                              Text(res.failure?.message ?? 'تجاوز المخزون'),
                           duration: const Duration(milliseconds: 900),
                           backgroundColor: colors.warning,
                         ));
@@ -1112,49 +1254,31 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
               ),
             ),
 
-          // ── Gold total + checkout ────────────────────────────────────
+          // ── Ticket breakdown + checkout ──────────────────────────────
           Container(
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF141210) : const Color(0xFFFFFDF8),
-              border: Border(
-                top: BorderSide(
-                  color: const Color(0xFFD4AF37).withValues(alpha: 0.25),
-                ),
-              ),
+              color: context.posChrome,
+              border: Border(top: BorderSide(color: context.posHairline)),
             ),
             padding: const EdgeInsetsDirectional.fromSTEB(
                 AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.lg),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Item count + total row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '${cart.length} صنف',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                    Row(
-                      children: [
-                        Text('المجموع: ',
-                            style: theme.textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.bold)),
-                        DzdPriceTag.lg(
-                          centimes: totalCentimes,
-                          gold: true,
-                        ),
-                      ],
-                    ),
-                  ],
+                _CartTotalsBreakdown(
+                  itemCount: cart.length,
+                  subtotalCentimes: cartNotifier.subtotalCentimes,
+                  discountCentimes: cartNotifier.discountCentimes,
+                  totalCentimes: totalCentimes,
                 ),
                 const SizedBox(height: AppSpacing.md),
-                // Gold checkout button
                 GoldButton.icon(
                   icon: Icons.check_circle_rounded,
-                  label: showKeys ? 'دفع وإتمام الوصل [F12]' : 'دفع وإتمام الوصل',
-                  onPressed: cart.isEmpty ? null : () => _openCheckoutDialog(totalCentimes),
+                  label:
+                      showKeys ? 'دفع وإتمام الوصل [F12]' : 'دفع وإتمام الوصل',
+                  onPressed: cart.isEmpty
+                      ? null
+                      : () => _openCheckoutDialog(totalCentimes),
                   width: double.infinity,
                   height: 52,
                 ),
@@ -1167,12 +1291,20 @@ final isDarkTheme = Theme.of(context).brightness == Brightness.dark;
   }
 }
 
-
 // ── Empty Cart State — creative animated placeholder ──────────────────────────
 
 class _EmptyCartState extends StatefulWidget {
   final VoidCallback onOpenCustomItem;
-  const _EmptyCartState({required this.onOpenCustomItem});
+  final VoidCallback onOpenCustomerSearch;
+  final VoidCallback onOpenHeldTickets;
+  final VoidCallback onOpenSalesHistory;
+
+  const _EmptyCartState({
+    required this.onOpenCustomItem,
+    required this.onOpenCustomerSearch,
+    required this.onOpenHeldTickets,
+    required this.onOpenSalesHistory,
+  });
 
   @override
   State<_EmptyCartState> createState() => _EmptyCartStateState();
@@ -1191,10 +1323,10 @@ class _EmptyCartStateState extends State<_EmptyCartState>
       vsync: this,
       duration: const Duration(milliseconds: 2400),
     )..repeat(reverse: true);
-    _float = Tween<double>(begin: -6, end: 6).animate(
-        CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-    _glow = Tween<double>(begin: 0.3, end: 0.75).animate(
-        CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _float = Tween<double>(begin: -6, end: 6)
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _glow = Tween<double>(begin: 0.3, end: 0.75)
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
   }
 
   @override
@@ -1205,8 +1337,8 @@ class _EmptyCartStateState extends State<_EmptyCartState>
 
   @override
   Widget build(BuildContext context) {
-    final theme  = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final brand = context.posBrand;
     final wc = context.windowClass;
     final showShortcuts = wc != WindowClass.compact && wc != WindowClass.medium;
 
@@ -1216,7 +1348,7 @@ class _EmptyCartStateState extends State<_EmptyCartState>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-           const SizedBox(height: 25),
+            const SizedBox(height: 25),
             // Animated floating basket
             AnimatedBuilder(
               animation: _controller,
@@ -1226,24 +1358,24 @@ class _EmptyCartStateState extends State<_EmptyCartState>
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    gradient: AppGradients.obsidian,
+                    color: context.roleTheme.badgeBackground,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: const Color(0xFFD4AF37).withValues(alpha: _glow.value),
+                      color: brand.withValues(alpha: _glow.value),
                       width: 1.5,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFD4AF37).withValues(alpha: _glow.value * 0.4),
+                        color: brand.withValues(alpha: _glow.value * 0.35),
                         blurRadius: 20,
                         spreadRadius: 2,
                       ),
                     ],
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.shopping_basket_rounded,
                     size: 36,
-                    color: Color(0xFFD4AF37),
+                    color: context.roleTheme.badgeText,
                   ),
                 ),
               ),
@@ -1258,8 +1390,8 @@ class _EmptyCartStateState extends State<_EmptyCartState>
             const SizedBox(height: AppSpacing.xs),
             Text(
               'امسح الباركود أو انقر على منتج\nلإضافته إلى وصل البيع',
-              style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               textAlign: TextAlign.center,
             ),
             if (showShortcuts) ...[
@@ -1270,9 +1402,22 @@ class _EmptyCartStateState extends State<_EmptyCartState>
                 runSpacing: AppSpacing.sm,
                 alignment: WrapAlignment.center,
                 children: [
-                  _HintChip(label: 'F3 منتج مخصص', onTap: widget.onOpenCustomItem, isDark: isDark),
-                  _HintChip(label: 'F2 بحث زبون', onTap: null, isDark: isDark),
-                  _HintChip(label: 'F5 تذاكر معلقة', onTap: null, isDark: isDark),
+                  _HintChip(
+                    label: 'F3 منتج مخصص',
+                    onTap: widget.onOpenCustomItem,
+                  ),
+                  _HintChip(
+                    label: 'F2 بحث زبون',
+                    onTap: widget.onOpenCustomerSearch,
+                  ),
+                  _HintChip(
+                    label: 'F5 تذاكر معلقة',
+                    onTap: widget.onOpenHeldTickets,
+                  ),
+                  _HintChip(
+                    label: 'F8 سجل المبيعات',
+                    onTap: widget.onOpenSalesHistory,
+                  ),
                 ],
               ),
             ],
@@ -1286,31 +1431,122 @@ class _EmptyCartStateState extends State<_EmptyCartState>
 class _HintChip extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
-  final bool isDark;
-  const _HintChip({required this.label, required this.onTap, required this.isDark});
+
+  const _HintChip({required this.label, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E1A14) : const Color(0xFFF3E8C8),
-          borderRadius: AppRadius.pillAll,
-          border: Border.all(
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.3),
+    final scheme = Theme.of(context).colorScheme;
+    final brand = context.posBrand;
+    final enabled = onTap != null;
+
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: AppRadius.pillAll,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHigh,
+            borderRadius: AppRadius.pillAll,
+            border: Border.all(
+              color: brand.withValues(alpha: enabled ? 0.35 : 0.15),
+            ),
           ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            color: isDark ? const Color(0xFFD4AF37) : const Color(0xFF9A7319),
-            fontWeight: FontWeight.w500,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: enabled
+                  ? brand
+                  : scheme.onSurfaceVariant.withValues(alpha: 0.6),
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Money breakdown displayed above the checkout action.
+///
+/// The subtotal and discount rows only appear when a price tier or a manual
+/// discount actually changed the amount, so the footer stays quiet during the
+/// common undiscounted sale while still exposing the savings when they exist.
+class _CartTotalsBreakdown extends StatelessWidget {
+  final int itemCount;
+  final int subtotalCentimes;
+  final int discountCentimes;
+  final int totalCentimes;
+
+  const _CartTotalsBreakdown({
+    required this.itemCount,
+    required this.subtotalCentimes,
+    required this.discountCentimes,
+    required this.totalCentimes,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = context.appColors;
+    final labelStyle = theme.textTheme.bodySmall;
+    final valueStyle =
+        theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('عدد الأصناف', style: labelStyle),
+            Text('$itemCount', style: valueStyle),
+          ],
+        ),
+        if (discountCentimes > 0) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('المجموع الفرعي', style: labelStyle),
+              Text(
+                DzdFormatter.formatCentimes(subtotalCentimes),
+                style: valueStyle,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('الخصم', style: labelStyle),
+              Text(
+                '- ${DzdFormatter.formatCentimes(discountCentimes)}',
+                style: valueStyle?.copyWith(
+                  color: colors.success,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: AppSpacing.xs),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text(
+              'الإجمالي',
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            DzdPriceTag.lg(centimes: totalCentimes, gold: true),
+          ],
+        ),
+      ],
     );
   }
 }

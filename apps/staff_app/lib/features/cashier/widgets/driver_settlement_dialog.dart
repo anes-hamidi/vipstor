@@ -44,10 +44,12 @@ class DriverSettlementDialog extends ConsumerStatefulWidget {
   }
 
   @override
-  ConsumerState<DriverSettlementDialog> createState() => _DriverSettlementDialogState();
+  ConsumerState<DriverSettlementDialog> createState() =>
+      _DriverSettlementDialogState();
 }
 
-class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog> {
+class _DriverSettlementDialogState
+    extends ConsumerState<DriverSettlementDialog> {
   final _amountController = TextEditingController();
   final _notesController = TextEditingController();
   final _searchController = TextEditingController();
@@ -97,7 +99,8 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
       _selectedDriverName = driver.driverName;
       _selectedDriverPhone = driver.driverPhone;
       if (driver.pendingCashCentimes > 0) {
-        _amountController.text = (driver.pendingCashCentimes / 100).toStringAsFixed(0);
+        _amountController.text =
+            (driver.pendingCashCentimes / 100).toStringAsFixed(0);
       } else {
         _amountController.text = '0';
       }
@@ -115,7 +118,8 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
     });
   }
 
-  Future<void> _submitSettlement(int expectedCentimes, int unsettledCount) async {
+  Future<void> _submitSettlement(
+      int expectedCentimes, int unsettledCount) async {
     if (_selectedDriverId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('يرجى تحديد سائق التوصيل أولاً')),
@@ -146,7 +150,9 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
         cashierId: widget.receiverId,
         driverId: _selectedDriverId!,
         countedAmountCentimes: countedCentimes,
-        notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+        notes: _notesController.text.trim().isEmpty
+            ? null
+            : _notesController.text.trim(),
       );
 
       // If active cashier shift, register the incoming cash into drawer
@@ -167,7 +173,9 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
             countedCentimes: countedCentimes,
             differenceCentimes: difference,
             status: settlement.status,
-            notes: _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+            notes: _notesController.text.trim().isEmpty
+                ? null
+                : _notesController.text.trim(),
           );
 
       // Print receipt if requested
@@ -177,7 +185,8 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
             settlement: settlement,
             driverPhone: _selectedDriverPhone,
             unsettledOrdersCount: unsettledCount,
-            receiverRole: widget.receiverRole == 'cashier' ? 'أمين الصندوق' : 'المشرف',
+            receiverRole:
+                widget.receiverRole == 'cashier' ? 'أمين الصندوق' : 'المشرف',
           );
         } catch (_) {}
       }
@@ -218,6 +227,7 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = context.appColors;
+    final role = context.roleTheme;
     final driversAsync = ref.watch(pendingDriverSettlementsProvider);
 
     return Dialog(
@@ -236,11 +246,12 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                   Container(
                     width: 44,
                     height: 44,
-                    decoration: const BoxDecoration(
-                      gradient: AppGradients.goldFoil,
+                    decoration: BoxDecoration(
+                      color: role.badgeBackground,
                       borderRadius: AppRadius.mdAll,
                     ),
-                    child: const Icon(Icons.handshake_rounded, color: Colors.black, size: 24),
+                    child: Icon(Icons.handshake_rounded,
+                        color: role.badgeText, size: 24),
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
@@ -256,14 +267,16 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                         ),
                         Text(
                           'المستلم: ${widget.receiverName} (${widget.receiverRole == "cashier" ? "أمين الصندوق" : "المشرف"})',
-                          style: theme.textTheme.bodySmall?.copyWith(color: colors.gold),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: colors.gold),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close_rounded),
-                    onPressed: _isSubmitting ? null : () => Navigator.pop(context),
+                    onPressed:
+                        _isSubmitting ? null : () => Navigator.pop(context),
                   ),
                 ],
               ),
@@ -279,7 +292,8 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                       return AppStates.empty(
                         icon: Icons.local_shipping_outlined,
                         title: 'لا يوجد سائقو توصيل مسجلون',
-                        description: 'قم بإضافة سائقين أولاً لتمكين تسوية العهدة.',
+                        description:
+                            'قم بإضافة سائقين أولاً لتمكين تسوية العهدة.',
                       );
                     }
 
@@ -292,7 +306,8 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                       _selectedDriverId = found.driverId;
                       _selectedDriverName = found.driverName;
                       _selectedDriverPhone = found.driverPhone;
-                      _amountController.text = (found.pendingCashCentimes / 100).toStringAsFixed(0);
+                      _amountController.text =
+                          (found.pendingCashCentimes / 100).toStringAsFixed(0);
                     }
 
                     final selectedDriver = drivers.firstWhere(
@@ -322,13 +337,16 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                             decoration: BoxDecoration(
                               color: colors.obsidianCard,
                               borderRadius: AppRadius.mdAll,
-                              border: Border.all(color: colors.gold.withValues(alpha: 0.2)),
+                              border: Border.all(
+                                  color: colors.gold.withValues(alpha: 0.2)),
                             ),
                             child: ListView.separated(
                               scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 8),
                               itemCount: drivers.length,
-                              separatorBuilder: (_, __) => const SizedBox(width: 8),
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 8),
                               itemBuilder: (ctx, i) {
                                 final d = drivers[i];
                                 final isSel = d.driverId == _selectedDriverId;
@@ -339,32 +357,44 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                                       Icon(
                                         Icons.person_pin_circle_rounded,
                                         size: 16,
-                                        color: isSel ? Colors.black : colors.gold,
+                                        color: isSel
+                                            ? theme.colorScheme.onPrimary
+                                            : colors.gold,
                                       ),
                                       const SizedBox(width: 6),
                                       Text(
                                         d.driverName,
                                         style: TextStyle(
-                                          fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                                          color: isSel ? Colors.black : colors.onObsidian,
+                                          fontWeight: isSel
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          color: isSel
+                                              ? theme.colorScheme.onPrimary
+                                              : colors.onObsidian,
                                         ),
                                       ),
                                       if (d.pendingCashCentimes > 0) ...[
                                         const SizedBox(width: 6),
                                         Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 6, vertical: 2),
                                           decoration: BoxDecoration(
                                             color: isSel
-                                                ? Colors.black.withValues(alpha: 0.2)
-                                                : colors.gold.withValues(alpha: 0.2),
+                                                ? theme.colorScheme.onPrimary
+                                                    .withValues(alpha: 0.2)
+                                                : colors.gold
+                                                    .withValues(alpha: 0.2),
                                             borderRadius: AppRadius.pillAll,
                                           ),
                                           child: Text(
-                                            DzdFormatter.formatCentimes(d.pendingCashCentimes),
+                                            DzdFormatter.formatCentimes(
+                                                d.pendingCashCentimes),
                                             style: TextStyle(
                                               fontSize: 10,
                                               fontWeight: FontWeight.bold,
-                                              color: isSel ? Colors.black : colors.gold,
+                                              color: isSel
+                                                  ? theme.colorScheme.onPrimary
+                                                  : colors.gold,
                                             ),
                                           ),
                                         ),
@@ -384,23 +414,29 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
 
                           // Driver Summary Card
                           LuxuryCard(
-                            padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+                            padding:
+                                const EdgeInsetsDirectional.all(AppSpacing.md),
                             child: Row(
                               children: [
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         'الكاش المتوقع بالعهدة (Expected):',
-                                        style: theme.textTheme.bodySmall?.copyWith(
-                                          color: colors.onObsidian.withValues(alpha: 0.65),
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          color: colors.onObsidian
+                                              .withValues(alpha: 0.65),
                                         ),
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        DzdFormatter.formatCentimes(expectedCentimes),
-                                        style: theme.textTheme.headlineSmall?.copyWith(
+                                        DzdFormatter.formatCentimes(
+                                            expectedCentimes),
+                                        style: theme.textTheme.headlineSmall
+                                            ?.copyWith(
                                           fontWeight: FontWeight.bold,
                                           color: colors.gold,
                                         ),
@@ -409,18 +445,23 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                                   ),
                                 ),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 6),
                                   decoration: BoxDecoration(
                                     color: colors.obsidianSurface,
                                     borderRadius: AppRadius.smAll,
-                                    border: Border.all(color: colors.gold.withValues(alpha: 0.3)),
+                                    border: Border.all(
+                                        color:
+                                            colors.gold.withValues(alpha: 0.3)),
                                   ),
                                   child: Column(
                                     children: [
                                       Text(
                                         'طلبات غير مسواة',
-                                        style: theme.textTheme.labelSmall?.copyWith(
-                                          color: colors.onObsidian.withValues(alpha: 0.65),
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                          color: colors.onObsidian
+                                              .withValues(alpha: 0.65),
                                         ),
                                       ),
                                       Text(
@@ -442,25 +483,32 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                           // Unsettled Orders Preview (Collapsible)
                           Consumer(
                             builder: (context, ref, _) {
-                              final ordersAsync = ref.watch(driverUnsettledOrdersProvider(selectedDriver.driverId));
+                              final ordersAsync = ref.watch(
+                                  driverUnsettledOrdersProvider(
+                                      selectedDriver.driverId));
                               return ordersAsync.when(
                                 data: (orders) {
-                                  if (orders.isEmpty) return const SizedBox.shrink();
+                                  if (orders.isEmpty) {
+                                    return const SizedBox.shrink();
+                                  }
                                   return ExpansionTile(
                                     tilePadding: EdgeInsets.zero,
                                     title: Text(
                                       'عرض تفاصيل الطلبات المشمولة (${orders.length} طلبات)',
-                                      style: theme.textTheme.labelMedium?.copyWith(
+                                      style:
+                                          theme.textTheme.labelMedium?.copyWith(
                                         color: colors.gold,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                     children: [
                                       Container(
-                                        constraints: const BoxConstraints(maxHeight: 140),
+                                        constraints: const BoxConstraints(
+                                            maxHeight: 140),
                                         child: ListView.separated(
                                           itemCount: orders.length,
-                                          separatorBuilder: (_, __) => const Divider(height: 1),
+                                          separatorBuilder: (_, __) =>
+                                              const Divider(height: 1),
                                           itemBuilder: (ctx, idx) {
                                             final o = orders[idx];
                                             return ListTile(
@@ -468,13 +516,15 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                                               contentPadding: EdgeInsets.zero,
                                               title: Text(
                                                 'طلب #${o.orderNumber ?? o.id.substring(0, 6)} - ${o.customerName ?? "زبون"}',
-                                                style: const TextStyle(fontSize: 12),
+                                                style: const TextStyle(
+                                                    fontSize: 12),
                                               ),
                                               trailing: Text(
-                                                DzdFormatter.formatCentimes(o.paidAmountCentimes),
-                                                style: const TextStyle(
+                                                DzdFormatter.formatCentimes(
+                                                    o.paidAmountCentimes),
+                                                style: TextStyle(
                                                   fontWeight: FontWeight.bold,
-                                                  color: Colors.greenAccent,
+                                                  color: colors.success,
                                                   fontSize: 12,
                                                 ),
                                               ),
@@ -505,39 +555,51 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                               ),
                               const Spacer(),
                               TextButton.icon(
-                                icon: const Icon(Icons.check_circle_outline, size: 16),
-                                label: const Text('مطابقة تامة للمتوقع', style: TextStyle(fontSize: 12)),
+                                icon: const Icon(Icons.check_circle_outline,
+                                    size: 16),
+                                label: const Text('مطابقة تامة للمتوقع',
+                                    style: TextStyle(fontSize: 12)),
                                 style: TextButton.styleFrom(
                                   foregroundColor: colors.gold,
-                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
                                 ),
                                 onPressed: () {
                                   setState(() {
-                                    _amountController.text = (expectedCentimes / 100).toStringAsFixed(0);
+                                    _amountController.text =
+                                        (expectedCentimes / 100)
+                                            .toStringAsFixed(0);
                                   });
                                 },
                               ),
                               TextButton.icon(
                                 icon: Icon(
-                                  _showDenominations ? Icons.keyboard_arrow_up : Icons.calculate_outlined,
+                                  _showDenominations
+                                      ? Icons.keyboard_arrow_up
+                                      : Icons.calculate_outlined,
                                   size: 16,
                                 ),
                                 label: Text(
-                                  _showDenominations ? 'إخفاء الفئات' : 'عد الفئات',
+                                  _showDenominations
+                                      ? 'إخفاء الفئات'
+                                      : 'عد الفئات',
                                   style: const TextStyle(fontSize: 12),
                                 ),
                                 style: TextButton.styleFrom(
                                   foregroundColor: colors.gold,
-                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
                                 ),
-                                onPressed: () => setState(() => _showDenominations = !_showDenominations),
+                                onPressed: () => setState(() =>
+                                    _showDenominations = !_showDenominations),
                               ),
                             ],
                           ),
                           const SizedBox(height: 4),
                           TextField(
                             controller: _amountController,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: false),
+                            keyboardType: const TextInputType.numberWithOptions(
+                                decimal: false),
                             style: theme.textTheme.titleLarge?.copyWith(
                               fontWeight: FontWeight.bold,
                               color: colors.gold,
@@ -546,8 +608,10 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                               filled: true,
                               fillColor: colors.obsidianCard,
                               suffixText: 'دج (DZD)',
-                              prefixIcon: const Icon(Icons.attach_money_rounded),
-                              border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+                              prefixIcon:
+                                  const Icon(Icons.attach_money_rounded),
+                              border: const OutlineInputBorder(
+                                  borderRadius: AppRadius.mdAll),
                             ),
                             onChanged: (_) => setState(() {}),
                           ),
@@ -556,11 +620,13 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                           if (_showDenominations) ...[
                             const SizedBox(height: AppSpacing.md),
                             Container(
-                              padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+                              padding: const EdgeInsetsDirectional.all(
+                                  AppSpacing.md),
                               decoration: BoxDecoration(
                                 color: colors.obsidianCard,
                                 borderRadius: AppRadius.mdAll,
-                                border: Border.all(color: colors.gold.withValues(alpha: 0.2)),
+                                border: Border.all(
+                                    color: colors.gold.withValues(alpha: 0.2)),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -576,7 +642,8 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                                   Wrap(
                                     spacing: 12,
                                     runSpacing: 8,
-                                    children: _denomControllers.entries.map((entry) {
+                                    children:
+                                        _denomControllers.entries.map((entry) {
                                       final denom = entry.key;
                                       final ctrl = entry.value;
                                       return SizedBox(
@@ -585,23 +652,34 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                                           children: [
                                             Text(
                                               '$denom: ',
-                                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                              style: const TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold),
                                             ),
                                             Expanded(
                                               child: SizedBox(
                                                 height: 36,
                                                 child: TextField(
                                                   controller: ctrl,
-                                                  keyboardType: TextInputType.number,
-                                                  style: const TextStyle(fontSize: 12),
+                                                  keyboardType:
+                                                      TextInputType.number,
+                                                  style: const TextStyle(
+                                                      fontSize: 12),
                                                   textAlign: TextAlign.center,
                                                   decoration: InputDecoration(
-                                                    contentPadding: EdgeInsets.zero,
+                                                    contentPadding:
+                                                        EdgeInsets.zero,
                                                     filled: true,
-                                                    fillColor: colors.obsidianSurface,
-                                                    border: const OutlineInputBorder(borderRadius: AppRadius.smAll),
+                                                    fillColor:
+                                                        colors.obsidianSurface,
+                                                    border:
+                                                        const OutlineInputBorder(
+                                                            borderRadius:
+                                                                AppRadius
+                                                                    .smAll),
                                                   ),
-                                                  onChanged: (_) => _recalcFromDenominations(),
+                                                  onChanged: (_) =>
+                                                      _recalcFromDenominations(),
                                                 ),
                                               ),
                                             ),
@@ -619,18 +697,22 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
 
                           // Difference / Discrepancy Indicator
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 10),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.md, vertical: 10),
                             decoration: BoxDecoration(
                               color: diffCentimes == 0
                                   ? colors.success.withValues(alpha: 0.12)
                                   : (diffCentimes < 0
                                       ? colors.error.withValues(alpha: 0.12)
-                                      : Colors.blue.withValues(alpha: 0.12)),
+                                      : theme.colorScheme.primary
+                                          .withValues(alpha: 0.12)),
                               borderRadius: AppRadius.mdAll,
                               border: Border.all(
                                 color: diffCentimes == 0
                                     ? colors.success
-                                    : (diffCentimes < 0 ? colors.error : Colors.blue),
+                                    : (diffCentimes < 0
+                                        ? colors.error
+                                        : theme.colorScheme.primary),
                               ),
                             ),
                             child: Row(
@@ -638,16 +720,21 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                                 Icon(
                                   diffCentimes == 0
                                       ? Icons.check_circle_rounded
-                                      : (diffCentimes < 0 ? Icons.warning_amber_rounded : Icons.info_outline),
+                                      : (diffCentimes < 0
+                                          ? Icons.warning_amber_rounded
+                                          : Icons.info_outline),
                                   color: diffCentimes == 0
                                       ? colors.success
-                                      : (diffCentimes < 0 ? colors.error : Colors.blue),
+                                      : (diffCentimes < 0
+                                          ? colors.error
+                                          : theme.colorScheme.primary),
                                   size: 22,
                                 ),
                                 const SizedBox(width: AppSpacing.sm),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         diffCentimes == 0
@@ -660,13 +747,18 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                                           fontSize: 13,
                                           color: diffCentimes == 0
                                               ? colors.success
-                                              : (diffCentimes < 0 ? colors.error : Colors.blue),
+                                              : (diffCentimes < 0
+                                                  ? colors.error
+                                                  : theme.colorScheme.primary),
                                         ),
                                       ),
                                       if (diffCentimes != 0)
-                                        const Text(
+                                        Text(
                                           'يرجى تدوين سبب الفارق في الملاحظات لإرفاقه في تقرير التدقيق.',
-                                          style: TextStyle(fontSize: 10, color: Colors.white70),
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              color: theme.colorScheme
+                                                  .onSurfaceVariant),
                                         ),
                                     ],
                                   ),
@@ -691,7 +783,8 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                               ),
                               filled: true,
                               fillColor: colors.obsidianCard,
-                              border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+                              border: const OutlineInputBorder(
+                                  borderRadius: AppRadius.mdAll),
                             ),
                           ),
 
@@ -700,19 +793,23 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                           // Auto print voucher toggle
                           CheckboxListTile(
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('طباعة وصل التسوية تلقائياً (وصل حراري 80mm)'),
+                            title: const Text(
+                                'طباعة وصل التسوية تلقائياً (وصل حراري 80mm)'),
                             value: _autoPrintVoucher,
                             activeColor: colors.gold,
-                            onChanged: (v) => setState(() => _autoPrintVoucher = v ?? true),
+                            onChanged: (v) =>
+                                setState(() => _autoPrintVoucher = v ?? true),
                           ),
                         ],
                       ),
                     );
                   },
-                  loading: () => AppStates.loading(message: 'جاري جلب بيانات السائقين...'),
+                  loading: () =>
+                      AppStates.loading(message: 'جاري جلب بيانات السائقين...'),
                   error: (e, _) => AppStates.error(
                     'تعذر تحميل السائقين: $e',
-                    onRetry: () => ref.invalidate(pendingDriverSettlementsProvider),
+                    onRetry: () =>
+                        ref.invalidate(pendingDriverSettlementsProvider),
                   ),
                 ),
               ),
@@ -731,13 +828,16 @@ class _DriverSettlementDialogState extends ConsumerState<DriverSettlementDialog>
                   return Row(
                     children: [
                       OutlinedButton(
-                        onPressed: _isSubmitting ? null : () => Navigator.pop(context),
+                        onPressed:
+                            _isSubmitting ? null : () => Navigator.pop(context),
                         child: const Text('إلغاء'),
                       ),
                       const Spacer(),
                       GoldButton.icon(
                         icon: Icons.check_circle_rounded,
-                        label: _isSubmitting ? 'جاري الترحيل...' : 'تأكيد التسوية وترحيل الكاش',
+                        label: _isSubmitting
+                            ? 'جاري الترحيل...'
+                            : 'تأكيد التسوية وترحيل الكاش',
                         onPressed: _isSubmitting
                             ? null
                             : () => _submitSettlement(

@@ -1,6 +1,6 @@
+import 'package:core/core.dart';
 import 'package:flutter/material.dart';
 import '../tokens/app_colors.dart';
-import '../tokens/app_gradients.dart';
 import '../tokens/app_radius.dart';
 import '../tokens/app_shadows.dart';
 import '../tokens/app_spacing.dart';
@@ -67,11 +67,12 @@ class _KpiCardState extends State<KpiCard>
   @override
   Widget build(BuildContext context) {
     final theme   = Theme.of(context);
+    final scheme  = theme.colorScheme;
     final colors  = context.appColors;
     final isDark  = theme.brightness == Brightness.dark;
-    final accent  = widget.accentColor ?? const Color(0xFFD4AF37);
+    final accent  = widget.accentColor ?? context.roleTheme.roleBrandColor;
 
-    final bgColor   = isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8);
+    final bgColor   = scheme.surfaceContainerLow;
     final shadows   = isDark ? AppShadows.cardSoftDark : AppShadows.cardSoftLight;
     final borderClr = accent.withValues(alpha: isDark ? 0.32 : 0.22);
 
@@ -116,7 +117,6 @@ class _KpiCardState extends State<KpiCard>
                         widget: widget,
                         accent: accent,
                         colors: colors,
-                        isDark: isDark,
                       ),
               ),
             ),
@@ -131,13 +131,11 @@ class _KpiContent extends StatelessWidget {
   final KpiCard widget;
   final Color accent;
   final AppColors colors;
-  final bool isDark;
 
   const _KpiContent({
     required this.widget,
     required this.accent,
     required this.colors,
-    required this.isDark,
   });
 
   @override
@@ -206,9 +204,7 @@ class _KpiContent extends StatelessWidget {
           style: theme.textTheme.headlineSmall?.copyWith(
             fontWeight: FontWeight.bold,
             fontFeatures: const [FontFeature.tabularFigures()],
-            color: isDark
-                ? const Color(0xFFFBF8F0)
-                : const Color(0xFF1E1B14),
+            color: theme.colorScheme.onSurface,
           ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
@@ -242,16 +238,28 @@ class _KpiContent extends StatelessWidget {
           ),
         ],
 
-        // Gold foil accent line
+        // Brand foil accent line
         Padding(
           padding: const EdgeInsetsDirectional.only(top: AppSpacing.sm),
           child: Container(
             height: 2.5,
             width: 48,
-            decoration: const BoxDecoration(
-              gradient: AppGradients.goldFoil,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: AlignmentDirectional.centerStart,
+                end: AlignmentDirectional.centerEnd,
+                colors: [
+                  accent,
+                  Color.lerp(accent, Colors.white, 0.45)!,
+                ],
+              ),
               borderRadius: AppRadius.fullAll,
-              boxShadow: [AppShadows.goldGlowSm],
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: 0.24),
+                  blurRadius: 6,
+                ),
+              ],
             ),
           ),
         ),

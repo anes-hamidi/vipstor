@@ -1,7 +1,6 @@
+import 'package:core/core.dart';
 import 'package:flutter/material.dart';
-import '../tokens/app_gradients.dart';
 import '../tokens/app_radius.dart';
-import '../tokens/app_shadows.dart';
 import '../tokens/app_spacing.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,8 +85,21 @@ class _GoldButtonState extends State<GoldButton>
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
     final isDisabled = widget.onPressed == null || widget.loading;
-    const dark = Color(0xFF1A1400);
+    final onBrand = scheme.onPrimary;
+    final disabledForeground = scheme.onSurface.withValues(alpha: 0.38);
+    final brandGradient = LinearGradient(
+      begin: AlignmentDirectional.topStart,
+      end: AlignmentDirectional.bottomEnd,
+      colors: [
+        Color.lerp(brand, Colors.white, 0.30)!,
+        brand,
+        Color.lerp(brand, Colors.black, 0.16)!,
+      ],
+      stops: const [0.0, 0.55, 1.0],
+    );
     final ph = widget.compact
         ? const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs)
         : const EdgeInsets.symmetric(horizontal: AppSpacing.xl, vertical: AppSpacing.md);
@@ -103,21 +115,22 @@ class _GoldButtonState extends State<GoldButton>
           child: DecoratedBox(
             decoration: BoxDecoration(
               borderRadius: AppRadius.mdAll,
-              gradient: isDisabled ? null : AppGradients.gold,
-              color: isDisabled ? const Color(0xFF5A5040) : null,
+              gradient: isDisabled ? null : brandGradient,
+              color: isDisabled ? scheme.surfaceContainerHighest : null,
               boxShadow: isDisabled
                   ? null
                   : [
                       BoxShadow(
-                        color: const Color(0xFFD4AF37)
-                            .withValues(alpha: 0.28 + 0.28 * _glow.value),
+                        color: brand.withValues(
+                          alpha: 0.24 + 0.24 * _glow.value,
+                        ),
                         blurRadius: 10 + 12 * _glow.value,
                         offset: Offset(0, 3 + 3 * _glow.value),
                       ),
-                      const BoxShadow(
-                        color: Color(0x18000000),
+                      BoxShadow(
+                        color: scheme.shadow.withValues(alpha: 0.10),
                         blurRadius: 4,
-                        offset: Offset(0, 2),
+                        offset: const Offset(0, 2),
                       ),
                     ],
             ),
@@ -136,7 +149,7 @@ class _GoldButtonState extends State<GoldButton>
               onTapUp: _onTapUp,
               onTapCancel: () => setState(() => _pressed = false),
               borderRadius: AppRadius.mdAll,
-              splashColor: const Color(0x30FFFFFF),
+              splashColor: scheme.onPrimary.withValues(alpha: 0.18),
               highlightColor: Colors.transparent,
               child: Padding(
                 padding: ph,
@@ -151,14 +164,14 @@ class _GoldButtonState extends State<GoldButton>
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           valueColor: AlwaysStoppedAnimation(
-                            dark.withValues(alpha: 0.70),
+                            onBrand.withValues(alpha: 0.70),
                           ),
                         ),
                       )
                     else ...[
                       if (widget.icon != null) ...[
                         Icon(widget.icon, size: widget.compact ? 15 : 18,
-                            color: isDisabled ? const Color(0xFF9A8A60) : dark),
+                            color: isDisabled ? disabledForeground : onBrand),
                         SizedBox(width: widget.compact ? AppSpacing.xs : AppSpacing.sm),
                       ],
                       Flexible(
@@ -167,7 +180,7 @@ class _GoldButtonState extends State<GoldButton>
                           style: TextStyle(
                             fontSize: widget.compact ? 12 : 14,
                             fontWeight: FontWeight.bold,
-                            color: isDisabled ? const Color(0xFF9A8A60) : dark,
+                            color: isDisabled ? disabledForeground : onBrand,
                             letterSpacing: 0.2,
                           ),
                           overflow: TextOverflow.ellipsis,
@@ -201,12 +214,16 @@ class GoldBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final iconSize = small ? 10.0 : 12.0;
     final fontSize = small ? 10.0 : 11.0;
+    final role = context.roleTheme;
 
     return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: AppGradients.gold,
+      decoration: BoxDecoration(
+        color: role.badgeBackground,
         borderRadius: AppRadius.fullAll,
-        boxShadow: [AppShadows.goldGlowSm],
+        border: Border.all(
+          color: role.badgeText.withValues(alpha: 0.18),
+          width: 1,
+        ),
       ),
       child: Padding(
         padding: EdgeInsetsDirectional.symmetric(
@@ -217,7 +234,7 @@ class GoldBadge extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
-              Icon(icon, size: iconSize, color: const Color(0xFF1A1400)),
+              Icon(icon, size: iconSize, color: role.badgeText),
               SizedBox(width: small ? AppSpacing.xxs : AppSpacing.xs),
             ],
             Text(
@@ -225,7 +242,7 @@ class GoldBadge extends StatelessWidget {
               style: TextStyle(
                 fontSize: fontSize,
                 fontWeight: FontWeight.bold,
-                color: const Color(0xFF1A1400),
+                color: role.badgeText,
                 letterSpacing: 0.4,
               ),
             ),
@@ -260,7 +277,9 @@ class SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
     return Padding(
       padding: EdgeInsetsDirectional.symmetric(
         vertical: dense ? AppSpacing.xs : AppSpacing.sm,
@@ -268,26 +287,36 @@ class SectionHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Gold accent bar
+          // Brand accent bar
           Container(
             width: 3,
             height: dense ? 14 : 18,
-            decoration: const BoxDecoration(
-              gradient: AppGradients.goldLuminous,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color.lerp(brand, Colors.white, 0.28)!,
+                  brand,
+                ],
+              ),
               borderRadius: AppRadius.fullAll,
-              boxShadow: [AppShadows.goldGlowSm],
+              boxShadow: [
+                BoxShadow(
+                  color: brand.withValues(alpha: 0.28),
+                  blurRadius: 6,
+                ),
+              ],
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               title,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.bold,
                 fontSize: dense ? 12 : 13,
-                color: isDark
-                    ? const Color(0xFFF3D278)
-                    : const Color(0xFF4A3800),
+                color: scheme.primary,
                 letterSpacing: 0.2,
               ),
             ),
@@ -312,9 +341,20 @@ class GoldDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brand = context.roleTheme.roleBrandColor;
     final w = Container(
       height: height,
-      decoration: const BoxDecoration(gradient: AppGradients.goldBorder),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: AlignmentDirectional.centerStart,
+          end: AlignmentDirectional.centerEnd,
+          colors: [
+            brand.withValues(alpha: 0.0),
+            brand.withValues(alpha: 0.50),
+            brand.withValues(alpha: 0.0),
+          ],
+        ),
+      ),
     );
     if (margin != null) return Padding(padding: margin!, child: w);
     return w;
@@ -367,10 +407,11 @@ class _GoldIconButtonState extends State<GoldIconButton>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final borderColor = isDark
-        ? const Color(0x40D4AF37)
-        : const Color(0x30C59B27);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final brand = context.roleTheme.roleBrandColor;
+    final borderColor = brand.withValues(alpha: isDark ? 0.28 : 0.20);
 
     return MouseRegion(
       onEnter: (_) => _ctrl.forward(),
@@ -382,24 +423,32 @@ class _GoldIconButtonState extends State<GoldIconButton>
         animation: _glow,
         builder: (ctx, child) => DecoratedBox(
           decoration: BoxDecoration(
-            gradient: widget.filled ? AppGradients.gold : null,
-            color: widget.filled ? null :
-                (isDark
-                    ? Color.lerp(const Color(0xFF1A1814), const Color(0xFF2A2518), _glow.value)
-                    : Color.lerp(Colors.transparent, const Color(0xFFFBF4DC), _glow.value)),
+            gradient: widget.filled
+                ? LinearGradient(
+                    begin: AlignmentDirectional.topStart,
+                    end: AlignmentDirectional.bottomEnd,
+                    colors: [
+                      Color.lerp(brand, Colors.white, 0.26)!,
+                      brand,
+                    ],
+                  )
+                : null,
+            color: widget.filled
+                ? null
+                : Color.lerp(
+                    Colors.transparent,
+                    scheme.primaryContainer.withValues(alpha: 0.55),
+                    _glow.value,
+                  ),
             borderRadius: AppRadius.mdAll,
             border: Border.all(
-              color: Color.lerp(
-                  borderColor,
-                  const Color(0xFFD4AF37),
-                  _glow.value)!,
+              color: Color.lerp(borderColor, brand, _glow.value)!,
               width: 1,
             ),
             boxShadow: _glow.value > 0.1
                 ? [
                     BoxShadow(
-                      color: const Color(0xFFD4AF37)
-                          .withValues(alpha: 0.20 * _glow.value),
+                      color: brand.withValues(alpha: 0.20 * _glow.value),
                       blurRadius: 8,
                     )
                   ]
@@ -416,8 +465,8 @@ class _GoldIconButtonState extends State<GoldIconButton>
               widget.icon,
               size: widget.size * 0.50,
               color: widget.filled
-                  ? const Color(0xFF1A1400)
-                  : (isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319)),
+                  ? scheme.onPrimary
+                  : (isDark ? scheme.primary : brand),
             ),
             tooltip: widget.tooltip,
             onPressed: widget.onPressed,

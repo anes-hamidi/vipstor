@@ -22,24 +22,37 @@ class CustomerShell extends ConsumerStatefulWidget {
 class _CustomerShellState extends ConsumerState<CustomerShell> {
   int _index = 0;
   bool _checkedUpdate = false;
-  bool _wasOnline = true;
 
   static const _destinations = [
-    (icon: Icons.storefront_outlined, active: Icons.storefront_rounded, label: 'المتجر'),
-    (icon: Icons.receipt_long_outlined, active: Icons.receipt_long_rounded, label: 'طلبياتي'),
-    (icon: Icons.account_balance_wallet_outlined, active: Icons.account_balance_wallet_rounded, label: 'محفظتي'),
-    (icon: Icons.person_outline_rounded, active: Icons.person_rounded, label: 'حسابي'),
+    (
+      icon: Icons.storefront_outlined,
+      active: Icons.storefront_rounded,
+      label: 'المتجر'
+    ),
+    (
+      icon: Icons.receipt_long_outlined,
+      active: Icons.receipt_long_rounded,
+      label: 'طلبياتي'
+    ),
+    (
+      icon: Icons.account_balance_wallet_outlined,
+      active: Icons.account_balance_wallet_rounded,
+      label: 'محفظتي'
+    ),
+    (
+      icon: Icons.person_outline_rounded,
+      active: Icons.person_rounded,
+      label: 'حسابي'
+    ),
   ];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_checkedUpdate) {
-        _checkedUpdate = true;
-        _checkForUpdate();
-      }
-      _wasOnline = ref.read(customerIsOnlineProvider);
+      if (!mounted || _checkedUpdate) return;
+      _checkedUpdate = true;
+      _checkForUpdate();
     });
   }
 
@@ -60,21 +73,20 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     }
   }
 
-  void _onConnectivityChanged(bool online) {
-    if (online && !_wasOnline) {
-      ref.read(customerSyncCoordinatorProvider).refreshAll();
-    }
-    _wasOnline = online;
-  }
-
   @override
   Widget build(BuildContext context) {
-    ref.listen<bool>(customerIsOnlineProvider, (_, next) {
-      _onConnectivityChanged(next);
+    // Connectivity is app-wide state. React to the provider transition instead
+    // of keeping a duplicated `_wasOnline` copy inside this widget.
+    ref.listen<bool>(customerIsOnlineProvider, (previous, next) {
+      if (next && previous == false) {
+        ref.read(customerSyncCoordinatorProvider).refreshAll();
+      }
     });
 
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
+    final brand = context.roleTheme.roleBrandColor;
     final cartCount = ref.watch(
       customerCartProvider.select(
         (items) => items.fold<int>(0, (sum, item) => sum + item.quantity),
@@ -82,7 +94,7 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     );
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0E0D0A) : const Color(0xFFFBF7EE),
+      backgroundColor: scheme.surface,
       body: IndexedStack(
         index: _index,
         children: [
@@ -94,11 +106,10 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF141210) : const Color(0xFFFFFDF8),
+          color: scheme.surfaceContainerLow,
           border: Border(
             top: BorderSide(
-              color: const Color(0xFFD4AF37)
-                  .withValues(alpha: isDark ? 0.26 : 0.18),
+              color: brand.withValues(alpha: isDark ? 0.26 : 0.18),
             ),
           ),
           boxShadow: isDark ? AppShadows.navDark : AppShadows.navLight,
@@ -147,8 +158,8 @@ class _ShellNavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final gold = isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319);
+    final scheme = theme.colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
 
     return Semantics(
       selected: selected,
@@ -156,7 +167,7 @@ class _ShellNavItem extends StatelessWidget {
       label: label,
       child: InkWell(
         onTap: onTap,
-        splashColor: const Color(0x22D4AF37),
+        splashColor: brand.withValues(alpha: 0.14),
         highlightColor: Colors.transparent,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -165,9 +176,17 @@ class _ShellNavItem extends StatelessWidget {
               duration: const Duration(milliseconds: 220),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
               decoration: BoxDecoration(
-                gradient: selected ? AppGradients.gold : null,
+                color: selected ? brand : null,
                 borderRadius: AppRadius.pillAll,
-                boxShadow: selected ? const [AppShadows.goldGlowSm] : null,
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: brand.withValues(alpha: 0.35),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : null,
               ),
               child: Stack(
                 clipBehavior: Clip.none,
@@ -176,8 +195,8 @@ class _ShellNavItem extends StatelessWidget {
                     icon,
                     size: 21,
                     color: selected
-                        ? const Color(0xFF1A1400)
-                        : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
+                        ? scheme.onPrimary
+                        : scheme.onSurfaceVariant.withValues(alpha: 0.72),
                   ),
                   if (badge != null)
                     PositionedDirectional(
@@ -185,22 +204,21 @@ class _ShellNavItem extends StatelessWidget {
                       end: -10,
                       child: Container(
                         constraints: const BoxConstraints(minWidth: 16),
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 1),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF9A1B1B),
+                          color: scheme.error,
                           borderRadius: AppRadius.pillAll,
                           border: Border.all(
-                            color: isDark
-                                ? const Color(0xFF141210)
-                                : const Color(0xFFFFFDF8),
+                            color: scheme.surface,
                             width: 1.5,
                           ),
                         ),
                         child: Text(
                           badge! > 99 ? '99+' : '$badge',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          style: TextStyle(
+                            color: scheme.onError,
                             fontSize: 8,
                             fontWeight: FontWeight.bold,
                           ),
@@ -218,7 +236,7 @@ class _ShellNavItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-                color: selected ? gold : theme.colorScheme.onSurfaceVariant,
+                color: selected ? brand : scheme.onSurfaceVariant,
               ),
             ),
           ],

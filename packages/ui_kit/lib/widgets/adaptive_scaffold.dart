@@ -1,3 +1,4 @@
+import 'package:core/core.dart';
 import 'package:flutter/material.dart';
 import '../tokens/app_radius.dart';
 import '../tokens/app_shadows.dart';
@@ -33,8 +34,8 @@ class NavDestination {
 }
 
 /// Adaptive scaffold that switches between BottomNavigationBar (compact) and
-/// NavigationRail (medium/expanded/large) layouts. The rail receives a premium
-/// obsidian-with-gold-accents treatment in dark mode.
+/// NavigationRail (medium/expanded/large) layouts. The rail receives the active
+/// workspace brand treatment derived from the role theme.
 class AdaptiveScaffold extends StatelessWidget {
   final List<NavDestination> destinations;
   final int selectedIndex;
@@ -106,9 +107,11 @@ class _RailLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final railBg = scaffold.railBackgroundColor ??
-        (isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8));
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final brand = context.roleTheme.roleBrandColor;
+    final railBg = scaffold.railBackgroundColor ?? scheme.surfaceContainerLowest;
 
     return Scaffold(
       appBar: scaffold.appBar,
@@ -127,31 +130,20 @@ class _RailLayout extends StatelessWidget {
               isDark: isDark,
             ),
           if (scaffold.destinations.isNotEmpty)
-            // Gold hairline divider replacing default VerticalDivider
+            // Brand hairline divider
             Container(
               width: 1,
               decoration: BoxDecoration(
-                gradient: isDark
-                    ? const LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Color(0x00D4AF37),
-                          Color(0x40D4AF37),
-                          Color(0x20D4AF37),
-                          Color(0x00D4AF37),
-                        ],
-                      )
-                    : const LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Color(0x00C59B27),
-                          Color(0x28C59B27),
-                          Color(0x14C59B27),
-                          Color(0x00C59B27),
-                        ],
-                      ),
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    brand.withValues(alpha: 0.0),
+                    brand.withValues(alpha: 0.28),
+                    brand.withValues(alpha: 0.12),
+                    brand.withValues(alpha: 0.0),
+                  ],
+                ),
               ),
             ),
           Expanded(child: scaffold.body),
@@ -186,6 +178,9 @@ class _PremiumRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: backgroundColor,
@@ -220,39 +215,35 @@ class _PremiumRail extends StatelessWidget {
         indicatorShape: const RoundedRectangleBorder(
           borderRadius: AppRadius.lgAll,
         ),
-        indicatorColor: isDark
-            ? const Color(0xFFD4AF37).withValues(alpha: 0.18)
-            : const Color(0xFFC59B27).withValues(alpha: 0.14),
+        indicatorColor: brand.withValues(alpha: isDark ? 0.20 : 0.14),
         selectedIconTheme: IconThemeData(
-          color: isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319),
+          color: scheme.primary,
           size: 22,
         ),
         unselectedIconTheme: IconThemeData(
-          color: isDark
-              ? const Color(0xFF8A7A52)
-              : const Color(0xFF9A8A60),
+          color: scheme.onSurfaceVariant,
           size: 22,
         ),
         selectedLabelTextStyle: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.bold,
-          color: isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319),
+          color: scheme.primary,
         ),
         unselectedLabelTextStyle: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w500,
-          color: isDark ? const Color(0xFF8A7A52) : const Color(0xFF9A8A60),
+          color: scheme.onSurfaceVariant,
         ),
         destinations: destinations
             .asMap()
             .entries
-            .map((e) => _buildDest(e.key, e.value))
+            .map((e) => _buildDest(e.key, e.value, brand))
             .toList(),
       ),
     );
   }
 
-  NavigationRailDestination _buildDest(int idx, NavDestination d) {
+  NavigationRailDestination _buildDest(int idx, NavDestination d, Color brand) {
     final isSelected = idx == selectedIndex;
     return NavigationRailDestination(
       padding: const EdgeInsetsDirectional.symmetric(
@@ -262,7 +253,7 @@ class _PremiumRail extends StatelessWidget {
         alignment: Alignment.center,
         children: [
           if (isSelected)
-            // Gold glow ring behind selected icon
+            // Brand glow ring behind the selected icon.
             Container(
               width: 36,
               height: 36,
@@ -270,8 +261,8 @@ class _PremiumRail extends StatelessWidget {
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
                   colors: [
-                    const Color(0xFFD4AF37).withValues(alpha: 0.20),
-                    const Color(0xFFD4AF37).withValues(alpha: 0.0),
+                    brand.withValues(alpha: 0.20),
+                    brand.withValues(alpha: 0.0),
                   ],
                 ),
               ),

@@ -13,24 +13,18 @@ import '../profile/profile_form_screen.dart';
 ///
 /// Works offline for established accounts: the order is queued locally and the
 /// sync coordinator replays it as soon as connectivity returns.
-class CartScreen extends ConsumerStatefulWidget {
+class CartScreen extends ConsumerWidget {
   const CartScreen({super.key});
 
-  @override
-  ConsumerState<CartScreen> createState() => _CartScreenState();
-}
-
-class _CartScreenState extends ConsumerState<CartScreen> {
-  bool _isSubmitting = false;
-
-  void _editProfile() => Navigator.of(context).push(
+  void _editProfile(BuildContext context) => Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const ProfileFormScreen()),
       );
 
-  Future<void> _submit() async {
+  Future<void> _submit(BuildContext context, WidgetRef ref) async {
+    if (ref.read(customerCheckoutInProgressProvider)) return;
     final profile = ref.read(customerProfileProvider);
     if (!profile.isComplete) {
-      _editProfile();
+      _editProfile(context);
       return;
     }
 
@@ -53,7 +47,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       return;
     }
 
-    setState(() => _isSubmitting = true);
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     final colors = context.appColors;
@@ -61,7 +54,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
 
     try {
       final outcome = await cart.checkout(profile: profile);
-      if (!mounted) return;
+      if (!context.mounted) return;
 
       final shortId = outcome.orderId.length > 8
           ? outcome.orderId.substring(0, 8)
@@ -97,7 +90,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
 
       if (navigator.canPop()) navigator.pop();
     } catch (e) {
-      if (!mounted) return;
+      if (!context.mounted) return;
       final msg = e.toString().replaceFirst('Exception: ', '');
       messenger.showSnackBar(
         SnackBar(
@@ -109,12 +102,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           ),
         ),
       );
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
-  Future<void> _confirmClear() async {
+  Future<void> _confirmClear(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -135,16 +126,17 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         ],
       ),
     );
-    if (confirmed == true && mounted) {
+    if (confirmed == true && context.mounted) {
       ref.read(customerCartProvider.notifier).clear();
     }
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.watch(customerCartProvider);
     final profile = ref.watch(customerProfileProvider);
     final online = ref.watch(customerIsOnlineProvider);
+    final isSubmitting = ref.watch(customerCheckoutInProgressProvider);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final colors = context.appColors;
@@ -185,7 +177,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             IconButton(
               tooltip: 'تفريغ السلة',
               icon: const Icon(Icons.delete_sweep_outlined),
-              onPressed: _confirmClear,
+              onPressed: () => _confirmClear(context, ref),
             ),
         ],
       ),
@@ -274,22 +266,22 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                     ],
                     const SizedBox(height: AppSpacing.sm),
                     GoldButton.icon(
-                      icon: _isSubmitting
+                      icon: isSubmitting
                           ? Icons.hourglass_top_rounded
                           : needsProfile
                               ? Icons.person_pin_circle_outlined
                               : online
                                   ? Icons.check_circle_rounded
                                   : Icons.cloud_upload_outlined,
-                      label: _isSubmitting
+                      label: isSubmitting
                           ? 'جاري الإرسال...'
                           : needsProfile
                               ? 'أكمل بيانات التوصيل'
                               : online
                                   ? 'تأكيد وإرسال الطلبية'
                                   : 'حفظ الطلبية وإرسالها لاحقاً',
-                      onPressed: _isSubmitting ? null : _submit,
-                      loading: _isSubmitting,
+                      onPressed: isSubmitting ? null : () => _submit(context, ref),
+                      loading: isSubmitting,
                       width: double.infinity,
                       height: 50,
                     ),
@@ -321,7 +313,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                       profile: profile,
                       needsProfile: needsProfile,
                       online: online,
-                      onEdit: _editProfile,
+                      onEdit: () => _editProfile(context),
                       isDark: isDark,
                       theme: theme,
                     ),

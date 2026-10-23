@@ -73,19 +73,17 @@ class _QuantityStepper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme  = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final size   = large ? 36.0 : 28.0;
+    final cs = Theme.of(context).colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
+    final size = large ? 36.0 : 28.0;
     final fontSize = large ? 14.0 : 12.0;
 
     return Container(
       height: size,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1A1814) : const Color(0xFFFAF7F0),
+        color: cs.surfaceContainerLow,
         borderRadius: AppRadius.mdAll,
-        border: Border.all(
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.35),
-        ),
+        border: Border.all(color: brand.withValues(alpha: 0.35)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -94,7 +92,6 @@ class _QuantityStepper extends StatelessWidget {
             icon: Icons.remove_rounded,
             size: size,
             onTap: () => onChange(qty - 1),
-            isDark: isDark,
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -103,14 +100,13 @@ class _QuantityStepper extends StatelessWidget {
               style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: fontSize,
-                  color: const Color(0xFFD4AF37)),
+                  color: brand),
             ),
           ),
           _StepBtn(
             icon: Icons.add_rounded,
             size: size,
             onTap: () => onChange(qty + 1),
-            isDark: isDark,
           ),
         ],
       ),
@@ -122,12 +118,12 @@ class _StepBtn extends StatelessWidget {
   final IconData icon;
   final double size;
   final VoidCallback onTap;
-  final bool isDark;
-  const _StepBtn(
-      {required this.icon,
-      required this.size,
-      required this.onTap,
-      required this.isDark});
+
+  const _StepBtn({
+    required this.icon,
+    required this.size,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) => InkWell(
@@ -136,8 +132,8 @@ class _StepBtn extends StatelessWidget {
         child: SizedBox(
           width: size,
           height: size,
-          child: Icon(icon, size: size * 0.45,
-              color: const Color(0xFFD4AF37)),
+          child: Icon(icon,
+              size: size * 0.45, color: context.roleTheme.roleBrandColor),
         ),
       );
 }
@@ -155,6 +151,9 @@ class _DiscountChip extends StatelessWidget {
         item.discountPercent > 0 || item.manualDiscountCentimes > 0;
     final h = large ? 36.0 : 28.0;
 
+    final cs = Theme.of(context).colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -162,13 +161,12 @@ class _DiscountChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
           color: hasDiscount
-              ? const Color(0xFFD4AF37).withValues(alpha: 0.15)
-              : Theme.of(context).colorScheme.surfaceContainerHighest,
+              ? brand.withValues(alpha: 0.15)
+              : cs.surfaceContainerHighest,
           borderRadius: AppRadius.mdAll,
           border: Border.all(
-            color: hasDiscount
-                ? const Color(0xFFD4AF37).withValues(alpha: 0.55)
-                : Theme.of(context).colorScheme.outlineVariant,
+            color:
+                hasDiscount ? brand.withValues(alpha: 0.55) : cs.outlineVariant,
           ),
         ),
         child: Row(
@@ -177,9 +175,7 @@ class _DiscountChip extends StatelessWidget {
             Icon(
               Icons.discount_rounded,
               size: large ? 14 : 12,
-              color: hasDiscount
-                  ? const Color(0xFFD4AF37)
-                  : Theme.of(context).colorScheme.onSurfaceVariant,
+              color: hasDiscount ? brand : cs.onSurfaceVariant,
             ),
             if (hasDiscount) ...[
               const SizedBox(width: 4),
@@ -187,10 +183,8 @@ class _DiscountChip extends StatelessWidget {
                 item.discountPercent > 0
                     ? '-${item.discountPercent.toStringAsFixed(0)}%'
                     : '-${DzdFormatter.formatCentimes(item.manualDiscountCentimes)}',
-                style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFFD4AF37)),
+                style: TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.bold, color: brand),
               ),
             ],
           ],
@@ -209,29 +203,28 @@ class _UnitPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final cs = Theme.of(context).colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
     final h = large ? 36.0 : 28.0;
 
     return Container(
       height: h,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1A1814) : const Color(0xFFFAF7F0),
+        color: cs.surfaceContainerLow,
         borderRadius: AppRadius.mdAll,
-        border: Border.all(
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.25)),
+        border: Border.all(color: brand.withValues(alpha: 0.25)),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<PosItemUnit>(
           value: item.unit,
           isDense: true,
           icon: Icon(Icons.expand_more_rounded,
-              size: 14, color: const Color(0xFFD4AF37).withValues(alpha: 0.7)),
+              size: 14, color: brand.withValues(alpha: 0.7)),
           style: TextStyle(
               fontSize: large ? 12 : 11,
               fontWeight: FontWeight.bold,
-              color: theme.colorScheme.onSurface),
+              color: cs.onSurface),
           items: PosItemUnit.values
               .map((u) => DropdownMenuItem(value: u, child: Text(u.label)))
               .toList(),
@@ -253,7 +246,8 @@ class _TierPill extends StatelessWidget {
   final ValueChanged<PriceTier> onChanged;
   final bool large;
 
-  const _TierPill({required this.item, required this.onChanged, this.large = false});
+  const _TierPill(
+      {required this.item, required this.onChanged, this.large = false});
 
   static String _label(PriceTier t) {
     switch (t) {
@@ -273,8 +267,8 @@ class _TierPill extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final cs = Theme.of(context).colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
     final active = item.activeTier ?? PriceTier.wholesale;
     final h = large ? 36.0 : 28.0;
     final fontSize = large ? 11.0 : 10.0;
@@ -282,9 +276,9 @@ class _TierPill extends StatelessWidget {
     return Container(
       height: h,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1A1814) : const Color(0xFFFAF7F0),
+        color: cs.surfaceContainerLow,
         borderRadius: AppRadius.mdAll,
-        border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.25)),
+        border: Border.all(color: brand.withValues(alpha: 0.25)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -298,7 +292,7 @@ class _TierPill extends StatelessWidget {
               height: h,
               padding: EdgeInsets.symmetric(horizontal: large ? 10 : 7),
               decoration: BoxDecoration(
-                gradient: isActive ? AppGradients.gold : null,
+                color: isActive ? brand : null,
                 borderRadius: AppRadius.smAll,
               ),
               child: Center(
@@ -307,11 +301,7 @@ class _TierPill extends StatelessWidget {
                   style: TextStyle(
                     fontSize: fontSize,
                     fontWeight: FontWeight.bold,
-                    color: isActive
-                        ? const Color(0xFF1A1400)
-                        : (isDark
-                            ? const Color(0xFF9A8A60)
-                            : const Color(0xFF7A6A40)),
+                    color: isActive ? cs.onPrimary : cs.onSurfaceVariant,
                   ),
                 ),
               ),
@@ -344,17 +334,16 @@ class _PhoneTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme  = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
 
     return Container(
       margin: const EdgeInsetsDirectional.symmetric(vertical: AppSpacing.xs),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+        color: cs.surfaceContainerLow,
         borderRadius: AppRadius.lgAll,
-        border: Border.all(
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.25),
-        ),
+        border: Border.all(color: brand.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -366,13 +355,13 @@ class _PhoneTile extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Gold index circle
+                // Role index circle
                 Container(
                   width: 28,
                   height: 28,
                   margin: const EdgeInsetsDirectional.only(end: AppSpacing.sm),
-                  decoration: const BoxDecoration(
-                    gradient: AppGradients.gold,
+                  decoration: BoxDecoration(
+                    color: brand,
                     shape: BoxShape.circle,
                   ),
                   child: Center(
@@ -381,7 +370,7 @@ class _PhoneTile extends StatelessWidget {
                           ? Icons.edit_note_rounded
                           : Icons.shopping_cart_rounded,
                       size: 14,
-                      color: const Color(0xFF1A1400),
+                      color: cs.onPrimary,
                     ),
                   ),
                 ),
@@ -400,7 +389,7 @@ class _PhoneTile extends StatelessWidget {
                         '${DzdFormatter.formatCentimes(item.effectiveUnitPriceCentimes)} / ${item.unit.label}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           fontSize: 11,
-                          color: const Color(0xFFD4AF37).withValues(alpha: 0.8),
+                          color: brand.withValues(alpha: 0.8),
                         ),
                       ),
                     ],
@@ -435,8 +424,7 @@ class _PhoneTile extends StatelessWidget {
               children: [
                 _UnitPill(item: item, onChanged: onUnitChanged, large: false),
                 _TierPill(item: item, onChanged: onTierChanged, large: false),
-                _DiscountChip(
-                    item: item, onTap: onEditDiscount, large: false),
+                _DiscountChip(item: item, onTap: onEditDiscount, large: false),
               ],
             ),
           ),
@@ -448,7 +436,9 @@ class _PhoneTile extends StatelessWidget {
             child: Row(
               children: [
                 _QuantityStepper(
-                    qty: item.quantity, onChange: onQuantityChanged, large: false),
+                    qty: item.quantity,
+                    onChange: onQuantityChanged,
+                    large: false),
                 const Spacer(),
                 DzdPriceTag(
                   centimes: item.lineTotalCentimes,
@@ -491,29 +481,24 @@ class _DesktopTileState extends State<_DesktopTile> {
 
   @override
   Widget build(BuildContext context) {
-    final theme  = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final colors = context.appColors;
+    final brand = context.roleTheme.roleBrandColor;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         margin: const EdgeInsetsDirectional.symmetric(vertical: 2),
         padding: const EdgeInsetsDirectional.symmetric(
             horizontal: AppSpacing.md, vertical: AppSpacing.sm),
         decoration: BoxDecoration(
-          color: _hovered
-              ? (isDark
-                  ? const Color(0xFF221E14)
-                  : const Color(0xFFFFF8E8))
-              : (isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8)),
+          color: _hovered ? cs.surfaceContainerHigh : cs.surfaceContainerLow,
           borderRadius: AppRadius.mdAll,
           border: Border.all(
-            color: _hovered
-                ? const Color(0xFFD4AF37).withValues(alpha: 0.45)
-                : const Color(0xFFD4AF37).withValues(alpha: 0.18),
+            color: brand.withValues(alpha: _hovered ? 0.45 : 0.18),
           ),
         ),
         child: Row(
@@ -535,7 +520,7 @@ class _DesktopTileState extends State<_DesktopTile> {
                     '${DzdFormatter.formatCentimes(widget.item.effectiveUnitPriceCentimes)} / ${widget.item.unit.label}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       fontSize: 10,
-                      color: const Color(0xFFD4AF37).withValues(alpha: 0.75),
+                      color: brand.withValues(alpha: 0.75),
                     ),
                   ),
                 ],
@@ -553,8 +538,7 @@ class _DesktopTileState extends State<_DesktopTile> {
             const SizedBox(width: AppSpacing.sm),
             // Stepper
             _QuantityStepper(
-                qty: widget.item.quantity,
-                onChange: widget.onQuantityChanged),
+                qty: widget.item.quantity, onChange: widget.onQuantityChanged),
             const SizedBox(width: AppSpacing.sm),
             // Line total
             SizedBox(
@@ -562,8 +546,8 @@ class _DesktopTileState extends State<_DesktopTile> {
               child: DzdPriceTag(
                 centimes: widget.item.lineTotalCentimes,
                 gold: true,
-                style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 13),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
               ),
             ),
             // Remove
@@ -575,8 +559,8 @@ class _DesktopTileState extends State<_DesktopTile> {
                 child: Padding(
                   padding:
                       const EdgeInsetsDirectional.only(start: AppSpacing.sm),
-                  child: Icon(Icons.close_rounded,
-                      size: 16, color: colors.error),
+                  child:
+                      Icon(Icons.close_rounded, size: 16, color: colors.error),
                 ),
               ),
             ),

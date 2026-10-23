@@ -95,8 +95,6 @@ final suppliersProvider =
   return repo.getSuppliers();
 });
 
-
-
 final settlementRepositoryProvider = Provider<ISettlementRepository>((ref) {
   final client = ref.watch(supabaseClientProvider);
   final service = ref.watch(supabaseServiceProvider);
@@ -131,7 +129,8 @@ final appUpdateServiceProvider = Provider<AppUpdateService>((ref) {
   return AppUpdateService(repository: repo, appType: 'staff_app');
 });
 
-final appUpdateCheckProvider = FutureProvider<AppUpdateCheckResult>((ref) async {
+final appUpdateCheckProvider =
+    FutureProvider<AppUpdateCheckResult>((ref) async {
   final service = ref.watch(appUpdateServiceProvider);
   return service.checkForUpdate();
 });
@@ -141,7 +140,8 @@ final liveStaffUsersProvider = FutureProvider<List<UserEntity>>((ref) async {
   return repo.getStaffMembers();
 });
 
-final staffMembersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final staffMembersProvider =
+    FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final client = ref.watch(supabaseClientProvider);
   final rows = await client
       .from('users')
@@ -175,7 +175,8 @@ final posCategoryListProvider = FutureProvider<List<String>>((ref) async {
 });
 
 // Active Customer in Cart
-final posActiveCustomerProvider = StateProvider<CustomerProfileEntity?>((ref) => null);
+final posActiveCustomerProvider =
+    StateProvider<CustomerProfileEntity?>((ref) => null);
 
 // Held Tickets (Suspended Carts)
 final posHeldTicketsProvider = StateProvider<List<PosHeldTicket>>((ref) => []);
@@ -207,9 +208,12 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
           openingFloatCentimes: (m['openingFloatCentimes'] as num).toInt(),
           cashSalesCentimes: (m['cashSalesCentimes'] as num?)?.toInt() ?? 0,
           creditSalesCentimes: (m['creditSalesCentimes'] as num?)?.toInt() ?? 0,
-          collectedDebtCashCentimes: (m['collectedDebtCashCentimes'] as num?)?.toInt() ?? 0,
-          supplierPaymentsCashCentimes: (m['supplierPaymentsCashCentimes'] as num?)?.toInt() ?? 0,
-          driverSettlementCashCentimes: (m['driverSettlementCashCentimes'] as num?)?.toInt() ?? 0,
+          collectedDebtCashCentimes:
+              (m['collectedDebtCashCentimes'] as num?)?.toInt() ?? 0,
+          supplierPaymentsCashCentimes:
+              (m['supplierPaymentsCashCentimes'] as num?)?.toInt() ?? 0,
+          driverSettlementCashCentimes:
+              (m['driverSettlementCashCentimes'] as num?)?.toInt() ?? 0,
           returnsCentimes: (m['returnsCentimes'] as num?)?.toInt() ?? 0,
           openedAt: DateTime.parse(m['openedAt'] as String),
           isOpen: (m['isOpen'] as bool?) ?? true,
@@ -316,7 +320,8 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
   void registerDebtCashPayment({required int cashCentimes}) {
     if (state == null || cashCentimes <= 0) return;
     state = state!.copyWith(
-      collectedDebtCashCentimes: state!.collectedDebtCashCentimes + cashCentimes,
+      collectedDebtCashCentimes:
+          state!.collectedDebtCashCentimes + cashCentimes,
     );
     _persistCurrentState();
   }
@@ -324,7 +329,8 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
   void registerSupplierCashPayment({required int cashCentimes}) {
     if (state == null || cashCentimes <= 0) return;
     state = state!.copyWith(
-      supplierPaymentsCashCentimes: state!.supplierPaymentsCashCentimes + cashCentimes,
+      supplierPaymentsCashCentimes:
+          state!.supplierPaymentsCashCentimes + cashCentimes,
     );
     _persistCurrentState();
   }
@@ -332,7 +338,8 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
   void registerDriverSettlement({required int cashCentimes}) {
     if (state == null || cashCentimes <= 0) return;
     state = state!.copyWith(
-      driverSettlementCashCentimes: state!.driverSettlementCashCentimes + cashCentimes,
+      driverSettlementCashCentimes:
+          state!.driverSettlementCashCentimes + cashCentimes,
     );
     _persistCurrentState();
   }
@@ -357,7 +364,8 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
       collectedDebtCashCentimes: current.collectedDebtCashCentimes,
       supplierPaymentsCashCentimes: current.supplierPaymentsCashCentimes,
       driverSettlementCashCentimes: current.driverSettlementCashCentimes,
-      totalSalesCentimes: current.cashSalesCentimes + current.creditSalesCentimes,
+      totalSalesCentimes:
+          current.cashSalesCentimes + current.creditSalesCentimes,
       returnsCentimes: current.returnsCentimes,
       expectedCashCentimes: current.expectedCashInDrawerCentimes,
       countedCashCentimes: countedCashCentimes,
@@ -388,30 +396,33 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     };
 
     if (ConnectivityService.instance.isOnline && client != null) {
-      client!.rpc('rpc_close_pos_shift', params: {
-        'p_client_id': clientId,
-        'p_shift_id': current.id,
-        'p_cashier_id': current.cashierId,
-        'p_z_report_sequence': summary.zNumber,
-        'p_expected_cash': summary.expectedCashCentimes,
-        'p_actual_cash': summary.countedCashCentimes,
-        'p_variance': summary.varianceCentimes,
-        'p_cash_sales': summary.cashSalesCentimes,
-        'p_credit_sales': summary.creditSalesCentimes,
-        'p_debt_collected': summary.collectedDebtCashCentimes,
-        'p_supplier_payments': summary.supplierPaymentsCashCentimes,
-        'p_driver_settlements': summary.driverSettlementCashCentimes,
-        'p_returns_amount': summary.returnsCentimes,
-        'p_denominations': denominations,
-        'p_closed_at': closedAt.toIso8601String(),
-      }).then((_) {}).catchError((_) {
-        db.enqueuePendingOp(PendingOperationsCompanion.insert(
-          clientId: clientId,
-          operationType: 'pos_shift_close',
-          payloadJson: jsonEncode(payload),
-          createdAt: DateTime.now(),
-        ));
-      });
+      client!
+          .rpc('rpc_close_pos_shift', params: {
+            'p_client_id': clientId,
+            'p_shift_id': current.id,
+            'p_cashier_id': current.cashierId,
+            'p_z_report_sequence': summary.zNumber,
+            'p_expected_cash': summary.expectedCashCentimes,
+            'p_actual_cash': summary.countedCashCentimes,
+            'p_variance': summary.varianceCentimes,
+            'p_cash_sales': summary.cashSalesCentimes,
+            'p_credit_sales': summary.creditSalesCentimes,
+            'p_debt_collected': summary.collectedDebtCashCentimes,
+            'p_supplier_payments': summary.supplierPaymentsCashCentimes,
+            'p_driver_settlements': summary.driverSettlementCashCentimes,
+            'p_returns_amount': summary.returnsCentimes,
+            'p_denominations': denominations,
+            'p_closed_at': closedAt.toIso8601String(),
+          })
+          .then((_) {})
+          .catchError((_) {
+            db.enqueuePendingOp(PendingOperationsCompanion.insert(
+              clientId: clientId,
+              operationType: 'pos_shift_close',
+              payloadJson: jsonEncode(payload),
+              createdAt: DateTime.now(),
+            ));
+          });
     } else {
       db.enqueuePendingOp(PendingOperationsCompanion.insert(
         clientId: clientId,
@@ -425,24 +436,29 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
   }
 }
 
-final posActiveShiftProvider = StateNotifierProvider<PosShiftNotifier, PosShiftSession?>((ref) {
+final posActiveShiftProvider =
+    StateNotifierProvider<PosShiftNotifier, PosShiftSession?>((ref) {
   final localStore = ref.watch(staffLocalAuthStoreProvider);
   final db = ref.watch(appDatabaseProvider);
   final client = ref.watch(supabaseClientProvider);
   return PosShiftNotifier(localStore: localStore, db: db, client: client);
 });
 
-final pendingDriverSettlementsProvider = FutureProvider<List<DriverSettlementSummaryEntity>>((ref) async {
+final pendingDriverSettlementsProvider =
+    FutureProvider<List<DriverSettlementSummaryEntity>>((ref) async {
   final repo = ref.watch(settlementRepositoryProvider);
   return repo.getPendingDriverSettlements();
 });
 
-final driverUnsettledOrdersProvider = FutureProvider.family<List<OrderEntity>, String>((ref, driverId) async {
+final driverUnsettledOrdersProvider =
+    FutureProvider.family<List<OrderEntity>, String>((ref, driverId) async {
   final repo = ref.watch(settlementRepositoryProvider);
   return repo.getDriverUnsettledOrders(driverId);
 });
 
-final recentSettlementsProvider = FutureProvider.family<List<SettlementEntity>, String?>((ref, driverId) async {
+final recentSettlementsProvider =
+    FutureProvider.family<List<SettlementEntity>, String?>(
+        (ref, driverId) async {
   final repo = ref.watch(settlementRepositoryProvider);
   return repo.getRecentSettlements(driverId: driverId);
 });
@@ -477,7 +493,8 @@ final driverWalletBalanceProvider = FutureProvider<int>((ref) async {
   return repo.getDriverExpectedWallet(user.id);
 });
 
-final suppliersWithBalancesProvider = FutureProvider<List<SupplierProfileEntity>>((ref) async {
+final suppliersWithBalancesProvider =
+    FutureProvider<List<SupplierProfileEntity>>((ref) async {
   final repo = ref.watch(purchaseRepositoryProvider);
   return repo.getSuppliersWithBalances();
 });
@@ -804,16 +821,14 @@ final managerOnlineOrdersProvider =
         if (!isTracked && channelValue != 'online') return;
 
         final statusValue = record['status'] as String?;
-        final status = statusValue == null
-            ? null
-            : OrderStatus.fromString(statusValue);
+        final status =
+            statusValue == null ? null : OrderStatus.fromString(statusValue);
 
         // Terminal order: remove it from the live pipeline immediately and
         // let the date-filtered history provider refresh.
         if (status != null && !_isActiveOnlineStatus(status)) {
           if (isTracked) {
-            currentOrders =
-                currentOrders.where((o) => o.id != id).toList();
+            currentOrders = currentOrders.where((o) => o.id != id).toList();
             publish(currentOrders);
           }
           scheduleHistoryRevision();
@@ -861,12 +876,16 @@ final unverifiedOrdersCountProvider = Provider<int>((ref) {
 });
 
 // Customer Debt & Ledger Providers
-final customerLedgerProvider = FutureProvider.family<List<CustomerLedgerEntryEntity>, String>((ref, customerId) async {
+final customerLedgerProvider =
+    FutureProvider.family<List<CustomerLedgerEntryEntity>, String>(
+        (ref, customerId) async {
   final repo = ref.watch(customerRepositoryProvider);
   return repo.getCustomerLedger(customerId);
 });
 
-final customerUnpaidOrdersProvider = FutureProvider.family<List<CustomerUnpaidOrderEntity>, String>((ref, customerId) async {
+final customerUnpaidOrdersProvider =
+    FutureProvider.family<List<CustomerUnpaidOrderEntity>, String>(
+        (ref, customerId) async {
   final repo = ref.watch(customerRepositoryProvider);
   return repo.getCustomerUnpaidOrders(customerId);
 });
@@ -889,7 +908,7 @@ final customerUnpaidOrdersProvider = FutureProvider.family<List<CustomerUnpaidOr
 */
 final staffListProvider = FutureProvider<List<UserEntity>>((ref) async {
   final repo = ref.watch(authRepositoryProvider);
-  
+
   return repo.getStaffMembers();
 });
 
@@ -904,23 +923,28 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
   // 1. Add / Merge Product
   void addProduct(ProductEntity product, {int qty = 1, PriceTier? tier}) {
     final activeCustomer = ref.read(posActiveCustomerProvider);
-    final effectiveTier = tier ?? activeCustomer?.priceTier ?? PriceTier.wholesale;
+    final effectiveTier =
+        tier ?? activeCustomer?.priceTier ?? PriceTier.wholesale;
 
     final initialUnit = PosItemUnit.fromString(product.unit);
-    final idx = state.indexWhere((it) => it.productId == product.id && it.unit == initialUnit);
+    final idx = state.indexWhere(
+        (it) => it.productId == product.id && it.unit == initialUnit);
     if (idx != -1) {
       final existing = state[idx];
       final newQty = existing.quantity + qty;
       updateQuantity(existing.id, newQty);
     } else {
-      final newItem = PosCartItem.fromProduct(product, qty: qty, tier: effectiveTier);
+      final newItem =
+          PosCartItem.fromProduct(product, qty: qty, tier: effectiveTier);
       state = [...state, newItem];
     }
   }
 
   // 2. Add Custom / Unlisted Item
-  void addCustomItem(String name, int priceCentimes, {int qty = 1, PosItemUnit unit = PosItemUnit.piece}) {
-    final customItem = PosCartItem.custom(name: name, priceCentimes: priceCentimes, qty: qty, unit: unit);
+  void addCustomItem(String name, int priceCentimes,
+      {int qty = 1, PosItemUnit unit = PosItemUnit.piece}) {
+    final customItem = PosCartItem.custom(
+        name: name, priceCentimes: priceCentimes, qty: qty, unit: unit);
     state = [...state, customItem];
   }
 
@@ -932,7 +956,8 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
     }
 
     final item = state.firstWhere((it) => it.id == itemId);
-    if (!item.isCustomItem && (quantity * item.unitMultiplier) > item.availableStock) {
+    if (!item.isCustomItem &&
+        (quantity * item.unitMultiplier) > item.availableStock) {
       return FailureResult(InsufficientStockFailure(
         'الكمية المطلوبة ($quantity) تتجاوز المخزون المتاح (${item.availableStock})',
       ));
@@ -941,14 +966,17 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
     state = state.map((it) {
       if (it.id == itemId) {
         var updated = it.copyWith(quantity: quantity);
-        if (!it.isCustomItem && it.activeTier != null && it.availableTiers.isNotEmpty) {
+        if (!it.isCustomItem &&
+            it.activeTier != null &&
+            it.availableTiers.isNotEmpty) {
           final totalQty = updated.totalPieces;
           final matches = it.availableTiers
               .where((p) => p.tier == it.activeTier && totalQty >= p.minQty)
               .toList();
           if (matches.isNotEmpty) {
             matches.sort((a, b) => b.minQty.compareTo(a.minQty));
-            updated = updated.copyWith(baseUnitPriceCentimes: matches.first.priceCentimes);
+            updated = updated.copyWith(
+                baseUnitPriceCentimes: matches.first.priceCentimes);
           }
         }
         return updated;
@@ -981,7 +1009,8 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
         matches.sort((a, b) => b.minQty.compareTo(a.minQty));
         newPrice = matches.first.priceCentimes;
       } else {
-        final tierRows = it.availableTiers.where((p) => p.tier == tier).toList();
+        final tierRows =
+            it.availableTiers.where((p) => p.tier == tier).toList();
         if (tierRows.isNotEmpty) {
           tierRows.sort((a, b) => a.minQty.compareTo(b.minQty));
           newPrice = tierRows.first.priceCentimes;
@@ -1015,7 +1044,25 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
     ref.read(posActiveCustomerProvider.notifier).state = null;
   }
 
-  int get totalCentimes => state.fold(0, (sum, item) => sum + item.lineTotalCentimes);
+  int get totalCentimes =>
+      state.fold(0, (sum, item) => sum + item.lineTotalCentimes);
+
+  /// Ticket value before any line percentage or fixed discount is applied.
+  ///
+  /// Used by the cart summary to show how much the cashier's price tier and
+  /// manual discounts saved the customer.
+  int get subtotalCentimes => state.fold(
+        0,
+        (sum, item) =>
+            sum +
+            item.baseUnitPriceCentimes * item.unitMultiplier * item.quantity,
+      );
+
+  /// Total savings granted on the ticket (never negative).
+  int get discountCentimes {
+    final saved = subtotalCentimes - totalCentimes;
+    return saved > 0 ? saved : 0;
+  }
 
   // 6. Suspend Cart (Hold Ticket)
   String holdCurrentCart() {
@@ -1034,7 +1081,9 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
       heldAt: DateTime.now(),
     );
 
-    ref.read(posHeldTicketsProvider.notifier).update((list) => [...list, heldTicket]);
+    ref
+        .read(posHeldTicketsProvider.notifier)
+        .update((list) => [...list, heldTicket]);
     clear();
     return ticketId;
   }
@@ -1046,7 +1095,9 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
 
     state = target.items;
     ref.read(posActiveCustomerProvider.notifier).state = target.customer;
-    ref.read(posHeldTicketsProvider.notifier).update((list) => list.where((t) => t.id != ticketId).toList());
+    ref
+        .read(posHeldTicketsProvider.notifier)
+        .update((list) => list.where((t) => t.id != ticketId).toList());
   }
 
   // 8. Checkout Execution with Customer Debt Verification
@@ -1061,7 +1112,8 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
     // Debt Limit check
     if (onAccountCentimes > 0) {
       if (customer == null && customerId == null) {
-        return const FailureResult(CreditLimitExceededFailure('لا يمكن البيع بالدين بدون حساب زبون مسجل.'));
+        return const FailureResult(CreditLimitExceededFailure(
+            'لا يمكن البيع بالدين بدون حساب زبون مسجل.'));
       }
       if (customer != null && customer.isCreditExceeded(onAccountCentimes)) {
         return FailureResult(CreditLimitExceededFailure(
@@ -1076,7 +1128,8 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
         return {
           'product_id': it.productId,
           'quantity': it.totalPieces,
-          'unit_price': (it.effectiveUnitPriceCentimes / it.unitMultiplier).round(),
+          'unit_price':
+              (it.effectiveUnitPriceCentimes / it.unitMultiplier).round(),
           'unit_cost': it.unitCostCentimes,
         };
       }).toList();
@@ -1099,7 +1152,8 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
       ref.invalidate(liveProductsProvider);
       return Success(orderId);
     } catch (e) {
-      return FailureResult(ServerFailure('تعذر تسجيل عملية البيع: ${e.toString()}'));
+      return FailureResult(
+          ServerFailure('تعذر تسجيل عملية البيع: ${e.toString()}'));
     }
   }
 
@@ -1134,11 +1188,13 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
       ref.invalidate(liveProductsProvider);
       return const Success(null);
     } catch (e) {
-      return FailureResult(ServerFailure('تعذر إتمام عملية الإرجاع: ${e.toString()}'));
+      return FailureResult(
+          ServerFailure('تعذر إتمام عملية الإرجاع: ${e.toString()}'));
     }
   }
 }
 
-final posCartProvider = StateNotifierProvider<PosCartNotifier, List<PosCartItem>>((ref) {
+final posCartProvider =
+    StateNotifierProvider<PosCartNotifier, List<PosCartItem>>((ref) {
   return PosCartNotifier(ref);
 });

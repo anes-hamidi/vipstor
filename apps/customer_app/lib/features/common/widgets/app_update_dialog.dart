@@ -54,6 +54,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
   bool get _isMandatory => widget.release.isForceRequired(widget.currentBuild);
 
   Future<void> _startUpdate() async {
+    if (_isDownloading) return;
     setState(() {
       _isDownloading = true;
       _downloadProgress = 0.0;
@@ -71,6 +72,13 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
           }
         },
       );
+      if (!mounted) return;
+      // Some platforms return after handing the installer to the OS. Leave the
+      // dialog in a usable state instead of showing an endless progress bar.
+      setState(() {
+        _isDownloading = false;
+        _downloadProgress = 1.0;
+      });
     } catch (e) {
       if (mounted) {
         setState(() {

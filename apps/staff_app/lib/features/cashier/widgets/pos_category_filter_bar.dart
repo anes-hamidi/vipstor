@@ -23,7 +23,6 @@ class PosCategoryFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final isCompact = context.windowClass == WindowClass.compact;
     final h = isCompact ? 48.0 : 38.0;
 
@@ -34,7 +33,8 @@ class PosCategoryFilterBar extends StatelessWidget {
       height: h,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsetsDirectional.symmetric(horizontal: AppSpacing.sm),
+        padding:
+            const EdgeInsetsDirectional.symmetric(horizontal: AppSpacing.sm),
         itemCount: items.length,
         separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.xs),
         itemBuilder: (context, i) {
@@ -42,11 +42,10 @@ class PosCategoryFilterBar extends StatelessWidget {
           final label = cat.isEmpty ? 'الكل' : cat;
           final icon = _iconForCategory(cat);
           final sel = selectedCategory == cat;
-          return _GoldCategoryChip(
+          return _PosCategoryChip(
             label: label,
             icon: icon,
             selected: sel,
-            isDark: isDark,
             isCompact: isCompact,
             onTap: () => onCategorySelected(cat),
           );
@@ -60,31 +59,45 @@ class PosCategoryFilterBar extends StatelessWidget {
   static IconData _iconForCategory(String cat) {
     if (cat.isEmpty) return Icons.apps_rounded;
     final lower = cat.toLowerCase();
-    if (lower.contains('مشروب') || lower.contains('عصير') || lower.contains('ماء')) {
+    if (lower.contains('مشروب') ||
+        lower.contains('عصير') ||
+        lower.contains('ماء')) {
       return Icons.local_drink_rounded;
     }
-    if (lower.contains('غذائ') || lower.contains('معلب') || lower.contains('بقال')) {
+    if (lower.contains('غذائ') ||
+        lower.contains('معلب') ||
+        lower.contains('بقال')) {
       return Icons.kitchen_rounded;
     }
-    if (lower.contains('لبن') || lower.contains('ألبان') || lower.contains('بيض')) {
+    if (lower.contains('لبن') ||
+        lower.contains('ألبان') ||
+        lower.contains('بيض')) {
       return Icons.egg_alt_rounded;
     }
-    if (lower.contains('حلو') || lower.contains('بسكو') || lower.contains('شوكولا')) {
+    if (lower.contains('حلو') ||
+        lower.contains('بسكو') ||
+        lower.contains('شوكولا')) {
       return Icons.cookie_rounded;
     }
     if (lower.contains('منظف') || lower.contains('تنظيف')) {
       return Icons.cleaning_services_rounded;
     }
-    if (lower.contains('عناية') || lower.contains('صحي') || lower.contains('نظافة')) {
+    if (lower.contains('عناية') ||
+        lower.contains('صحي') ||
+        lower.contains('نظافة')) {
       return Icons.soap_rounded;
     }
     if (lower.contains('توابل') || lower.contains('بهار')) {
       return Icons.grain_rounded;
     }
-    if (lower.contains('خضر') || lower.contains('فاكه') || lower.contains('فواكه')) {
+    if (lower.contains('خضر') ||
+        lower.contains('فاكه') ||
+        lower.contains('فواكه')) {
       return Icons.eco_rounded;
     }
-    if (lower.contains('لحم') || lower.contains('دجاج') || lower.contains('سمك')) {
+    if (lower.contains('لحم') ||
+        lower.contains('دجاج') ||
+        lower.contains('سمك')) {
       return Icons.set_meal_rounded;
     }
     return Icons.category_rounded;
@@ -93,28 +106,26 @@ class PosCategoryFilterBar extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _GoldCategoryChip extends StatefulWidget {
+class _PosCategoryChip extends StatefulWidget {
   final String label;
   final IconData icon;
   final bool selected;
-  final bool isDark;
   final bool isCompact;
   final VoidCallback onTap;
 
-  const _GoldCategoryChip({
+  const _PosCategoryChip({
     required this.label,
     required this.icon,
     required this.selected,
-    required this.isDark,
     required this.isCompact,
     required this.onTap,
   });
 
   @override
-  State<_GoldCategoryChip> createState() => _GoldCategoryChipState();
+  State<_PosCategoryChip> createState() => _PosCategoryChipState();
 }
 
-class _GoldCategoryChipState extends State<_GoldCategoryChip>
+class _PosCategoryChipState extends State<_PosCategoryChip>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
   late final Animation<double> _scale;
@@ -137,7 +148,8 @@ class _GoldCategoryChipState extends State<_GoldCategoryChip>
   @override
   Widget build(BuildContext context) {
     final sel = widget.selected;
-    final isDark = widget.isDark;
+    final cs = Theme.of(context).colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
 
     return GestureDetector(
       onTapDown: (_) => _ctrl.forward(),
@@ -148,7 +160,8 @@ class _GoldCategoryChipState extends State<_GoldCategoryChip>
       onTapCancel: () => _ctrl.reverse(),
       child: AnimatedBuilder(
         animation: _scale,
-        builder: (_, child) => Transform.scale(scale: _scale.value, child: child),
+        builder: (_, child) =>
+            Transform.scale(scale: _scale.value, child: child),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           padding: EdgeInsetsDirectional.symmetric(
@@ -156,20 +169,32 @@ class _GoldCategoryChipState extends State<_GoldCategoryChip>
             vertical: 0,
           ),
           decoration: BoxDecoration(
-            gradient: sel ? AppGradients.gold : null,
-            color: sel
-                ? null
-                : (isDark
-                    ? const Color(0xFF1A1814)
-                    : const Color(0xFFFAF7F0)),
+            gradient: sel
+                ? LinearGradient(
+                    begin: AlignmentDirectional.topStart,
+                    end: AlignmentDirectional.bottomEnd,
+                    colors: [
+                      Color.lerp(brand, Colors.white, 0.30)!,
+                      brand,
+                      Color.lerp(brand, Colors.black, 0.16)!,
+                    ],
+                  )
+                : null,
+            color: sel ? null : cs.surfaceContainerLow,
             borderRadius: AppRadius.pillAll,
             border: Border.all(
-              color: sel
-                  ? const Color(0xFFD4AF37)
-                  : const Color(0xFFD4AF37).withValues(alpha: 0.22),
+              color: sel ? brand : brand.withValues(alpha: 0.22),
               width: sel ? 1.5 : 1.0,
             ),
-            boxShadow: sel ? [AppShadows.goldGlowSm] : null,
+            boxShadow: sel
+                ? [
+                    BoxShadow(
+                      color: brand.withValues(alpha: 0.28),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -177,9 +202,7 @@ class _GoldCategoryChipState extends State<_GoldCategoryChip>
               Icon(
                 widget.icon,
                 size: widget.isCompact ? 16 : 14,
-                color: sel
-                    ? const Color(0xFF1A1400)
-                    : const Color(0xFFD4AF37).withValues(alpha: 0.65),
+                color: sel ? cs.onPrimary : brand.withValues(alpha: 0.70),
               ),
               const SizedBox(width: 5),
               Text(
@@ -187,11 +210,7 @@ class _GoldCategoryChipState extends State<_GoldCategoryChip>
                 style: TextStyle(
                   fontSize: widget.isCompact ? 13 : 12,
                   fontWeight: sel ? FontWeight.bold : FontWeight.w500,
-                  color: sel
-                      ? const Color(0xFF1A1400)
-                      : (isDark
-                          ? const Color(0xFFE8DDB0)
-                          : const Color(0xFF5C4A1A)),
+                  color: sel ? cs.onPrimary : cs.onSurfaceVariant,
                 ),
               ),
             ],

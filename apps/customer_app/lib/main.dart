@@ -7,7 +7,6 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:l10n/l10n.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:ui_kit/ui_kit.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,18 +31,41 @@ Future<void> main() async {
   );
 }
 
-class CustomerApp extends StatelessWidget {
+class CustomerApp extends ConsumerStatefulWidget {
   final VoidCallback? onExit;
   const CustomerApp({super.key, this.onExit});
 
   @override
+  ConsumerState<CustomerApp> createState() => _CustomerAppState();
+}
+
+class _CustomerAppState extends ConsumerState<CustomerApp> {
+  @override
+  void initState() {
+    super.initState();
+    // The customer shell is always the storefront workspace. Force the role
+    // after the first frame so embedding it in the master portal cannot leak a
+    // staff palette from a previous session.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(appRoleProvider) != AppRole.customer) {
+        ref.read(appRoleProvider.notifier).state = AppRole.customer;
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final lightTheme = ref.watch(lightThemeProvider);
+    final darkTheme = ref.watch(darkThemeProvider);
+    final themeMode = ref.watch(themeModeProvider);
+
     return MaterialApp(
       title: 'متجر الجملة (Wholesale Store)',
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
-      home: CustomerShell(onExit: onExit),
+      theme: lightTheme,
+      darkTheme: darkTheme,
+      themeMode: themeMode,
+      home: CustomerShell(onExit: widget.onExit),
       debugShowCheckedModeBanner: false,
       locale: const Locale('ar'),
       supportedLocales: AppLocalizationHelper.supportedLocales,

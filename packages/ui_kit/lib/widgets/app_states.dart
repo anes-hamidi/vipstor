@@ -1,7 +1,6 @@
+import 'package:core/core.dart';
 import 'package:flutter/material.dart';
-import '../tokens/app_gradients.dart';
 import '../tokens/app_radius.dart';
-import '../tokens/app_shadows.dart';
 import '../tokens/app_spacing.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,7 +37,10 @@ class _AppLoadingViewState extends State<AppLoadingView>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
+    final isDark = theme.brightness == Brightness.dark;
 
     return Center(
       child: Column(
@@ -49,7 +51,7 @@ class _AppLoadingViewState extends State<AppLoadingView>
             builder: (_, __) => Stack(
               alignment: Alignment.center,
               children: [
-                // Sweeping gold ring
+                // Sweeping role-coloured ring
                 Container(
                   width: 68,
                   height: 68,
@@ -57,19 +59,18 @@ class _AppLoadingViewState extends State<AppLoadingView>
                     shape: BoxShape.circle,
                     gradient: SweepGradient(
                       transform: GradientRotation(_ctrl.value * 6.28318),
-                      colors: const [
-                        Color(0xFFD4AF37),
-                        Color(0xFFF3D278),
-                        Color(0xFFEDD066),
-                        Color(0xFFA67C1E),
-                        Color(0x00D4AF37),
+                      colors: [
+                        brand,
+                        Color.lerp(brand, Colors.white, 0.45)!,
+                        brand,
+                        Color.lerp(brand, Colors.black, 0.20)!,
+                        brand.withValues(alpha: 0.0),
                       ],
                       stops: const [0.0, 0.25, 0.50, 0.75, 1.0],
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFD4AF37)
-                            .withValues(alpha: isDark ? 0.40 : 0.28),
+                        color: brand.withValues(alpha: isDark ? 0.40 : 0.28),
                         blurRadius: 20,
                         spreadRadius: 2,
                       ),
@@ -82,14 +83,17 @@ class _AppLoadingViewState extends State<AppLoadingView>
                   height: 52,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: isDark
-                        ? const Color(0xFF1A1814)
-                        : const Color(0xFFFFFDF8),
-                    boxShadow: const [AppShadows.goldGlowSm],
+                    color: scheme.surfaceContainerLowest,
+                    boxShadow: [
+                      BoxShadow(
+                        color: brand.withValues(alpha: 0.18),
+                        blurRadius: 8,
+                      ),
+                    ],
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.diamond_outlined,
-                    color: Color(0xFFD4AF37),
+                    color: brand,
                     size: 22,
                   ),
                 ),
@@ -100,8 +104,8 @@ class _AppLoadingViewState extends State<AppLoadingView>
             const SizedBox(height: AppSpacing.lg),
             Text(
               widget.message!,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
                   ),
             ),
           ],
@@ -207,9 +211,11 @@ class AppEmptyView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
     final isDark = theme.brightness == Brightness.dark;
-    final iconBg = const Color(0xFFD4AF37).withValues(alpha: isDark ? 0.12 : 0.09);
-    final iconColor = isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27);
+    final iconBg = brand.withValues(alpha: isDark ? 0.16 : 0.10);
+    final iconColor = brand;
 
     return SingleChildScrollView(
       child: Center(
@@ -227,10 +233,15 @@ class AppEmptyView extends StatelessWidget {
                     color: iconBg,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: const Color(0xFFD4AF37).withValues(alpha: 0.30),
+                      color: brand.withValues(alpha: 0.30),
                       width: 1.5,
                     ),
-                    boxShadow: const [AppShadows.goldGlowSm],
+                    boxShadow: [
+                      BoxShadow(
+                        color: brand.withValues(alpha: 0.16),
+                        blurRadius: 12,
+                      ),
+                    ],
                   ),
                   child: Icon(icon, size: 38, color: iconColor),
                 ),
@@ -246,15 +257,21 @@ class AppEmptyView extends StatelessWidget {
                   description,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: scheme.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 Container(
                   height: 2.5,
                   width: 60,
-                  decoration: const BoxDecoration(
-                    gradient: AppGradients.goldBorder,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        brand.withValues(alpha: 0.0),
+                        brand,
+                        brand.withValues(alpha: 0.0),
+                      ],
+                    ),
                     borderRadius: AppRadius.fullAll,
                   ),
                 ),
@@ -362,7 +379,8 @@ class AppOfflineView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final scheme = theme.colorScheme;
+    final brand = context.roleTheme.roleBrandColor;
 
     return Center(
       child: Padding(
@@ -376,22 +394,17 @@ class AppOfflineView extends StatelessWidget {
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: (isDark
-                          ? const Color(0xFF2A2518)
-                          : const Color(0xFFF0E8D0))
-                      .withValues(alpha: 0.80),
+                  color: scheme.primaryContainer.withValues(alpha: 0.80),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: const Color(0xFFD4AF37).withValues(alpha: 0.25),
+                    color: brand.withValues(alpha: 0.25),
                     width: 1.5,
                   ),
                 ),
                 child: Icon(
                   Icons.wifi_off_rounded,
                   size: 38,
-                  color: isDark
-                      ? const Color(0xFFF3D278)
-                      : const Color(0xFFB8962E),
+                  color: brand,
                 ),
               ),
               const SizedBox(height: AppSpacing.xl),

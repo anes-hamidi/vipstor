@@ -3,10 +3,11 @@ import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
 import 'package:data/data.dart';
 import '../models/pos_models.dart';
+import 'pos_theme.dart';
 
 /// Premium POS header with:
-/// - Dark obsidian AppBar with gold VIP logo accent
-/// - Gold gradient shift-open badge with glow
+/// - Role-tinted chrome bar with brand logo accent
+/// - Brand shift badge with glow
 /// - Customer sub-bar with debt indicators
 /// - Keyboard shortcut pills
 class PosHeaderStatusBar extends StatelessWidget
@@ -71,9 +72,6 @@ class PosHeaderStatusBar extends StatelessWidget
     // Keyboard hints only make sense with a physical keyboard (desktop sizes).
     final showShortcuts = wc != WindowClass.compact && wc != WindowClass.medium;
 
-    // AppBar background — obsidian in dark, cream-card in light
-    final barBg = isDark ? const Color(0xFF141210) : const Color(0xFFFFFDF8);
-
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -81,13 +79,17 @@ class PosHeaderStatusBar extends StatelessWidget
         Container(
           height: kToolbarHeight,
           decoration: BoxDecoration(
-            color: barBg,
-            boxShadow: isDark ? AppShadows.navDark : AppShadows.navLight,
-            border: Border(
-              bottom: BorderSide(
-                color: const Color(0xFFD4AF37).withValues(alpha: isDark ? 0.22 : 0.16),
-                width: 1,
+            color: context.posChrome,
+            boxShadow: [
+              BoxShadow(
+                color: theme.colorScheme.shadow
+                    .withValues(alpha: isDark ? 0.38 : 0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
               ),
+            ],
+            border: Border(
+              bottom: BorderSide(color: context.posHairline, width: 1),
             ),
           ),
           child: Padding(
@@ -96,21 +98,19 @@ class PosHeaderStatusBar extends StatelessWidget
             child: Row(
               children: [
                 // Logo + title
-                _VipPosLogo(isDark: isDark),
+                const _VipPosLogo(),
                 const SizedBox(width: AppSpacing.sm),
-                // Gold avatar chip — taps to edit profile
+                // Role avatar chip — taps to edit profile
                 GestureDetector(
                   onTap: onEditProfile,
                   child: Container(
                     padding: const EdgeInsetsDirectional.symmetric(
                         horizontal: AppSpacing.sm, vertical: 4),
                     decoration: BoxDecoration(
-                      color: isDark
-                          ? const Color(0xFF2A2010)
-                          : const Color(0xFFF3E8C8),
+                      color: context.roleTheme.badgeBackground,
                       borderRadius: AppRadius.pillAll,
                       border: Border.all(
-                        color: const Color(0xFFD4AF37).withValues(alpha: 0.45),
+                        color: context.posBrand.withValues(alpha: 0.45),
                       ),
                     ),
                     child: Row(
@@ -119,51 +119,56 @@ class PosHeaderStatusBar extends StatelessWidget
                         Container(
                           width: 26,
                           height: 26,
-                          decoration: const BoxDecoration(
-                            gradient: AppGradients.gold,
+                          decoration: BoxDecoration(
+                            color: context.posBrand,
                             shape: BoxShape.circle,
                           ),
                           child: Center(
                             child: Text(
-                              ((cashierUser?.name ?? '?').isEmpty ? '?' : (cashierUser?.name ?? '?')[0]).toUpperCase(),
-                              style: const TextStyle(
+                              ((cashierUser?.name ?? '?').isEmpty
+                                      ? '?'
+                                      : (cashierUser?.name ?? '?')[0])
+                                  .toUpperCase(),
+                              style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1A1400)),
+                                  color: context.posOnBrand),
                             ),
                           ),
                         ),
                         if (!isPhone) const SizedBox(width: 6),
                         if (!isPhone)
-                        ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 100),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                cashierUser?.name ?? 'أمين الصندوق',
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 0.1),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              Text(
-                                'أمين صندوق',
-                                style: TextStyle(
-                                    fontSize: 9,
-                                    color: const Color(0xFFD4AF37).withValues(alpha: 0.8)),
-                              ),
-                            ],
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 100),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  cashierUser?.name ?? 'أمين الصندوق',
+                                  style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.1),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  'أمين صندوق',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      color: context.roleTheme.badgeText
+                                          .withValues(alpha: 0.8)),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
                         if (onEditProfile != null && !isPhone) ...[
                           const SizedBox(width: 4),
                           Icon(Icons.edit_rounded,
                               size: 11,
-                              color: const Color(0xFFD4AF37).withValues(alpha: 0.7)),
+                              color: context.roleTheme.badgeText
+                                  .withValues(alpha: 0.7)),
                         ],
                       ],
                     ),
@@ -176,7 +181,6 @@ class PosHeaderStatusBar extends StatelessWidget
                   activeShift: activeShift,
                   onOpenShift: onOpenShift,
                   onOpenShiftAudit: onOpenShiftAudit,
-                  isDark: isDark,
                 ),
 
                 const Spacer(),
@@ -194,7 +198,8 @@ class PosHeaderStatusBar extends StatelessWidget
                   ),
 
                 // Action icons
-                _HeaderIcon(icon: Icons.person_pin_circle_outlined,
+                _HeaderIcon(
+                    icon: Icons.person_pin_circle_outlined,
                     tooltip: 'الزبون [F2]',
                     onTap: onOpenCustomerSearch,
                     active: activeCustomer != null,
@@ -207,18 +212,26 @@ class PosHeaderStatusBar extends StatelessWidget
                     onSelected: (cb) => cb(),
                     itemBuilder: (_) => [
                       if (onPaySupplier != null)
-                        _menuItem(Icons.payments_outlined, 'سداد مستحقات المورد', onPaySupplier!),
+                        _menuItem(Icons.payments_outlined,
+                            'سداد مستحقات المورد', onPaySupplier!),
                       if (onSettleDriver != null)
-                        _menuItem(Icons.local_shipping_outlined, 'تسوية عهدة سائق توصيل', onSettleDriver!),
-                      _menuItem(Icons.print_outlined, 'الطابعة', onOpenPrinterSettings),
-                      _menuItem(Icons.history_edu_outlined, 'سجل المبيعات', onOpenSalesHistory),
-                      _menuItem(Icons.assignment_return_outlined, 'الإرجاع', onOpenReturns),
-                      _menuItem(Icons.receipt_long_outlined, 'تقرير Z', onOpenShiftAudit),
+                        _menuItem(Icons.local_shipping_outlined,
+                            'تسوية عهدة سائق توصيل', onSettleDriver!),
+                      _menuItem(Icons.print_outlined, 'الطابعة',
+                          onOpenPrinterSettings),
+                      _menuItem(Icons.history_edu_outlined, 'سجل المبيعات',
+                          onOpenSalesHistory),
+                      _menuItem(Icons.assignment_return_outlined, 'الإرجاع',
+                          onOpenReturns),
+                      _menuItem(Icons.receipt_long_outlined, 'تقرير Z',
+                          onOpenShiftAudit),
                       _menuItem(Icons.lock_outline, 'قفل', onLockScreen),
-                      _menuItem(Icons.swap_horiz_rounded, 'تبديل الكاشير', onFastSwitchCashier),
+                      _menuItem(Icons.swap_horiz_rounded, 'تبديل الكاشير',
+                          onFastSwitchCashier),
                       _menuItem(Icons.refresh, 'تحديث المخزون', onRefreshStock),
                       if (onCheckUpdates != null)
-                        _menuItem(Icons.system_update_rounded, 'التحقق من التحديثات', onCheckUpdates!),
+                        _menuItem(Icons.system_update_rounded,
+                            'التحقق من التحديثات', onCheckUpdates!),
                       _menuItem(Icons.logout, 'خروج', onLogout),
                     ],
                   )
@@ -237,40 +250,49 @@ class PosHeaderStatusBar extends StatelessWidget
                       onTap: onSettleDriver!,
                       colors: colors,
                     ),
-                  _HeaderIcon(icon: Icons.print_outlined,
+                  _HeaderIcon(
+                      icon: Icons.print_outlined,
                       tooltip: 'الطابعة [F6]',
                       onTap: onOpenPrinterSettings,
                       colors: colors),
-                  _HeaderIcon(icon: Icons.history_edu_outlined,
+                  _HeaderIcon(
+                      icon: Icons.history_edu_outlined,
                       tooltip: 'سجل المبيعات [F8]',
                       onTap: onOpenSalesHistory,
                       colors: colors),
-                  _HeaderIcon(icon: Icons.assignment_return_outlined,
+                  _HeaderIcon(
+                      icon: Icons.assignment_return_outlined,
                       tooltip: 'الإرجاع [F9]',
                       onTap: onOpenReturns,
                       colors: colors),
-                  _HeaderIcon(icon: Icons.receipt_long_outlined,
+                  _HeaderIcon(
+                      icon: Icons.receipt_long_outlined,
                       tooltip: 'تقرير Z [F10]',
                       onTap: onOpenShiftAudit,
                       colors: colors),
-                  _HeaderIcon(icon: Icons.lock_outline,
+                  _HeaderIcon(
+                      icon: Icons.lock_outline,
                       tooltip: 'قفل [F11]',
                       onTap: onLockScreen,
                       colors: colors),
-                  _HeaderIcon(icon: Icons.swap_horiz_rounded,
+                  _HeaderIcon(
+                      icon: Icons.swap_horiz_rounded,
                       tooltip: 'تبديل الكاشير',
                       onTap: onFastSwitchCashier,
                       colors: colors),
-                  _HeaderIcon(icon: Icons.refresh,
+                  _HeaderIcon(
+                      icon: Icons.refresh,
                       tooltip: 'تحديث المخزون',
                       onTap: onRefreshStock,
                       colors: colors),
                   if (onCheckUpdates != null)
-                    _HeaderIcon(icon: Icons.system_update_rounded,
+                    _HeaderIcon(
+                        icon: Icons.system_update_rounded,
                         tooltip: 'التحقق من التحديثات',
                         onTap: onCheckUpdates!,
                         colors: colors),
-                  _HeaderIcon(icon: Icons.logout,
+                  _HeaderIcon(
+                      icon: Icons.logout,
                       tooltip: 'خروج',
                       onTap: onLogout,
                       colors: colors),
@@ -286,13 +308,11 @@ class PosHeaderStatusBar extends StatelessWidget
             customer: activeCustomer!,
             onCollectDebt: onCollectDebt,
             onClearCustomer: onClearCustomer,
-            isDark: isDark,
             colors: colors,
           )
         else
           _NoCustomerBar(
             onOpenCustomerSearch: onOpenCustomerSearch,
-            isDark: isDark,
             showShortcuts: showShortcuts,
           ),
       ],
@@ -318,21 +338,35 @@ PopupMenuItem<VoidCallback> _menuItem(
 // ── Logo ────────────────────────────────────────────────────────────────────
 
 class _VipPosLogo extends StatelessWidget {
-  final bool isDark;
-  const _VipPosLogo({required this.isDark});
+  const _VipPosLogo();
 
   @override
   Widget build(BuildContext context) {
-    return const DecoratedBox(
+    final brand = context.posBrand;
+    return DecoratedBox(
       decoration: BoxDecoration(
-        gradient: AppGradients.gold,
+        gradient: LinearGradient(
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+          colors: [
+            Color.lerp(brand, Colors.white, 0.30)!,
+            brand,
+            Color.lerp(brand, Colors.black, 0.16)!,
+          ],
+        ),
         borderRadius: AppRadius.smAll,
-        boxShadow: [AppShadows.goldGlowSm],
+        boxShadow: [
+          BoxShadow(
+            color: brand.withValues(alpha: 0.32),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Padding(
-        padding: EdgeInsets.all(6),
+        padding: const EdgeInsets.all(6),
         child: Icon(Icons.point_of_sale_rounded,
-            color: Color(0xFF1A1400), size: 18),
+            color: context.posOnBrand, size: 18),
       ),
     );
   }
@@ -344,13 +378,11 @@ class _ShiftBadge extends StatelessWidget {
   final PosShiftSession? activeShift;
   final VoidCallback onOpenShift;
   final VoidCallback onOpenShiftAudit;
-  final bool isDark;
 
   const _ShiftBadge({
     required this.activeShift,
     required this.onOpenShift,
     required this.onOpenShiftAudit,
-    required this.isDark,
   });
 
   @override
@@ -410,7 +442,7 @@ class _HeldChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final role = context.roleTheme;
     return InkWell(
       onTap: onTap,
       borderRadius: AppRadius.pillAll,
@@ -418,25 +450,24 @@ class _HeldChip extends StatelessWidget {
         padding: const EdgeInsetsDirectional.symmetric(
             horizontal: AppSpacing.md, vertical: 4),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2A2518) : const Color(0xFFFBF4DC),
+          color: role.badgeBackground,
           borderRadius: AppRadius.pillAll,
           border: Border.all(
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.40),
+            color: context.posBrand.withValues(alpha: 0.40),
             width: 1,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.pause_circle_outline,
-                size: 13, color: Color(0xFFD4AF37)),
+            Icon(Icons.pause_circle_outline, size: 13, color: role.badgeText),
             const SizedBox(width: 4),
             Text(
               '$count معلقة [F5]',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFFD4AF37),
+                color: role.badgeText,
               ),
             ),
           ],
@@ -465,14 +496,11 @@ class _HeaderIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     return IconButton(
       icon: Icon(
         icon,
         size: 20,
-        color: active
-            ? (isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27))
-            : null,
+        color: active ? context.posBrand : null,
       ),
       tooltip: tooltip,
       onPressed: onTap,
@@ -487,14 +515,12 @@ class _CustomerSubBar extends StatelessWidget {
   final CustomerProfileEntity customer;
   final VoidCallback onCollectDebt;
   final VoidCallback onClearCustomer;
-  final bool isDark;
   final AppColors colors;
 
   const _CustomerSubBar({
     required this.customer,
     required this.onCollectDebt,
     required this.onClearCustomer,
-    required this.isDark,
     required this.colors,
   });
 
@@ -503,9 +529,7 @@ class _CustomerSubBar extends StatelessWidget {
     final isOverLimit = customer.isCreditExceeded(0);
     final cs = Theme.of(context).colorScheme;
 
-    final bg = isOverLimit
-        ? (isDark ? const Color(0xFF2A1010) : cs.errorContainer)
-        : (isDark ? const Color(0xFF1A2210) : colors.successContainer);
+    final bg = isOverLimit ? cs.errorContainer : colors.successContainer;
     final fg = isOverLimit ? cs.onErrorContainer : colors.onSuccessContainer;
 
     return Container(
@@ -520,8 +544,7 @@ class _CustomerSubBar extends StatelessWidget {
           ),
         ),
       ),
-      padding: const EdgeInsetsDirectional.symmetric(
-          horizontal: AppSpacing.lg),
+      padding: const EdgeInsetsDirectional.symmetric(horizontal: AppSpacing.lg),
       child: Row(
         children: [
           Icon(
@@ -532,12 +555,13 @@ class _CustomerSubBar extends StatelessWidget {
           const SizedBox(width: AppSpacing.sm),
           Text(
             '${customer.name}  •  ${customer.phone}',
-            style: TextStyle(
-                fontSize: 12, fontWeight: FontWeight.bold, color: fg),
+            style:
+                TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: fg),
           ),
           const Spacer(),
           Text('الدين: ',
-              style: TextStyle(fontSize: 11, color: fg.withValues(alpha: 0.80))),
+              style:
+                  TextStyle(fontSize: 11, color: fg.withValues(alpha: 0.80))),
           DzdPriceTag(
             centimes: customer.currentDebtCentimes,
             color: fg,
@@ -545,7 +569,8 @@ class _CustomerSubBar extends StatelessWidget {
           ),
           const SizedBox(width: AppSpacing.lg),
           Text('الحد: ',
-              style: TextStyle(fontSize: 11, color: fg.withValues(alpha: 0.80))),
+              style:
+                  TextStyle(fontSize: 11, color: fg.withValues(alpha: 0.80))),
           DzdPriceTag(
             centimes: customer.creditLimitCentimes,
             color: fg,
@@ -577,12 +602,10 @@ class _CustomerSubBar extends StatelessWidget {
 
 class _NoCustomerBar extends StatelessWidget {
   final VoidCallback onOpenCustomerSearch;
-  final bool isDark;
   final bool showShortcuts;
 
   const _NoCustomerBar({
     required this.onOpenCustomerSearch,
-    required this.isDark,
     required this.showShortcuts,
   });
 
@@ -592,9 +615,8 @@ class _NoCustomerBar extends StatelessWidget {
 
     return Container(
       height: 42,
-      color: isDark ? const Color(0xFF161411) : cs.surfaceContainerLow,
-      padding: const EdgeInsetsDirectional.symmetric(
-          horizontal: AppSpacing.lg),
+      color: cs.surfaceContainerLow,
+      padding: const EdgeInsetsDirectional.symmetric(horizontal: AppSpacing.lg),
       child: Row(
         children: [
           Icon(Icons.person_outline, size: 15, color: cs.onSurfaceVariant),
@@ -614,9 +636,7 @@ class _NoCustomerBar extends StatelessWidget {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: isDark
-                    ? const Color(0xFFF3D278)
-                    : const Color(0xFFC59B27),
+                color: context.posBrand,
               ),
             ),
           ),
@@ -629,7 +649,7 @@ class _NoCustomerBar extends StatelessWidget {
               ('F4', 'تعليق'),
               ('F12', 'دفع'),
               ('Esc', 'تفريغ'),
-            ].map((e) => _ShortcutPill(keyLabel: e.$1, action: e.$2, isDark: isDark)),
+            ].map((e) => _ShortcutPill(keyLabel: e.$1, action: e.$2)),
           ],
         ],
       ),
@@ -640,25 +660,23 @@ class _NoCustomerBar extends StatelessWidget {
 class _ShortcutPill extends StatelessWidget {
   final String keyLabel;
   final String action;
-  final bool isDark;
 
-  const _ShortcutPill(
-      {required this.keyLabel, required this.action, required this.isDark});
+  const _ShortcutPill({required this.keyLabel, required this.action});
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsetsDirectional.only(start: 6),
       child: Container(
-        padding: const EdgeInsetsDirectional.symmetric(
-            horizontal: 6, vertical: 2),
+        padding:
+            const EdgeInsetsDirectional.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: isDark
-              ? const Color(0xFF2A2518)
-              : const Color(0x12D4AF37),
+          color: scheme.surfaceContainerHigh,
           borderRadius: AppRadius.xsAll,
           border: Border.all(
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.20),
+            color: context.posBrand.withValues(alpha: 0.20),
             width: 1,
           ),
         ),
@@ -667,9 +685,7 @@ class _ShortcutPill extends StatelessWidget {
           style: TextStyle(
             fontSize: 9.5,
             fontWeight: FontWeight.w600,
-            color: isDark
-                ? const Color(0xFFB8A882)
-                : const Color(0xFF9A7319),
+            color: scheme.onSurfaceVariant,
           ),
         ),
       ),
@@ -716,6 +732,8 @@ class _OfflineBadgeState extends State<_OfflineBadge>
   Widget build(BuildContext context) {
     if (_online) return const SizedBox.shrink();
 
+    final colors = context.appColors;
+
     return Padding(
       padding: const EdgeInsetsDirectional.only(end: AppSpacing.sm),
       child: FadeTransition(
@@ -724,21 +742,23 @@ class _OfflineBadgeState extends State<_OfflineBadge>
           padding: const EdgeInsetsDirectional.symmetric(
               horizontal: AppSpacing.sm, vertical: 3),
           decoration: BoxDecoration(
-            color: const Color(0xFF7A3A00),
+            color: colors.warningContainer,
             borderRadius: AppRadius.pillAll,
-            border:
-                Border.all(color: const Color(0xFFFFB84D).withValues(alpha: 0.6)),
+            border: Border.all(
+              color: colors.warning.withValues(alpha: 0.6),
+            ),
           ),
-          child: const Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.wifi_off_rounded, size: 12, color: Color(0xFFFFB84D)),
-              SizedBox(width: 4),
+              Icon(Icons.wifi_off_rounded,
+                  size: 12, color: colors.onWarningContainer),
+              const SizedBox(width: 4),
               Text(
                 'غير متصل',
                 style: TextStyle(
                   fontSize: 11,
-                  color: Color(0xFFFFD980),
+                  color: colors.onWarningContainer,
                   fontWeight: FontWeight.w600,
                 ),
               ),

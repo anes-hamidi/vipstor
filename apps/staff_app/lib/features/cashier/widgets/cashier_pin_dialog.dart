@@ -34,8 +34,6 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
   String? _errorMessage;
   bool _isVerifying = false;
 
-  
-
   List<UserEntity> get _availableStaff {
     final currentAuth = ref.read(authStateProvider);
     final list = <UserEntity>[];
@@ -127,7 +125,10 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
       if (!mounted) return;
       setState(() {
         _isVerifying = false;
-        _errorMessage = e.toString().replaceFirst('AuthException: ', '').replaceFirst('Exception: ', '');
+        _errorMessage = e
+            .toString()
+            .replaceFirst('AuthException: ', '')
+            .replaceFirst('Exception: ', '');
         _pinController.clear();
       });
       _focusNode.requestFocus();
@@ -140,7 +141,7 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
     final colorScheme = theme.colorScheme;
     final isLockMode = widget.mode == CashierPinMode.unlockTerminal;
     final colors = context.appColors;
-       final defaultPinTheme = PinTheme(
+    final defaultPinTheme = PinTheme(
       width: 60,
       height: 64,
       textStyle: theme.textTheme.headlineMedium?.copyWith(
@@ -159,7 +160,12 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
       decoration: defaultPinTheme.decoration!.copyWith(
         border: Border.all(color: colors.gold, width: 2.5),
         color: colors.gold.withValues(alpha: 0.12),
-        boxShadow: [AppShadows.goldRim],
+        boxShadow: [
+          BoxShadow(
+            color: colors.gold.withValues(alpha: 0.35),
+            blurRadius: 12,
+          ),
+        ],
       ),
     );
 
@@ -181,23 +187,36 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Header Icon — gold gradient circle
+              // Header icon — error gradient while locked, role brand otherwise
               Container(
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
                   gradient: isLockMode
-                      ? LinearGradient(colors: [colorScheme.error, colorScheme.errorContainer])
-                      : AppGradients.goldFoil,
+                      ? LinearGradient(
+                          colors: [
+                            colorScheme.error,
+                            colorScheme.errorContainer,
+                          ],
+                        )
+                      : null,
+                  color: isLockMode ? null : colors.gold,
                   shape: BoxShape.circle,
-                  boxShadow: const [AppShadows.goldRim],
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isLockMode ? colorScheme.error : colors.gold)
+                          .withValues(alpha: 0.35),
+                      blurRadius: 14,
+                    ),
+                  ],
                 ),
                 child: Icon(
                   isLockMode
                       ? Icons.lock_outline_rounded
                       : Icons.lock_person_outlined,
                   size: 34,
-                  color: isLockMode ? Colors.white : colors.obsidian,
+                  color:
+                      isLockMode ? colorScheme.onError : colorScheme.onPrimary,
                 ),
               ),
               AppSpacing.gapMd,
@@ -238,7 +257,8 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
                   decoration: BoxDecoration(
                     color: colors.obsidianSurface,
                     borderRadius: AppRadius.mdAll,
-                    border: Border.all(color: colors.gold.withValues(alpha: 0.3)),
+                    border:
+                        Border.all(color: colors.gold.withValues(alpha: 0.3)),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(

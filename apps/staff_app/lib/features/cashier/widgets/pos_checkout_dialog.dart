@@ -61,11 +61,6 @@ class _PosCheckoutDialogState extends ConsumerState<PosCheckoutDialog> {
     });
   }
 
-  void _addCashAmount(double dzd) {
-    final currentDzd = (_paidCentimes / 100.0);
-    _setCashAmount(currentDzd + dzd);
-  }
-
   void _handleConfirm() {
     final customer = ref.read(posActiveCustomerProvider);
     final cashToPay = _paidCentimes > widget.totalCentimes
@@ -112,28 +107,32 @@ class _PosCheckoutDialogState extends ConsumerState<PosCheckoutDialog> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final colors = context.appColors;
+    final role = context.roleTheme;
+    final brand = role.roleBrandColor;
     final customer = ref.watch(posActiveCustomerProvider);
     final difference = _paidCentimes - widget.totalCentimes;
     final isCreditNeeded = difference < 0;
-    final isDark = theme.brightness == Brightness.dark;
 
     return AlertDialog(
-      title: const Row(
+      title: Row(
         children: [
           DecoratedBox(
             decoration: BoxDecoration(
-              gradient: AppGradients.gold,
+              color: role.badgeBackground,
               borderRadius: AppRadius.smAll,
-              boxShadow: [AppShadows.goldGlowSm],
+              border: Border.all(color: brand.withValues(alpha: 0.30)),
+              boxShadow: [
+                BoxShadow(color: brand.withValues(alpha: 0.18), blurRadius: 10),
+              ],
             ),
             child: Padding(
-              padding: EdgeInsets.all(6),
+              padding: const EdgeInsets.all(6),
               child: Icon(Icons.shopping_cart_checkout_rounded,
-                  color: Color(0xFF1A1400), size: 20),
+                  color: role.badgeText, size: 20),
             ),
           ),
-          SizedBox(width: AppSpacing.sm),
-          Text('إتمام الدفع وتحصيل الوصل',
+          const SizedBox(width: AppSpacing.sm),
+          const Text('إتمام الدفع وتحصيل الوصل',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
         ],
       ),
@@ -148,15 +147,19 @@ class _PosCheckoutDialogState extends ConsumerState<PosCheckoutDialog> {
               Container(
                 padding: const EdgeInsetsDirectional.all(AppSpacing.md),
                 decoration: BoxDecoration(
-                  gradient: Theme.of(context).brightness == Brightness.dark
-                      ? AppGradients.darkGlass
-                      : AppGradients.goldSubtleLight,
+                  color: role.badgeBackground,
                   borderRadius: AppRadius.lgAll,
                   border: Border.all(
-                    color: const Color(0xFFD4AF37).withValues(alpha: 0.35),
+                    color: brand.withValues(alpha: 0.35),
                     width: 1.5,
                   ),
-                  boxShadow: const [AppShadows.goldGlowSm],
+                  boxShadow: [
+                    BoxShadow(
+                      color: brand.withValues(alpha: 0.16),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -167,10 +170,7 @@ class _PosCheckoutDialogState extends ConsumerState<PosCheckoutDialog> {
                         Text('المبلغ الإجمالي المستحق:',
                             style: theme.textTheme.bodySmall?.copyWith(
                                 fontSize: 11,
-                                color: Theme.of(context).brightness ==
-                                        Brightness.dark
-                                    ? const Color(0xFFB8A882)
-                                    : const Color(0xFF9A8A60))),
+                                color: role.badgeText.withValues(alpha: 0.75))),
                         DzdPriceTag.hero(
                             centimes: widget.totalCentimes, gold: true),
                       ],
@@ -180,23 +180,22 @@ class _PosCheckoutDialogState extends ConsumerState<PosCheckoutDialog> {
                         padding: const EdgeInsetsDirectional.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color:
-                              const Color(0xFFD4AF37).withValues(alpha: 0.12),
+                          color: brand.withValues(alpha: 0.12),
                           borderRadius: AppRadius.pillAll,
                           border: Border.all(
-                            color:
-                                const Color(0xFFD4AF37).withValues(alpha: 0.30),
+                            color: brand.withValues(alpha: 0.30),
                           ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.person_rounded,
-                                size: 13, color: Color(0xFFD4AF37)),
+                            Icon(Icons.person_rounded, size: 13, color: brand),
                             const SizedBox(width: 4),
                             Text(customer.name,
-                                style: const TextStyle(
-                                    fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: role.badgeText)),
                           ],
                         ),
                       ),
@@ -290,33 +289,30 @@ class _PosCheckoutDialogState extends ConsumerState<PosCheckoutDialog> {
                 runSpacing: AppSpacing.xs,
                 children: [
                   ActionChip(
-                    avatar: const Icon(Icons.done_all_rounded, size: 14),
+                    avatar: Icon(Icons.done_all_rounded,
+                        size: 14, color: role.badgeText),
                     label: const Text('كامل المبلغ'),
+                    labelStyle: TextStyle(color: role.badgeText),
                     onPressed: () =>
                         _setCashAmount(widget.totalCentimes / 100.0),
-                    backgroundColor: isDark
-                        ? const Color(0xFF1A1400)
-                        : const Color(0xFFD4AF37),
+                    backgroundColor: role.badgeBackground,
                   ),
                   ActionChip(
-                    avatar: const Icon(Icons.clear_rounded, size: 14),
+                    avatar: Icon(Icons.clear_rounded,
+                        size: 14, color: role.badgeText),
                     label: const Text('0 دج (دين)'),
+                    labelStyle: TextStyle(color: role.badgeText),
                     onPressed: () => _setCashAmount(0),
-                    backgroundColor: isDark
-                        ? const Color(0xFF1A1400)
-                        : const Color(0xFFD4AF37),
+                    backgroundColor: role.badgeBackground,
                   ),
                   ...[500, 1000, 2000, 5000, 10000].map((val) {
                     return ActionChip(
                       label: Text('$val'),
+                      labelStyle: TextStyle(color: role.badgeText),
                       onPressed: () => _setCashAmount(val.toDouble()),
-                      backgroundColor: isDark 
-                          ? const Color(0xFF1A1400)
-                          : const Color(0xFFD4AF37)
+                      backgroundColor: role.badgeBackground,
                     );
                   }),
-               
-               
                 ],
               ),
               AppSpacing.gapMd,

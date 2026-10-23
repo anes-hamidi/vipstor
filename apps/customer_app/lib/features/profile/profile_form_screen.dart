@@ -67,11 +67,14 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
   }
 
   Future<void> _detectGps() async {
+    if (_locating) return;
     setState(() => _locating = true);
     try {
       var perm = await Geolocator.checkPermission();
+      if (!mounted) return;
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
+        if (!mounted) return;
       }
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
@@ -82,6 +85,11 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
         desiredAccuracy: LocationAccuracy.high,
         timeLimit: const Duration(seconds: 8),
       );
+
+      // GPS can take several seconds. If the user left this screen while the
+      // request was in flight, both setState and the controllers are invalid.
+      if (!mounted) return;
+
       setState(() {
         _lat = pos.latitude;
         _lng = pos.longitude;
@@ -89,6 +97,7 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
       try {
         final marks =
             await placemarkFromCoordinates(pos.latitude, pos.longitude);
+        if (!mounted) return;
         if (marks.isNotEmpty) {
           final m = marks.first;
           if ((m.administrativeArea ?? '').isNotEmpty) {
@@ -109,6 +118,7 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
   }
 
   Future<void> _lookup() async {
+    if (_lookingUp) return;
     if (!CustomerProfileInfo.isValidPhone(_phone.text)) {
       _toast('أدخل رقم هاتف صحيحاً أولاً');
       return;
@@ -142,6 +152,7 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
 

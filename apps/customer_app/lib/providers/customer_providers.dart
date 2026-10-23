@@ -224,6 +224,16 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final loaded = _load(prefs);
+      if (!mounted) return;
+      // Never overwrite edits the customer may already have made while prefs
+      // were loading (important when the app is embedded without an override).
+      final hasLocalEdits = state.id != null ||
+          state.name.isNotEmpty ||
+          state.phone.isNotEmpty ||
+          state.wilaya.isNotEmpty ||
+          state.commune.isNotEmpty ||
+          state.addressText.isNotEmpty;
+      if (hasLocalEdits) return;
       if (loaded.isComplete ||
           loaded.phone.isNotEmpty ||
           loaded.name.isNotEmpty) {
@@ -247,6 +257,7 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
 
   /// Single place that updates state AND saves it on the device.
   void _set(CustomerProfileInfo next) {
+    if (!mounted) return;
     state = next;
     final prefs = ref.read(sharedPreferencesProvider);
     if (prefs != null) {
@@ -414,6 +425,7 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
     _restoring = true;
     try {
       final raw = await _store.readCartJson();
+      if (!mounted) return;
       if (raw == null) return;
       final restored = _decodeCart(raw);
       if (restored.isNotEmpty && state.isEmpty) {
@@ -463,6 +475,7 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
   }
 
   void _commit(List<CustomerCartItem> next) {
+    if (!mounted) return;
     state = next;
     _persist();
   }
@@ -610,26 +623,37 @@ class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
   Future<CheckoutOutcome> checkout({
     required CustomerProfileInfo profile,
   }) async {
-    String? customerId = profile.id;
+    if (ref.read(customerCheckoutInProgressProvider)) {
+      throw Exception('جاري إرسال الطلبية، يرجى الانتظار.');
+    }
+    ref.read(customerCheckoutInProgressProvider.notifier).state = true;
 
-    // First-time setup needs one online round-trip; an existing account can
-    // keep ordering offline because the id is already known.
-    if (customerId == null || customerId.isEmpty) {
-      try {
-        final synced =
-            await ref.read(customerProfileProvider.notifier).syncWithDatabase();
-        customerId = synced.id;
-      } catch (_) {
-        throw Exception(
-          'أكمل بيانات التوصيل مرة واحدة عبر الإنترنت قبل أول طلبية.',
-        );
+    try {
+      String? customerId = profile.id;
+
+      // First-time setup needs one online round-trip; an existing account can
+      // keep ordering offline because the id is already known.
+      if (customerId == null || customerId.isEmpty) {
+        try {
+          final synced =
+              await ref.read(customerProfileProvider.notifier).syncWithDatabase();
+          customerId = synced.id;
+        } catch (_) {
+          throw Exception(
+            'أكمل بيانات التوصيل مرة واحدة عبر الإنترنت قبل أول طلبية.',
+          );
+        }
+      }
+
+      return await submitOrder(
+        customerId: customerId,
+        address: profile.toMap(),
+      );
+    } finally {
+      if (mounted) {
+        ref.read(customerCheckoutInProgressProvider.notifier).state = false;
       }
     }
-
-    return submitOrder(
-      customerId: customerId,
-      address: profile.toMap(),
-    );
   }
 
   Future<CheckoutOutcome> submitOrder({
@@ -711,6 +735,11 @@ final customerCartProvider =
   });
   return notifier;
 });
+
+/// Shared checkout guard. The cart itself is app state, so an in-flight
+/// checkout must be visible to every cart screen: otherwise a second screen
+/// could submit the same cart again while the first request is still pending.
+final customerCheckoutInProgressProvider = StateProvider<bool>((ref) => false);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Catalogue

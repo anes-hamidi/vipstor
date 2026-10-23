@@ -1,6 +1,5 @@
 import 'package:core/core.dart';
 import 'package:flutter/material.dart';
-import '../tokens/app_gradients.dart';
 import '../tokens/app_radius.dart';
 import '../tokens/app_spacing.dart';
 
@@ -70,7 +69,7 @@ class DzdPriceTag extends StatelessWidget {
 
     final resolvedColor = color ??
         (gold
-            ? (isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27))
+            ? context.roleTheme.roleBrandColor
             : theme.colorScheme.primary);
 
     final defaultStyle = TextStyle(
@@ -86,16 +85,24 @@ class DzdPriceTag extends StatelessWidget {
       style: style != null ? defaultStyle.merge(style) : defaultStyle,
     );
 
-    // Gold variant: wrap in a subtle gold shimmer container for hero/lg sizes
+    // Brand variant: wrap in a subtle role-tinted container for hero/lg sizes
     if (gold && _size == _Size.hero) {
+      final brand = context.roleTheme.roleBrandColor;
       return Container(
         padding: const EdgeInsetsDirectional.symmetric(
             horizontal: AppSpacing.md, vertical: AppSpacing.xs),
         decoration: BoxDecoration(
-          gradient: AppGradients.goldSubtleLight,
+          gradient: LinearGradient(
+            begin: AlignmentDirectional.topStart,
+            end: AlignmentDirectional.bottomEnd,
+            colors: [
+              theme.colorScheme.surfaceContainerLow,
+              brand.withValues(alpha: isDark ? 0.14 : 0.10),
+            ],
+          ),
           borderRadius: AppRadius.smAll,
           border: Border.all(
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.25),
+            color: brand.withValues(alpha: 0.25),
             width: 1,
           ),
         ),

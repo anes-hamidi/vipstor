@@ -125,7 +125,8 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
     if (callerPin.length < 4) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('يرجى إدخال رمز PIN الخاص بك (4 أرقام على الأقل)'),
+          content:
+              const Text('يرجى إدخال رمز PIN الخاص بك (4 أرقام على الأقل)'),
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
@@ -179,6 +180,8 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
         if (proceed != true) return;
       }
     }
+
+    if (!mounted) return;
 
     if (payCentimes > _selectedSupplier!.currentBalanceCentimes &&
         _selectedSupplier!.currentBalanceCentimes > 0) {
@@ -256,7 +259,7 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
                     'تم تسجيل سداد مستحقات المورد نقدًا بنجاح: ${DzdFormatter.formatCentimes(payCentimes)}'),
               ],
             ),
-            backgroundColor: Colors.green.shade700,
+            backgroundColor: context.appColors.success,
           ),
         );
       }
@@ -277,6 +280,8 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final role = context.roleTheme;
+    final brand = role.roleBrandColor;
     final isCashier = widget.payerRole.toLowerCase().contains('cashier');
     final activeShift = ref.watch(posActiveShiftProvider);
 
@@ -296,13 +301,21 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
                 children: [
                   Container(
                     padding: const EdgeInsets.all(AppSpacing.sm),
-                    decoration: const BoxDecoration(
-                      gradient: AppGradients.gold,
+                    decoration: BoxDecoration(
+                      color: role.badgeBackground,
                       borderRadius: AppRadius.mdAll,
-                      boxShadow: [AppShadows.goldGlow],
+                      border: Border.all(
+                        color: brand.withValues(alpha: 0.30),
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: brand.withValues(alpha: 0.18),
+                          blurRadius: 10,
+                        ),
+                      ],
                     ),
-                    child: const Icon(Icons.payments_rounded,
-                        color: Colors.black87, size: 24),
+                    child: Icon(Icons.payments_rounded,
+                        color: role.badgeText, size: 24),
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
@@ -407,8 +420,8 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
                       const SizedBox(width: AppSpacing.md),
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFFD4AF37), // VIP Gold
-                          foregroundColor: Colors.black,
+                          backgroundColor: brand,
+                          foregroundColor: theme.colorScheme.onPrimary,
                           padding: const EdgeInsets.symmetric(
                               horizontal: AppSpacing.lg,
                               vertical: AppSpacing.md),
@@ -417,11 +430,12 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
                         ),
                         onPressed: _isSubmitting ? null : _handlePayment,
                         icon: _isSubmitting
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 18,
                                 height: 18,
                                 child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.black),
+                                    strokeWidth: 2,
+                                    color: theme.colorScheme.onPrimary),
                               )
                             : const Icon(Icons.check_circle_rounded, size: 20),
                         label: Text(
@@ -524,7 +538,7 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
                               s.name.isNotEmpty ? s.name[0].toUpperCase() : 'S',
                               style: TextStyle(
                                 color: isSelected
-                                    ? Colors.white
+                                    ? theme.colorScheme.onPrimary
                                     : theme.colorScheme.onSurfaceVariant,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13,
@@ -564,8 +578,8 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   fontWeight: FontWeight.bold,
                                   color: s.currentBalanceCentimes > 0
-                                      ? Colors.red.shade700
-                                      : Colors.green.shade700,
+                                      ? context.appColors.error
+                                      : context.appColors.success,
                                 ),
                               ),
                               Text(
@@ -575,8 +589,8 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
                                 style: theme.textTheme.labelSmall?.copyWith(
                                   fontSize: 10,
                                   color: s.currentBalanceCentimes > 0
-                                      ? Colors.red.shade600
-                                      : Colors.green.shade600,
+                                      ? context.appColors.error
+                                      : context.appColors.success,
                                 ),
                               ),
                             ],

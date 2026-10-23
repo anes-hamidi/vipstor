@@ -106,6 +106,33 @@ class AppColors extends ThemeExtension<AppColors> {
 
   // ── Presets ─────────────────────────────────────────────────────────────────
 
+  /// Derives the legacy semantic token surface from an active role scheme.
+  ///
+  /// Widgets that still consume gold/obsidian aliases automatically inherit
+  /// the current workspace accent instead of falling back to a fixed palette.
+  factory AppColors.fromColorScheme(ColorScheme scheme) {
+    final AppColors base = scheme.brightness == Brightness.dark
+        ? AppColors.dark
+        : AppColors.light;
+    return base.copyWith(
+      gold: scheme.primary,
+      onGold: scheme.onPrimary,
+      goldContainer: scheme.primaryContainer,
+      onGoldContainer: scheme.onPrimaryContainer,
+      goldDark: scheme.primary,
+      goldLight: scheme.primary,
+      goldBorder: scheme.primary.withValues(alpha: 0.28),
+      goldMuted: scheme.primary.withValues(alpha: 0.12),
+      obsidian: scheme.inverseSurface,
+      onObsidian: scheme.onInverseSurface,
+      obsidianSurface: scheme.surface,
+      obsidianCard: scheme.surfaceContainerLow,
+      obsidianMuted: scheme.onSurface.withValues(alpha: 0.08),
+      shimmerBase: scheme.surfaceContainerHighest,
+      shimmerHighlight: scheme.surfaceContainerLow,
+    );
+  }
+
   static const AppColors light = AppColors(
     success:              Color(0xFF059669),
     onSuccess:            Colors.white,
@@ -295,6 +322,9 @@ class AppColors extends ThemeExtension<AppColors> {
 }
 
 extension AppColorsContext on BuildContext {
-  AppColors get appColors =>
-      Theme.of(this).extension<AppColors>() ?? AppColors.light;
+  AppColors get appColors {
+    final ThemeData theme = Theme.of(this);
+    return theme.extension<AppColors>() ??
+        AppColors.fromColorScheme(theme.colorScheme);
+  }
 }

@@ -1,5 +1,5 @@
+import 'package:core/core.dart';
 import 'package:flutter/material.dart';
-import '../tokens/app_gradients.dart';
 import '../tokens/app_radius.dart';
 import '../tokens/app_shadows.dart';
 
@@ -95,34 +95,36 @@ class _LuxuryCardState extends State<LuxuryCard>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+    final brand = context.roleTheme.roleBrandColor;
     final radius = widget.borderRadius ?? AppRadius.lgAll;
 
-    // Resolve surface color
+    // Resolve surface color from the active role scheme.
     Color bgColor;
     if (widget._glass) {
       bgColor = Colors.transparent;
     } else if (widget._obsidian) {
-      bgColor = widget.color ?? const Color(0xFF1A1814);
+      bgColor = widget.color ?? scheme.surfaceContainerHighest;
     } else {
-      bgColor = widget.color ??
-          (isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8));
+      bgColor = widget.color ?? scheme.surfaceContainerLow;
     }
 
-    // Resolve border color
+    // Resolve border color.
     Color borderColor;
     if (widget.selected) {
-      borderColor = const Color(0xFFD4AF37);
-    } else if (widget._obsidian || isDark) {
-      borderColor = const Color(0x38D4AF37);
+      borderColor = brand;
+    } else if (widget._obsidian) {
+      borderColor = brand.withValues(alpha: isDark ? 0.30 : 0.24);
     } else {
-      borderColor = const Color(0x28C59B27);
+      borderColor = scheme.outlineVariant;
     }
 
     // Shadows
     List<BoxShadow> shadows;
     if (widget._glass) {
-      shadows = [];
+      shadows = <BoxShadow>[];
     } else if (widget._obsidian || isDark) {
       shadows = widget.selected
           ? AppShadows.cardElevatedDark
@@ -133,7 +135,14 @@ class _LuxuryCardState extends State<LuxuryCard>
           : AppShadows.cardSoftLight;
     }
     if (widget.selected) {
-      shadows = [...shadows, AppShadows.goldGlow];
+      shadows = <BoxShadow>[
+        ...shadows,
+        BoxShadow(
+          color: brand.withValues(alpha: 0.20),
+          blurRadius: 18,
+          offset: const Offset(0, 6),
+        ),
+      ];
     }
 
     return MouseRegion(
@@ -147,13 +156,24 @@ class _LuxuryCardState extends State<LuxuryCard>
             decoration: BoxDecoration(
               color: widget._glass ? null : bgColor,
               gradient: widget._glass
-                  ? (isDark ? AppGradients.darkGlass : AppGradients.lightGlass)
+                  ? LinearGradient(
+                      begin: AlignmentDirectional.topStart,
+                      end: AlignmentDirectional.bottomEnd,
+                      colors: [
+                        scheme.surfaceContainerHighest.withValues(
+                          alpha: isDark ? 0.42 : 0.78,
+                        ),
+                        scheme.surfaceContainerLowest.withValues(
+                          alpha: isDark ? 0.18 : 0.52,
+                        ),
+                      ],
+                    )
                   : null,
               borderRadius: radius,
               border: Border.all(
                 color: Color.lerp(
                     borderColor,
-                    const Color(0xFFD4AF37),
+                    brand,
                     widget.selected ? 1.0 : _hover.value * 0.6)!,
                 width: 1.0 + extraBorder,
               ),
@@ -169,18 +189,26 @@ class _LuxuryCardState extends State<LuxuryCard>
             child: InkWell(
               onTap: widget.onTap,
               borderRadius: radius,
-              highlightColor: const Color(0xFFD4AF37).withValues(alpha: 0.06),
-              splashColor:    const Color(0xFFD4AF37).withValues(alpha: 0.10),
+              highlightColor: brand.withValues(alpha: 0.06),
+              splashColor: brand.withValues(alpha: 0.10),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Gold foil accent stripe
+                  // Brand foil accent stripe
                   if (widget.goldAccent)
                     Container(
                       height: 3,
-                      decoration: const BoxDecoration(
-                        gradient: AppGradients.goldFoil,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: AlignmentDirectional.centerStart,
+                          end: AlignmentDirectional.centerEnd,
+                          colors: [
+                            brand,
+                            Color.lerp(brand, Colors.white, 0.42)!,
+                            brand,
+                          ],
+                        ),
                       ),
                     ),
                   if (widget.padding != null)

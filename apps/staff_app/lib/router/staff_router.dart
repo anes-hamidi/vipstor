@@ -1,3 +1,4 @@
+import 'package:core/core.dart' show AppRole;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +14,19 @@ import '../providers/staff_providers.dart';
 // ── Auth state ─────────────────────────────────────────────────────────────────
 // Holds the resolved user after both Supabase session check AND PIN verify.
 final authStateProvider = StateProvider<UserEntity?>((ref) => null);
+
+/// Maps the authenticated staff account onto the theme role whose palette the
+/// application shell should display. Unauthenticated sessions and customer
+/// accounts fall back to the neutral customer storefront theme.
+AppRole roleForStaffUser(UserEntity? user) {
+  return switch (user?.role) {
+    UserRole.cashier => AppRole.cashier,
+    UserRole.manager => AppRole.inventory,
+    UserRole.driver => AppRole.delivery,
+    UserRole.moderator => AppRole.moderator,
+    UserRole.customer || null => AppRole.customer,
+  };
+}
 
 // Tracks whether session restore has been attempted on boot.
 final sessionRestoredProvider = StateProvider<bool>((ref) => false);

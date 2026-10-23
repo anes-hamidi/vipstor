@@ -3,9 +3,9 @@ import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
 
 /// Premium POS product tile with:
-/// - Gold border on in-cart state with glow shadow
-/// - Glassmorphic price footer
-/// - Animated add-to-cart button with gold gradient
+/// - Brand border on in-cart state with glow shadow
+/// - Tonal price footer
+/// - Animated add-to-cart button in the role brand color
 /// - Compact stock badge
 class PosProductCard extends StatefulWidget {
   final ProductEntity product;
@@ -54,6 +54,8 @@ class _PosProductCardState extends State<PosProductCard>
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
+    final role = context.roleTheme;
+    final brand = role.roleBrandColor;
 
     final retailePrice =
         widget.product.getPriceForQuantity(PriceTier.retail, 1);
@@ -65,26 +67,38 @@ class _PosProductCardState extends State<PosProductCard>
     List<BoxShadow> shadows;
 
     if (inCart) {
-      bgColor = isDark ? const Color(0xFF241F10) : const Color(0xFFFAF2DC);
-      borderColor = const Color(0xFFD4AF37);
+      bgColor = role.badgeBackground;
+      borderColor = brand;
       shadows = [
-        ...AppShadows.cardElevatedLight,
-        AppShadows.goldGlow,
+        BoxShadow(
+          color: cs.shadow.withValues(alpha: 0.12),
+          blurRadius: 16,
+          offset: const Offset(0, 6),
+        ),
+        BoxShadow(
+          color: brand.withValues(alpha: 0.22),
+          blurRadius: 18,
+          offset: const Offset(0, 4),
+        ),
       ];
     } else if (!isAvailable) {
-      bgColor = isDark ? const Color(0xFF141210) : const Color(0xFFF7F4EE);
-      borderColor = isDark ? const Color(0xFF2D271B) : const Color(0xFFE9E2D2);
+      bgColor = cs.surfaceContainerLow;
+      borderColor = cs.outlineVariant;
       shadows = [];
     } else {
-      bgColor = isDark ? const Color(0xFF1A1815) : const Color(0xFFFFFFFF);
-      borderColor = isDark
-          ? const Color(0xFFD4AF37).withValues(alpha: 0.15)
-          : const Color(0xFFE6DECA);
-      shadows = isDark ? AppShadows.cardSoftDark : AppShadows.cardSoftLight;
+      bgColor = cs.surface;
+      borderColor = cs.outlineVariant.withValues(alpha: 0.75);
+      shadows = [
+        BoxShadow(
+          color: cs.shadow.withValues(alpha: isDark ? 0.28 : 0.06),
+          blurRadius: 10,
+          offset: const Offset(0, 3),
+        ),
+      ];
     }
 
     if (_hovered && isAvailable && !inCart) {
-      borderColor = const Color(0xFFD4AF37).withValues(alpha: 0.60);
+      borderColor = brand.withValues(alpha: 0.60);
     }
 
     return MouseRegion(
@@ -107,7 +121,7 @@ class _PosProductCardState extends State<PosProductCard>
               border: Border.all(
                 color: Color.lerp(
                   borderColor,
-                  const Color(0xFFD4AF37),
+                  brand,
                   inCart ? 1.0 : _glowAnim.value * 0.4,
                 )!,
                 width: inCart ? 1.5 : 1.0,
@@ -123,8 +137,8 @@ class _PosProductCardState extends State<PosProductCard>
               child: InkWell(
                 onTap: isAvailable ? widget.onAddToCart : null,
                 borderRadius: AppRadius.xl2All,
-                highlightColor: const Color(0xFFD4AF37).withValues(alpha: 0.08),
-                splashColor: const Color(0xFFD4AF37).withValues(alpha: 0.12),
+                highlightColor: brand.withValues(alpha: 0.08),
+                splashColor: brand.withValues(alpha: 0.12),
                 child: Padding(
                   padding: const EdgeInsetsDirectional.all(AppSpacing.sm),
                   child: LayoutBuilder(
@@ -144,7 +158,6 @@ class _PosProductCardState extends State<PosProductCard>
                                 _ProductImage(
                                   url: widget.product.photoUrl,
                                   isAvailable: isAvailable,
-                                  isDark: isDark,
                                 ),
                                 // Stock badge + cart pill
                                 PositionedDirectional(
@@ -164,35 +177,41 @@ class _PosProductCardState extends State<PosProductCard>
                                               Transform.scale(
                                                   scale: val, child: child),
                                           child: DecoratedBox(
-                                            decoration: const BoxDecoration(
-                                              gradient: AppGradients.gold,
+                                            decoration: BoxDecoration(
+                                              color: brand,
                                               borderRadius: AppRadius.pillAll,
                                               boxShadow: [
-                                                AppShadows.goldGlowSm
+                                                BoxShadow(
+                                                  color: brand.withValues(
+                                                      alpha: 0.35),
+                                                  blurRadius: 8,
+                                                  offset: const Offset(0, 2),
+                                                ),
                                               ],
                                             ),
                                             child: Padding(
-                                              padding: const EdgeInsetsDirectional
-                                                  .symmetric(
+                                              padding:
+                                                  const EdgeInsetsDirectional
+                                                      .symmetric(
                                                 horizontal: AppSpacing.sm,
                                                 vertical: 3,
                                               ),
                                               child: Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
-                                                  const Icon(
+                                                  Icon(
                                                       Icons
                                                           .shopping_cart_rounded,
                                                       size: 10,
-                                                      color: Color(0xFF1A1400)),
+                                                      color: cs.onPrimary),
                                                   const SizedBox(width: 3),
                                                   Text(
                                                     '${widget.cartQuantity}',
-                                                    style: const TextStyle(
+                                                    style: TextStyle(
                                                       fontSize: 11,
                                                       fontWeight:
                                                           FontWeight.w800,
-                                                      color: Color(0xFF1A1400),
+                                                      color: cs.onPrimary,
                                                     ),
                                                   ),
                                                 ],
@@ -217,18 +236,16 @@ class _PosProductCardState extends State<PosProductCard>
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: isDark
-                                              ? const Color(0xE61A1815)
-                                              : const Color(0xE6FFFFFF),
+                                          color: cs.surface
+                                              .withValues(alpha: 0.92),
                                           borderRadius: AppRadius.smAll,
                                         ),
-                                        child: Text( type,
+                                        child: Text(
+                                          type,
                                           overflow: TextOverflow.ellipsis,
                                           style: TextStyle(
                                             fontSize: 10,
-                                            color: isDark
-                                                ? const Color(0xFFF7DC8B)
-                                                : const Color(0xFF8B6B15),
+                                            color: brand,
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -255,9 +272,7 @@ class _PosProductCardState extends State<PosProductCard>
                                   fontSize: 13,
                                   height: 1.2,
                                   color: isAvailable
-                                      ? (isDark
-                                          ? const Color(0xFFFFFDF9)
-                                          : const Color(0xFF181510))
+                                      ? cs.onSurface
                                       : cs.onSurface.withValues(alpha: 0.40),
                                 ),
                               ),
@@ -284,17 +299,14 @@ class _PosProductCardState extends State<PosProductCard>
                           Container(
                             padding: EdgeInsetsDirectional.symmetric(
                               horizontal: AppSpacing.sm,
-                              vertical: compact
-                                  ? AppSpacing.xs
-                                  : AppSpacing.xs + 2,
+                              vertical:
+                                  compact ? AppSpacing.xs : AppSpacing.xs + 2,
                             ),
                             decoration: BoxDecoration(
-                              gradient: isDark
-                                  ? AppGradients.darkGlass
-                                  : AppGradients.lightGlass,
+                              color: cs.surfaceContainerLow,
                               borderRadius: AppRadius.mdAll,
                               border: Border.all(
-                                color: const Color(0xFFD4AF37).withValues(
+                                color: brand.withValues(
                                   alpha: isDark ? 0.20 : 0.15,
                                 ),
                                 width: 1,
@@ -319,7 +331,6 @@ class _PosProductCardState extends State<PosProductCard>
                                 ),
                                 const SizedBox(width: AppSpacing.xs),
                                 if (!isAvailable)
-                                
                                   Container(
                                     width: 30,
                                     height: 30,
@@ -355,27 +366,40 @@ class _PosProductCardState extends State<PosProductCard>
 class _ProductImage extends StatelessWidget {
   final String? url;
   final bool isAvailable;
-  final bool isDark;
 
   const _ProductImage({
     required this.url,
     required this.isAvailable,
-    required this.isDark,
   });
 
   static const _greyscale = ColorFilter.matrix(<double>[
-    0.2126, 0.7152, 0.0722, 0, 0,
-    0.2126, 0.7152, 0.0722, 0, 0,
-    0.2126, 0.7152, 0.0722, 0, 0,
-    0, 0, 0, 1, 0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
   ]);
 
   @override
   Widget build(BuildContext context) {
-    final placeholderColor =
-        isDark ? const Color(0xFF221E16) : const Color(0xFFF6F1E4);
-    final iconColor =
-        isDark ? const Color(0xFF8A7A50) : const Color(0xFFB8A060);
+    final cs = Theme.of(context).colorScheme;
+    final placeholderColor = cs.surfaceContainerHigh;
+    final iconColor = cs.onSurfaceVariant.withValues(alpha: 0.70);
 
     final placeholder = Center(
       child: Icon(Icons.inventory_2_outlined, size: 28, color: iconColor),
