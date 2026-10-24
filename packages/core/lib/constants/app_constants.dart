@@ -5,8 +5,28 @@ class AppConstants {
   static const String defaultLanguage = 'ar';
   static const List<String> supportedLanguages = ['ar', 'fr'];
 
-  static const String supabaseUrl = 'https://qwdwukyewhbkrijkcusq.supabase.co';
+  // Build-time configuration (required):
+  //   flutter run --dart-define-from-file=.env
+  //   flutter build apk --release --dart-define-from-file=.env
+  //
+  // There is deliberately no fallback project. A build without these values
+  // fails fast instead of silently connecting to a stale database.
+  // Never ship the service_role key to a client app.
+  static const String supabaseUrl = String.fromEnvironment('SUPABASE_URL');
   static const String supabaseAnonKey =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZHd1a3lld2hia3JpamtjdXNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjUxOTIsImV4cCI6MjEwNzY0MTE5Mn0.uBiHdORl1AEkMo-pJamLsZA5h4UH9bZzqWr0K_MtHr0';
+      String.fromEnvironment('SUPABASE_ANON_KEY');
+
+  /// Call before `Supabase.initialize` to produce an actionable error when a
+  /// developer forgot the build-time configuration.
+  static void ensureSupabaseConfigured() {
+    if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
+      throw StateError(
+        'Supabase credentials are missing. Run from the repository root with '
+        '--dart-define-from-file=.env, or pass '
+        '--dart-define=SUPABASE_URL=... and '
+        '--dart-define=SUPABASE_ANON_KEY=....',
+      );
+    }
+  }
 }
 

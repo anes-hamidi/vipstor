@@ -27,7 +27,7 @@ A universal launcher at `lib/main.dart` routes between them at runtime.
 
 ## Backend
 
-Supabase (PostgreSQL 15+). All schema changes are sequential numbered migrations under `backend/supabase/migrations/`. Business logic lives exclusively in PostgreSQL RPC functions — the client never writes to tables directly.
+Supabase (PostgreSQL 15+). A new project is created from `backend/supabase/schema/001_fresh_schema.sql` (through migration `00033`) plus `backend/supabase/seeds/001_admin.sql`. Future schema changes go in `backend/supabase/migrations/` starting at `00034`; older migrations are archived under `backend/supabase/archive/migrations/`. Business logic lives exclusively in PostgreSQL RPC functions — the client never writes to tables directly. Clients receive `SUPABASE_URL` and `SUPABASE_ANON_KEY` at build time through `--dart-define-from-file=.env` (template: `.env.example`); the service role key is never shipped.
 
 ## Key Tech Stack
 

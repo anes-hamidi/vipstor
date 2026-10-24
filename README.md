@@ -30,6 +30,7 @@ To maintain consistency and follow the development process without architectural
 
 ```
 vip/
+├── .env.example           # Local Supabase configuration template (copy to .env)
 ├── apps/
 │   ├── staff_app/         # Moderator, Manager, Cashier (POS), Driver
 │   └── customer_app/      # Wholesale B2B Client Ordering Portal
@@ -40,7 +41,7 @@ vip/
 │   ├── ui_kit/            # Design System (Tokens, Themes, Atomic Widgets)
 │   └── l10n/              # Arabic (RTL) & French Localization
 ├── backend/
-│   └── supabase/          # PostgreSQL Migrations, Ledgers, RPCs, Clean Reset
+│   └── supabase/          # Fresh schema, admin seed, operations, archived migrations
 └── lib/
     └── main.dart          # Universal Root Application Launcher
 ```
@@ -63,3 +64,20 @@ flutter run -d chrome
 ```powershell
 dart analyze apps/staff_app/lib/features/cashier apps/staff_app/lib/providers
 ```
+
+### Supabase configuration
+
+The app reads `SUPABASE_URL` and `SUPABASE_ANON_KEY` at build time. Copy
+`.env.example` to `.env`, fill in the new project's values, then run:
+
+```powershell
+flutter run -d windows --dart-define-from-file=.env
+```
+
+`.env` is git-ignored. Add the same flag to your IDE run configuration.
+Explicit `--dart-define=SUPABASE_URL=...` flags also work. The apps have no
+compiled fallback project, so a build without these values fails fast.
+
+Release builds and CI use the same flags; see
+[`backend/supabase/README.md`](backend/supabase/README.md#point-the-flutter-apps-at-the-new-project).
+Never embed the `service_role` key in a client app.

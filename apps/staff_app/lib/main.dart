@@ -9,6 +9,7 @@ import 'package:l10n/l10n.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppConstants.ensureSupabaseConfigured();
 
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,

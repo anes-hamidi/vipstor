@@ -18,6 +18,26 @@
       - Uses curl.exe for large uploads with retries.
       - Verifies that the uploaded object is publicly reachable.
 
+    Supabase configuration:
+      The Flutter apps read SUPABASE_URL and SUPABASE_ANON_KEY through
+      String.fromEnvironment. This script resolves both values from an
+      environment variable or .env at the repository root. There is no
+      compiled fallback. Both values are passed to every build as
+      --dart-define, so the app and the release row always point at the same
+      project.
+
+          # .env (git-ignored)
+          SUPABASE_URL=https://<project>.supabase.co
+          SUPABASE_ANON_KEY=<anon public key>
+          SUPABASE_SERVICE_ROLE_KEY=<service role key>
+
+      Existing environment variables win, so CI secrets are never overridden
+      by a local .env file. The anon key is public and safe to embed. The
+      service key is only used for release publishing and is never passed to
+      Flutter. Both legacy service_role JWTs and new sb_secret_... keys are
+      supported; opaque keys are sent only in the apikey header because
+      Supabase rejects them in Authorization.
+
 .PARAMETER BuildNumber
     Monotonic build number (Android versionCode). If omitted, the script reads
     the latest published build from app_versions and uses (latest + 1).
@@ -239,25 +259,87 @@ function Test-PublicUrl {
     }
 }
 
-function Get-AppConstantValue {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$Name
-    )
+function Get-SupabaseProjectRef {
+    param([Parameter(Mandatory = $false)][string]$Url)
 
-    $constantsPath = Join-Path $RepoRoot 'packages\core\lib\constants\app_constants.dart'
-    if (-not (Test-Path -LiteralPath $constantsPath)) { return $null }
-
-    $text = Get-Content -LiteralPath $constantsPath -Raw
-    $pattern = [regex]::Escape($Name) + "\s*=\s*['""]([^'""]+)['""]"
-    $match = [regex]::Match($text, $pattern)
-    if ($match.Success) { return $match.Groups[1].Value }
+    if ([string]::IsNullOrWhiteSpace($Url)) { return $null }
+    if ($Url -match '^https?://([a-z0-9]+)\.supabase\.(co|in)$') { return $Matches[1] }
     return $null
 }
 
-function Get-SupabaseUrlFromAppConstants {
-    param([Parameter(Mandatory = $true)][string]$RepoRoot)
-    return Get-AppConstantValue -RepoRoot $RepoRoot -Name 'supabaseUrl'
+function Get-SupabaseJwtProjectRef {
+    param([Parameter(Mandatory = $false)][string]$Key)
+
+    if ([string]::IsNullOrWhiteSpace($Key)) { return $null }
+    $parts = $Key.Split('.')
+    if ($parts.Count -lt 2) { return $null }
+
+    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+    while ($payload.Length % 4 -ne 0) { $payload += '=' }
+
+    try {
+        $json = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payload))
+        $claims = $json | ConvertFrom-Json
+        if ($claims.PSObject.Properties.Name -contains 'ref') { return [string]$claims.ref }
+    }
+    catch { }
+
+    return $null
+}
+
+function Test-SupabaseJwtKey {
+    param([Parameter(Mandatory = $false)][string]$Key)
+
+    if ([string]::IsNullOrWhiteSpace($Key)) { return $false }
+    return ($Key.Split('.').Count -eq 3)
+}
+
+function Import-DotEnvFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $false)][switch]$PreserveExisting
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return @() }
+
+    $loaded = @()
+    foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed)) { continue }
+        if ($trimmed.StartsWith('#')) { continue }
+        if ($trimmed -notmatch '^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') { continue }
+
+        $name = $Matches[1]
+        $value = $Matches[2].Trim()
+
+        if ($value.Length -ge 2) {
+            $first = $value[0]
+            $last = $value[$value.Length - 1]
+            if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+            else {
+                # Allow "KEY=value # comment" for unquoted values.
+                $value = ($value -replace '\s+#.*$', '').Trim()
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+
+        if ($PreserveExisting -and -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+            continue
+        }
+
+        if (($name -in @('SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY')) -and
+            ($value -match 'REPLACE[_-]?ME|YOUR[_-]|CHANGEME')) {
+            throw ('The .env value for {0} is still a placeholder. Fill in the real value from Supabase Project Settings > API.' -f $name)
+        }
+
+        [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        $loaded += $name
+    }
+
+    return $loaded
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -317,36 +399,44 @@ Write-Host ('Upload limit    : {0} MB' -f $MaxUploadMB)
 Write-Host ('Source path     : {0}' -f $appDir)
 Write-Host '----------------------------------------------------------'
 
+# Local development configuration. Existing environment variables win, so CI
+# secrets are never overridden by a developer's .env file.
+$dotEnvValues = @(Import-DotEnvFile -Path (Join-Path $repoRoot '.env') -PreserveExisting)
+if ($dotEnvValues.Count -gt 0) {
+    Write-Ok ('Loaded local configuration from .env: {0}' -f ($dotEnvValues -join ', '))
+}
+
 # -----------------------------------------------------------------------------
-# 2. Supabase credentials
-#    SUPABASE_URL is optional: when the environment variable is missing it is
-#    read from packages/core/lib/constants/app_constants.dart.
+# 2. Supabase configuration
+#    Environment variables win; otherwise .env in the repository root supplies
+#    SUPABASE_URL and SUPABASE_ANON_KEY. There is no compiled fallback. Both
+#    values are passed to Flutter as --dart-define, so the built app and the
+#    release row cannot drift to different projects.
 #    The service role key is never accepted as a parameter (it would leak into
 #    shell history and the process list). Use an environment variable or the
-#    secure prompt. The anon key in app_constants.dart cannot publish releases.
+#    secure prompt. It is never passed to Flutter.
 # -----------------------------------------------------------------------------
 $needsSupabase = (-not $SkipDatabase) -or (-not $SkipUpload)
-$supabaseUrl = $null
+$supabaseUrl = $env:SUPABASE_URL
+$supabaseAnonKey = $env:SUPABASE_ANON_KEY
 $serviceRoleKey = $null
 
-if ($needsSupabase) {
-    $supabaseUrl = $env:SUPABASE_URL
-    $serviceRoleKey = $env:SUPABASE_SERVICE_ROLE_KEY
-
-    if ([string]::IsNullOrWhiteSpace($supabaseUrl)) {
-        $supabaseUrl = Get-SupabaseUrlFromAppConstants -RepoRoot $repoRoot
-        if ($supabaseUrl) {
-            Write-Ok ('Supabase URL auto-detected from app_constants.dart: {0}' -f $supabaseUrl)
-        }
+if ((-not $SkipBuild -or $needsSupabase) -and [string]::IsNullOrWhiteSpace($supabaseUrl)) {
+    if ($env:CI -eq 'true' -or -not [Environment]::UserInteractive) {
+        throw 'SUPABASE_URL is not set. Add it to .env in the repository root or set it as an environment variable.'
     }
+    $supabaseUrl = Read-Host 'Enter Supabase Project URL (for example https://xxx.supabase.co)'
+}
 
-    if ([string]::IsNullOrWhiteSpace($supabaseUrl)) {
-        if ($env:CI -eq 'true' -or -not [Environment]::UserInteractive) {
-            throw 'SUPABASE_URL is not set and could not be read from packages/core/lib/constants/app_constants.dart.'
-        }
-        $supabaseUrl = Read-Host 'Enter Supabase Project URL (for example https://xxx.supabase.co)'
-    }
+if (-not $SkipBuild -and [string]::IsNullOrWhiteSpace($supabaseAnonKey)) {
+    throw 'SUPABASE_ANON_KEY is not set. Add it to .env in the repository root or set it as an environment variable.'
+}
 
+if (-not [string]::IsNullOrWhiteSpace($supabaseAnonKey)) {
+    $supabaseAnonKey = $supabaseAnonKey.Trim()
+}
+
+if (-not [string]::IsNullOrWhiteSpace($supabaseUrl)) {
     $supabaseUrl = $supabaseUrl.Trim().TrimEnd('/')
     if ($supabaseUrl -notmatch '^https?://[^/]+$') {
         throw ('Invalid SUPABASE_URL: {0}. Use the project base URL only.' -f $supabaseUrl)
@@ -354,6 +444,19 @@ if ($needsSupabase) {
     if ($supabaseUrl -match '/rest/v1$') {
         throw 'SUPABASE_URL must not include /rest/v1. Use the project base URL only.'
     }
+}
+
+# Catch a half-finished project switch: the URL points at one project while a
+# key still belongs to another. The ref claim exists in legacy JWT keys only;
+# newer publishable keys skip this check.
+$urlProjectRef = Get-SupabaseProjectRef -Url $supabaseUrl
+$anonProjectRef = Get-SupabaseJwtProjectRef -Key $supabaseAnonKey
+if ($urlProjectRef -and $anonProjectRef -and $urlProjectRef -ne $anonProjectRef) {
+    throw ('SUPABASE_URL points to project "{0}" but SUPABASE_ANON_KEY belongs to project "{1}". Use the URL and anon key from the same Supabase project.' -f $urlProjectRef, $anonProjectRef)
+}
+
+if ($needsSupabase) {
+    $serviceRoleKey = $env:SUPABASE_SERVICE_ROLE_KEY
 
     if ([string]::IsNullOrWhiteSpace($serviceRoleKey)) {
         if ($env:CI -eq 'true' -or -not [Environment]::UserInteractive) {
@@ -380,12 +483,24 @@ if ($needsSupabase) {
 
     # The anon key is shipped inside the client app and cannot publish releases
     # (RLS + revoked anon/authenticated writes). Catch that mistake early.
-    $anonKey = Get-AppConstantValue -RepoRoot $repoRoot -Name 'supabaseAnonKey'
-    if ($anonKey -and $serviceRoleKey -eq $anonKey) {
-        throw 'SUPABASE_SERVICE_ROLE_KEY contains the anon key from app_constants.dart. Publishing requires the service_role key from Supabase Project Settings > API.'
+    if ($serviceRoleKey -eq $supabaseAnonKey) {
+        throw 'SUPABASE_SERVICE_ROLE_KEY contains the anon key. Publishing requires the service_role key from Supabase Project Settings > API.'
+    }
+
+    $serviceProjectRef = Get-SupabaseJwtProjectRef -Key $serviceRoleKey
+    if ($urlProjectRef -and $serviceProjectRef -and $urlProjectRef -ne $serviceProjectRef) {
+        throw ('SUPABASE_URL points to project "{0}" but SUPABASE_SERVICE_ROLE_KEY belongs to project "{1}". Use credentials from the same Supabase project.' -f $urlProjectRef, $serviceProjectRef)
     }
 
     Write-Ok ('Supabase project: {0}' -f $supabaseUrl)
+}
+
+if (-not $SkipBuild) {
+    $dartDefines = @(
+        ('--dart-define=SUPABASE_URL=' + $supabaseUrl),
+        ('--dart-define=SUPABASE_ANON_KEY=' + $supabaseAnonKey)
+    )
+    Write-Ok ('Build configuration: SUPABASE_URL={0} (anon key supplied)' -f $supabaseUrl)
 }
 
 function Invoke-SupabaseRest {
@@ -397,9 +512,14 @@ function Invoke-SupabaseRest {
     )
 
     $headers = @{
-        'apikey'        = $serviceRoleKey
-        'Authorization' = ('Bearer ' + $serviceRoleKey)
-        'Accept'        = 'application/json'
+        'apikey' = $serviceRoleKey
+        'Accept' = 'application/json'
+    }
+    # Legacy service_role keys are JWTs and also work as Bearer tokens. New
+    # sb_secret_... keys must be sent only in the apikey header; Supabase's
+    # gateway rejects them when they appear in Authorization.
+    if (Test-SupabaseJwtKey -Key $serviceRoleKey) {
+        $headers['Authorization'] = ('Bearer ' + $serviceRoleKey)
     }
     if ($Prefer) { $headers['Prefer'] = $Prefer }
 
@@ -407,6 +527,10 @@ function Invoke-SupabaseRest {
         Uri        = $Uri
         Method     = $Method
         Headers    = $headers
+        # Windows PowerShell 5.1 sends a browser-like default User-Agent.
+        # Supabase rejects sb_secret_... keys from browser-like clients, so
+        # identify the publisher explicitly.
+        UserAgent  = 'vip-release-publisher/1.0'
         TimeoutSec = 60
     }
 
@@ -419,7 +543,7 @@ function Invoke-SupabaseRest {
     }
 
     try {
-        return Invoke-RestMethod @request
+        $response = Invoke-RestMethod @request
     }
     catch {
         $detail = ''
@@ -437,6 +561,18 @@ function Invoke-SupabaseRest {
         }
         throw ('Supabase {0} {1} failed: {2} {3}' -f $Method, $Uri, $_.Exception.Message, $detail)
     }
+
+    if ($null -eq $response) { return }
+
+    # Windows PowerShell 5.1 returns a JSON array as one pipeline object, so
+    # @(Invoke-SupabaseRest ...) would produce a nested array whose [0] is the
+    # array itself. Emit the items individually instead.
+    if ($response -is [System.Collections.IEnumerable] -and $response -isnot [string]) {
+        foreach ($item in $response) { Write-Output $item }
+        return
+    }
+
+    Write-Output $response
 }
 
 # -----------------------------------------------------------------------------
@@ -649,6 +785,7 @@ else {
                 $buildArgs += ('--target-platform=' + $targetPlatform)
             }
 
+            $buildArgs += $dartDefines
             Invoke-NativeCommand -Command $flutterCmd.Source -Arguments $buildArgs -WorkingDirectory $appDir
 
             $rawApk = Join-Path $flutterApkDir 'app-release.apk'
@@ -766,11 +903,11 @@ else {
                     }
             }
 
-            Invoke-NativeCommand -Command $flutterCmd.Source -Arguments @(
+            Invoke-NativeCommand -Command $flutterCmd.Source -Arguments (@(
                 'build', 'windows', '--release',
                 ('--build-name=' + $Version),
                 ('--build-number=' + $BuildNumber)
-            ) -WorkingDirectory $appDir
+            ) + $dartDefines) -WorkingDirectory $appDir
 
             $releaseDirs = @(
                 Get-ChildItem -LiteralPath $windowsBuildRoot -Directory -ErrorAction SilentlyContinue |
@@ -808,6 +945,7 @@ else {
                 ('--build-number=' + $BuildNumber)
             )
             if ($WebBaseHref) { $buildArgs += ('--base-href=' + $WebBaseHref) }
+            $buildArgs += $dartDefines
 
             Invoke-NativeCommand -Command $flutterCmd.Source -Arguments $buildArgs -WorkingDirectory $appDir
 
@@ -890,11 +1028,14 @@ function Invoke-StorageUpload {
                 '-w', '%{http_code}',
                 '-X', 'POST', $Uri,
                 '-H', ('apikey: ' + $serviceRoleKey),
-                '-H', ('Authorization: Bearer ' + $serviceRoleKey),
                 '-H', ('Content-Type: ' + $ContentType),
                 '-H', 'x-upsert: true',
+                '-H', 'User-Agent: vip-release-publisher/1.0',
                 '--upload-file', $Path
             )
+            if (Test-SupabaseJwtKey -Key $serviceRoleKey) {
+                $curlArgs += @('-H', ('Authorization: Bearer ' + $serviceRoleKey))
+            }
 
             $status = & $curl.Source @curlArgs
             $curlExit = $LASTEXITCODE
@@ -926,13 +1067,15 @@ function Invoke-StorageUpload {
     }
 
     $headers = @{
-        'apikey'        = $serviceRoleKey
-        'Authorization' = ('Bearer ' + $serviceRoleKey)
-        'x-upsert'      = 'true'
+        'apikey'   = $serviceRoleKey
+        'x-upsert' = 'true'
+    }
+    if (Test-SupabaseJwtKey -Key $serviceRoleKey) {
+        $headers['Authorization'] = ('Bearer ' + $serviceRoleKey)
     }
 
     try {
-        Invoke-RestMethod -Uri $Uri -Method Post -Headers $headers -ContentType $ContentType -InFile $Path -TimeoutSec 900 | Out-Null
+        Invoke-RestMethod -Uri $Uri -Method Post -Headers $headers -ContentType $ContentType -InFile $Path -UserAgent 'vip-release-publisher/1.0' -TimeoutSec 900 | Out-Null
         Write-Ok 'Uploaded with Invoke-RestMethod (curl.exe not found)'
     }
     catch {

@@ -5,9 +5,14 @@
 # scripts/publish_release.ps1, so local releases and CI releases behave the
 # same way.
 #
-# Required repository secrets (already configured for Supabase):
+# Required repository secrets:
 #   SUPABASE_URL
+#   SUPABASE_ANON_KEY
 #   SUPABASE_SERVICE_ROLE_KEY
+#
+# The client apps have no compiled fallback project, so all three must point at
+# the same Supabase project. The publisher also rejects a cross-project
+# URL/key pair.
 #
 # Optional Android release-signing secrets. Without them, Android jobs fail
 # unless you run with allow_debug_signing = true (unsafe, testing only):
@@ -230,6 +235,7 @@ jobs:
         shell: pwsh
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           VERSION: ${{ needs.plan.outputs.version }}
           PLATFORM: ${{ matrix.platform }}

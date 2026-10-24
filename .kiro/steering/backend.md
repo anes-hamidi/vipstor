@@ -1,29 +1,27 @@
 # Backend: Supabase & PostgreSQL
 
-## Migration Strategy
+## Schema & Migration Strategy
 
-Migrations are sequential, numbered SQL files under `backend/supabase/migrations/`.
+The authoritative fresh-install schema is:
 
-| Migration | Content |
-|---|---|
-| `00001_initial_schema.sql` | Core tables: `users`, `products`, `customers`, `suppliers`, `orders`, `payments`, `purchases` |
-| `00002_ledgers_and_indexes.sql` | Append-only ledger tables + performance indexes |
-| `00003_audit_triggers.sql` | Audit trail triggers on all write tables |
-| `00004_transaction_rpc_functions.sql` | Initial atomic RPC functions with idempotency |
-| `00005_row_level_security.sql` | RLS policies per user role |
-| `00006_fix_rls_and_staff_rpc.sql` | RLS fixes + staff management RPC |
-| `00007_allow_purchases_and_financial_rls.sql` | Purchase-specific RLS relaxation |
-| `00008_collect_customer_debt_rpc.sql` | `rpc_collect_customer_debt` |
-| `00009_staff_pin_authentication.sql` | 4-digit PIN login for staff roles |
-| `00010_add_preparing_ready_order_statuses.sql` | Order lifecycle: `preparing`, `ready` statuses |
-| `00011_driver_locations_tracking.sql` | `driver_locations` table for telemetry |
-| `00012_comprehensive_audit_trail_and_views.sql` | Audit views + enhanced audit trail |
-| `00013_product_images_storage_bucket.sql` | Supabase Storage bucket for product images |
-| `00014_concurrency_and_security_fixes.sql` | Concurrency guards, idempotency fixes, security |
-| `00015_section3_security_hardening.sql` | Final RLS hardening pass |
+- `backend/supabase/schema/001_fresh_schema.sql` — bundles all migrations through `00033`.
+
+To initialize a new Supabase project, run in order:
+
+1. `backend/supabase/schema/001_fresh_schema.sql`
+2. `backend/supabase/seeds/001_admin.sql` (admin only, no demo data)
+3. `backend/supabase/operations/verify_installation.sql` (optional health check)
+
+Future schema changes go in `backend/supabase/migrations/` as sequential files starting at `00034`. Historical migrations `00001`–`00033` are archived in `backend/supabase/archive/migrations/` and are reference-only. The old consolidated scripts and the demo seed are in `backend/supabase/archive/legacy/`.
+
+See `backend/supabase/README.md` for setup, reset, and verification commands.
 
 **Never** edit a migration after it has been applied. Always create a new numbered file.  
 **Never** write DDL or DML directly from the Flutter client — only via named RPC functions.
+
+## Client Configuration
+
+The Flutter apps read `SUPABASE_URL` and `SUPABASE_ANON_KEY` through `String.fromEnvironment` in `packages/core/lib/constants/app_constants.dart`. There is no compiled fallback project: `ensureSupabaseConfigured()` fails fast when a build omits the values. Local values live in a git-ignored `.env` (template: `.env.example`) and are passed with `--dart-define-from-file=.env`. `scripts/publish_release.ps1` loads `.env` automatically (environment variables win) and forwards the values to every build as `--dart-define`. Never put the `service_role` key in a client app; only the publisher and CI use it.
 
 ---
 

@@ -12,6 +12,7 @@ import 'package:customer_app/main.dart' as customer;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  AppConstants.ensureSupabaseConfigured();
 
   await Supabase.initialize(
     url: AppConstants.supabaseUrl,
