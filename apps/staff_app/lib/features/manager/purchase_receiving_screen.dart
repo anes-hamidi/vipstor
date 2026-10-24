@@ -53,6 +53,67 @@ class _PurchaseReceivingScreenState
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAppUpdates();
+    });
+  }
+
+  Future<void> _checkAppUpdates() async {
+    try {
+      final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
+      if (res.hasUpdate && mounted && res.newRelease != null) {
+        final service = ref.read(appUpdateServiceProvider);
+        AppUpdateDialog.show(
+          context,
+          release: res.newRelease!,
+          currentVersion: res.currentVersion,
+          currentBuild: res.currentBuild,
+          updateService: service,
+          force: res.isForceUpdate,
+        );
+      }
+    } catch (e) {
+      debugPrint('[Manager] Error checking updates: $e');
+    }
+  }
+
+  Future<void> _checkUpdatesManually() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('جاري التحقق من التحديثات...'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+    try {
+      final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
+      if (!mounted) return;
+      if (res.hasUpdate && res.newRelease != null) {
+        final service = ref.read(appUpdateServiceProvider);
+        AppUpdateDialog.show(
+          context,
+          release: res.newRelease!,
+          currentVersion: res.currentVersion,
+          currentBuild: res.currentBuild,
+          updateService: service,
+          force: res.isForceUpdate,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
+            backgroundColor: const Color(0xFF1E3A2F),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذر التحقق من التحديثات: $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
   }
 
   @override
@@ -307,6 +368,11 @@ class _PurchaseReceivingScreenState
         ),
       ),
       actions: [
+        IconButton(
+          tooltip: 'التحقق من التحديثات',
+          icon: const Icon(Icons.system_update_rounded),
+          onPressed: _checkUpdatesManually,
+        ),
         IconButton(
           tooltip: 'تعديل الملف الشخصي',
           icon: const Icon(Icons.manage_accounts_outlined),

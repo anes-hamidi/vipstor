@@ -61,7 +61,7 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
   Future<void> _checkAppUpdates() async {
     try {
       final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
-      if (res.hasUpdate && mounted) {
+      if (res.hasUpdate && mounted && res.newRelease != null) {
         final service = ref.read(appUpdateServiceProvider);
         AppUpdateDialog.show(
           context,
@@ -69,6 +69,7 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
           currentVersion: res.currentVersion,
           currentBuild: res.currentBuild,
           updateService: service,
+          force: res.isForceUpdate,
         );
       }
     } catch (e) {
@@ -86,7 +87,7 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     try {
       final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
       if (!mounted) return;
-      if (res.hasUpdate) {
+      if (res.hasUpdate && res.newRelease != null) {
         final service = ref.read(appUpdateServiceProvider);
         AppUpdateDialog.show(
           context,
@@ -94,6 +95,7 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
           currentVersion: res.currentVersion,
           currentBuild: res.currentBuild,
           updateService: service,
+          force: res.isForceUpdate,
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(

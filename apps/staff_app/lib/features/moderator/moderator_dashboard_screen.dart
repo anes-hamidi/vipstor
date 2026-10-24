@@ -203,6 +203,9 @@ class _ModeratorDashboardScreenState
   void initState() {
     super.initState();
     _tabs = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAppUpdates();
+    });
   }
 
   @override
@@ -218,6 +221,25 @@ class _ModeratorDashboardScreenState
     ref.invalidate(liveStaffUsersProvider);
   }
 
+  Future<void> _checkAppUpdates() async {
+    try {
+      final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
+      if (res.hasUpdate && mounted && res.newRelease != null) {
+        final service = ref.read(appUpdateServiceProvider);
+        AppUpdateDialog.show(
+          context,
+          release: res.newRelease!,
+          currentVersion: res.currentVersion,
+          currentBuild: res.currentBuild,
+          updateService: service,
+          force: res.isForceUpdate,
+        );
+      }
+    } catch (e) {
+      debugPrint('[Moderator] Error checking updates: $e');
+    }
+  }
+
   Future<void> _checkUpdatesManually() async {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -228,7 +250,7 @@ class _ModeratorDashboardScreenState
     try {
       final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
       if (!mounted) return;
-      if (res.hasUpdate) {
+      if (res.hasUpdate && res.newRelease != null) {
         final service = ref.read(appUpdateServiceProvider);
         AppUpdateDialog.show(
           context,
@@ -236,6 +258,7 @@ class _ModeratorDashboardScreenState
           currentVersion: res.currentVersion,
           currentBuild: res.currentBuild,
           updateService: service,
+          force: res.isForceUpdate,
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(

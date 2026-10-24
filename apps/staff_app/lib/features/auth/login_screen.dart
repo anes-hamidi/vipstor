@@ -35,6 +35,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _currentTime = DateTime.now());
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAppUpdates();
+    });
+  }
+
+  Future<void> _checkAppUpdates() async {
+    try {
+      final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
+      if (res.hasUpdate && mounted && res.newRelease != null) {
+        final service = ref.read(appUpdateServiceProvider);
+        AppUpdateDialog.show(
+          context,
+          release: res.newRelease!,
+          currentVersion: res.currentVersion,
+          currentBuild: res.currentBuild,
+          updateService: service,
+          force: res.isForceUpdate,
+        );
+      }
+    } catch (e) {
+      debugPrint('[Login] Error checking updates: $e');
+    }
   }
 
   @override

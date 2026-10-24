@@ -51,6 +51,67 @@ class _DriverDeliveriesScreenState
   void initState() {
     super.initState();
     _telemetry.addListener(_onTelemetryUpdate);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAppUpdates();
+    });
+  }
+
+  Future<void> _checkAppUpdates() async {
+    try {
+      final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
+      if (res.hasUpdate && mounted && res.newRelease != null) {
+        final service = ref.read(appUpdateServiceProvider);
+        AppUpdateDialog.show(
+          context,
+          release: res.newRelease!,
+          currentVersion: res.currentVersion,
+          currentBuild: res.currentBuild,
+          updateService: service,
+          force: res.isForceUpdate,
+        );
+      }
+    } catch (e) {
+      debugPrint('[Driver] Error checking updates: $e');
+    }
+  }
+
+  Future<void> _checkUpdatesManually() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('جاري التحقق من التحديثات...'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+    try {
+      final res = await ref.read(appUpdateServiceProvider).checkForUpdate();
+      if (!mounted) return;
+      if (res.hasUpdate && res.newRelease != null) {
+        final service = ref.read(appUpdateServiceProvider);
+        AppUpdateDialog.show(
+          context,
+          release: res.newRelease!,
+          currentVersion: res.currentVersion,
+          currentBuild: res.currentBuild,
+          updateService: service,
+          force: res.isForceUpdate,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
+            backgroundColor: const Color(0xFF1E3A2F),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تعذر التحقق من التحديثات: $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
+    }
   }
 
   @override
@@ -458,6 +519,11 @@ class _DriverDeliveriesScreenState
             onPressed: _refresh,
           ),
           _AppBarAction(
+            icon: Icons.system_update_rounded,
+            tooltip: 'التحقق من التحديثات',
+            onPressed: _checkUpdatesManually,
+          ),
+          _AppBarAction(
             icon: Icons.manage_accounts_outlined,
             tooltip: 'تعديل الملف الشخصي',
             onPressed: _openEditProfile,
@@ -477,6 +543,9 @@ class _DriverDeliveriesScreenState
                 case 'refresh':
                   _refresh();
                   break;
+                case 'update':
+                  _checkUpdatesManually();
+                  break;
                 case 'profile':
                   _openEditProfile();
                   break;
@@ -492,6 +561,14 @@ class _DriverDeliveriesScreenState
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.refresh_rounded),
                   title: Text('تحديث المهام'),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'update',
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.system_update_rounded),
+                  title: Text('التحقق من التحديثات'),
                 ),
               ),
               const PopupMenuItem(

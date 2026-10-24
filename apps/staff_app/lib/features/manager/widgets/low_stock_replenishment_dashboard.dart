@@ -44,6 +44,7 @@ class _LowStockReplenishmentDashboardState
     String selectedSupplierName = suppliers.first['name'] as String;
 
     final confirmed = await showDialog<bool>(
+      // ignore: use_build_context_synchronously
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {

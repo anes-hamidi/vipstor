@@ -23,3 +23,4 @@ export 'widgets/luxury_card.dart';   // LuxuryCard · LuxuryCard.glass · Luxury
 export 'widgets/money_field.dart';
 export 'widgets/status_badge.dart';
 export 'widgets/stock_badge.dart';
+export 'widgets/app_update_screen.dart';

@@ -1,3 +1,5 @@
+// ignore_for_file: depend_on_referenced_packages
+
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -42,8 +44,10 @@ class AppUpdateService {
     return 'unknown';
   }
 
-  /// Checks if a newer release is published for the current platform
-  Future<AppUpdateCheckResult> checkForUpdate() async {
+  /// Checks if a newer release is published for the current platform.
+  /// When [force] is true, returns the latest release even if build numbers match,
+  /// or a preview release if no release exists in the database.
+  Future<AppUpdateCheckResult> checkForUpdate({bool force = false}) async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
@@ -54,11 +58,31 @@ class AppUpdateService {
         platform: currentPlatform,
       );
 
-      if (latest != null && latest.hasUpdate(currentBuild)) {
+      if (latest != null && (force || latest.hasUpdate(currentBuild))) {
         return AppUpdateCheckResult(
           currentVersion: currentVersion,
           currentBuild: currentBuild,
           newRelease: latest,
+        );
+      }
+
+      if (force && latest == null) {
+        // Fallback preview release for testing when app_versions is empty
+        return AppUpdateCheckResult(
+          currentVersion: currentVersion,
+          currentBuild: currentBuild,
+          newRelease: AppVersionEntity(
+            id: 'preview-update-staff',
+            appType: appType,
+            platform: currentPlatform,
+            versionName: currentVersion,
+            buildNumber: currentBuild + 1,
+            minSupportedBuild: currentBuild + 1,
+            downloadUrl: 'https://github.com/anes-hamidi/vipstor/releases',
+            releaseNotes: 'نسخة تجريبية لاختبار وتأكيد شاشة التحديث الإجباري للموظفين.',
+            isMandatory: true,
+            publishedAt: DateTime.now(),
+          ),
         );
       }
 
