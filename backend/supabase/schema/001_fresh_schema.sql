@@ -1,10 +1,10 @@
 -- ============================================================
 -- VIP WHOLESALE & POS MANAGEMENT SYSTEM
--- FRESH DATABASE BASELINE - SCHEMA VERSION 00033
+-- FRESH DATABASE BASELINE - SCHEMA VERSION 00034
 -- ============================================================
 -- This is the single authoritative schema for a NEW Supabase project.
 -- It merges the curated base schema (migrations 00001-00015) with every
--- migration through 00033, in order.
+-- migration through 00034, in order.
 --
 -- DO NOT run this on a database that already contains the VIP schema.
 -- For an existing database use the incremental migrations instead.
@@ -405,7 +405,7 @@ CREATE TABLE IF NOT EXISTS supplier_ledger (
 -- Payments collection log
 CREATE TABLE IF NOT EXISTS payments (
     id          UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id    UUID           REFERENCES orders(id),
+    order_id    UUID           REFERENCES orders(id) ON DELETE SET NULL,
     customer_id UUID           REFERENCES customers(id),
     amount      BIGINT         NOT NULL CHECK (amount > 0),
     method      payment_method NOT NULL DEFAULT 'cash',
@@ -4859,6 +4859,11 @@ DECLARE
     v_old_json  JSONB := NULL;
     v_target_id UUID := NULL;
 BEGIN
+    -- Fast exit during batch maintenance / archival cleanup
+    IF current_setting('app.maintenance_mode', true) = 'true' THEN
+        RETURN COALESCE(NEW, OLD);
+    END IF;
+
     -- Resolve actor from auth.uid() when a JWT exists.
     BEGIN
         v_user_id := auth.uid();
@@ -6004,6 +6009,135 @@ $$;
 REVOKE ALL ON FUNCTION rpc_get_customer_order_live(UUID, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION rpc_get_customer_order_live(UUID, TEXT) TO anon, authenticated;
 
+
+-- ============================================================================
+-- 00034 - storage lifecycle and retention management
+-- Source: backend/supabase/operations/storage_lifecycle_management.sql
+-- ============================================================================
+-- Optimizes storage for permanent operation under the Supabase Free Tier (500 MB).
+-- 1. Performance indexes for telemetry and closed orders.
+-- 2. Stored procedure rpc_purge_historical_data() to purge archived data safely.
+-- ============================================================================
+
+CREATE INDEX IF NOT EXISTS idx_driver_location_events_recorded_at
+    ON driver_location_events(recorded_at);
+
+CREATE INDEX IF NOT EXISTS idx_orders_status_created_at
+    ON orders(status, created_at)
+    WHERE status IN ('delivered', 'settled', 'cancelled');
+
+CREATE OR REPLACE FUNCTION rpc_purge_historical_data(
+    p_order_retention_days INT DEFAULT 60,
+    p_audit_retention_days INT DEFAULT 30,
+    p_telemetry_retention_days INT DEFAULT 7
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions, pg_temp
+AS $$
+DECLARE
+    v_purged_orders BIGINT := 0;
+    v_purged_order_items BIGINT := 0;
+    v_purged_audit BIGINT := 0;
+    v_purged_telemetry BIGINT := 0;
+    v_purged_failed_ops BIGINT := 0;
+    v_cutoff_orders TIMESTAMPTZ;
+    v_cutoff_audit TIMESTAMPTZ;
+    v_cutoff_telemetry TIMESTAMPTZ;
+BEGIN
+    -- Guardrails on minimum safe retention periods
+    IF p_order_retention_days < 14 THEN
+        RAISE EXCEPTION 'Order retention cannot be less than 14 days.';
+    END IF;
+    IF p_audit_retention_days < 7 THEN
+        RAISE EXCEPTION 'Audit retention cannot be less than 7 days.';
+    END IF;
+    IF p_telemetry_retention_days < 1 THEN
+        RAISE EXCEPTION 'Telemetry retention cannot be less than 1 day.';
+    END IF;
+
+    v_cutoff_orders := NOW() - (p_order_retention_days || ' days')::INTERVAL;
+    v_cutoff_audit := NOW() - (p_audit_retention_days || ' days')::INTERVAL;
+    v_cutoff_telemetry := NOW() - (p_telemetry_retention_days || ' days')::INTERVAL;
+
+    -- Suppress audit triggers during batch cleanup
+    PERFORM set_config('app.maintenance_mode', 'true', true);
+
+    -- 1. Purge driver location events older than threshold
+    DELETE FROM driver_location_events
+    WHERE recorded_at < v_cutoff_telemetry;
+    GET DIAGNOSTICS v_purged_telemetry = ROW_COUNT;
+
+    -- 2. Purge transient offline sync failure logs older than 14 days
+    DELETE FROM failed_operations
+    WHERE created_at < (NOW() - INTERVAL '14 days');
+    GET DIAGNOSTICS v_purged_failed_ops = ROW_COUNT;
+
+    -- 3. Purge audit log records older than threshold
+    DELETE FROM audit_log
+    WHERE created_at < v_cutoff_audit;
+    GET DIAGNOSTICS v_purged_audit = ROW_COUNT;
+
+    -- Also purge audit_log_partitioned if active
+    IF to_regclass('public.audit_log_partitioned') IS NOT NULL THEN
+        BEGIN
+            DELETE FROM audit_log_partitioned WHERE created_at < v_cutoff_audit;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
+    END IF;
+
+    -- 4. Purge closed/delivered/cancelled orders older than threshold
+    --    ACTIVE / IN-FLIGHT orders are NEVER touched!
+    -- Detach payments from orders being deleted so payment records remain intact
+    UPDATE payments
+    SET order_id = NULL
+    WHERE order_id IN (
+        SELECT id FROM orders
+        WHERE status IN ('delivered', 'settled', 'cancelled')
+          AND created_at < v_cutoff_orders
+    );
+
+    -- Delete order_items
+    WITH old_orders AS (
+        SELECT id FROM orders
+        WHERE status IN ('delivered', 'settled', 'cancelled')
+          AND created_at < v_cutoff_orders
+    ),
+    deleted_items AS (
+        DELETE FROM order_items
+        WHERE order_id IN (SELECT id FROM old_orders)
+        RETURNING id
+    )
+    SELECT count(*) INTO v_purged_order_items FROM deleted_items;
+
+    -- Delete orders
+    WITH deleted_orders AS (
+        DELETE FROM orders
+        WHERE status IN ('delivered', 'settled', 'cancelled')
+          AND created_at < v_cutoff_orders
+        RETURNING id
+    )
+    SELECT count(*) INTO v_purged_orders FROM deleted_orders;
+
+    RETURN jsonb_build_object(
+        'status', 'success',
+        'purged_orders', v_purged_orders,
+        'purged_order_items', v_purged_order_items,
+        'purged_audit_entries', v_purged_audit,
+        'purged_telemetry_events', v_purged_telemetry,
+        'purged_failed_operations', v_purged_failed_ops,
+        'order_retention_days', p_order_retention_days,
+        'audit_retention_days', p_audit_retention_days,
+        'telemetry_retention_days', p_telemetry_retention_days,
+        'executed_at', NOW()
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION rpc_purge_historical_data(INT, INT, INT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION rpc_purge_historical_data(INT, INT, INT) TO service_role, authenticated;
+
 -- Force PostgREST to pick up the new function/index metadata.
 NOTIFY pgrst, 'reload schema';
 
@@ -6041,7 +6175,8 @@ INSERT INTO schema_migrations (version, description) VALUES
     ('00030', '00030 - audit log partitioning readiness'),
     ('00031', '00031 - offline sync resilience'),
     ('00032', '00032 - permission repair'),
-    ('00033', '00033 - customer experience upgrade')
+    ('00033', '00033 - customer experience upgrade'),
+    ('00034', '00034 - storage lifecycle and retention management')
 ON CONFLICT (version) DO NOTHING;
 
 ALTER TABLE schema_migrations ENABLE ROW LEVEL SECURITY;

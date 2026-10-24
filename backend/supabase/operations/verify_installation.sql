@@ -6,7 +6,7 @@
 -- seeds/001_admin.sql to confirm the database is ready.
 --
 -- A healthy fresh install shows:
---   * latest_version = 00033
+--   * latest_version = 00034
 --   * no missing tables
 --   * no missing RPCs
 --   * rls_enabled = public_tables
@@ -56,7 +56,8 @@ WITH expected(name) AS (
         ('rpc_submit_customer_order'), ('rpc_register_or_bind_customer_device'),
         ('rpc_save_user_profile'), ('rpc_create_customer_by_staff'),
         ('rpc_get_customer_order_live'), ('rpc_open_pos_shift'),
-        ('rpc_close_pos_shift'), ('rpc_get_latest_app_version')
+        ('rpc_close_pos_shift'), ('rpc_get_latest_app_version'),
+        ('rpc_purge_historical_data')
 )
 SELECT e.name AS missing_rpc
 FROM expected e

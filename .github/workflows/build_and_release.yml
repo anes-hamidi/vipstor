@@ -52,6 +52,11 @@ on:
         required: true
         default: '1.1.0'
         type: string
+      build_number:
+        description: 'Build number (versionCode). Must exceed the last released build; 0 = auto'
+        required: false
+        default: '0'
+        type: string
       android_abi:
         description: 'Android ABI (universal is larger and may exceed the 50 MB limit)'
         required: true
@@ -170,6 +175,25 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
+      - name: Validate required secrets
+        shell: pwsh
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          $missing = @(
+            foreach ($name in @('SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY')) {
+              if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+                $name
+              }
+            }
+          )
+          if ($missing.Count -gt 0) {
+            throw "Missing GitHub Actions secrets: $($missing -join ', '). Add them under Settings > Secrets and variables > Actions."
+          }
+          Write-Host 'Supabase secrets are present.'
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -238,6 +262,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           VERSION: ${{ needs.plan.outputs.version }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
           PLATFORM: ${{ matrix.platform }}
           ANDROID_ABI: ${{ inputs.android_abi }}
           MIN_SUPPORTED_BUILD: ${{ inputs.min_supported_build }}
@@ -253,6 +278,9 @@ jobs:
             '-Version', $env:VERSION
           )
 
+          if (-not [string]::IsNullOrWhiteSpace($env:BUILD_NUMBER) -and $env:BUILD_NUMBER -ne '0') {
+            $scriptArgs += @('-BuildNumber', $env:BUILD_NUMBER)
+          }
           if ($env:PLATFORM -eq 'android' -and -not [string]::IsNullOrWhiteSpace($env:ANDROID_ABI)) {
             $scriptArgs += @('-AndroidAbi', $env:ANDROID_ABI)
           }

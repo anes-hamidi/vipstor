@@ -9,14 +9,16 @@ This folder is the complete database backend for the VIP Wholesale & POS system.
 ```
 backend/supabase/
 ├── schema/
-│   └── 001_fresh_schema.sql      # Complete schema for a NEW database (through 00033)
+│   └── 001_fresh_schema.sql      # Complete schema for a NEW database (through 00034)
 ├── seeds/
 │   └── 001_admin.sql             # Admin-only seed: one moderator account
 ├── operations/
 │   ├── reset_database.sql        # DESTRUCTIVE: drop and recreate the public schema
-│   └── verify_installation.sql   # Read-only installation health check
+│   ├── verify_installation.sql   # Read-only installation health check
+│   ├── check_storage_footprint.sql # Read-only disk usage & archivable candidate audit
+│   └── storage_lifecycle_management.sql # Retention policy & rpc_purge_historical_data
 ├── migrations/
-│   └── README.md                 # Where future incremental migrations go (00034+)
+│   └── README.md                 # Where future incremental migrations go (00035+)
 ├── archive/
 │   ├── migrations/               # Historical migrations 00001-00033 (reference only)
 │   └── legacy/                   # Stale consolidated schemas and the old demo seed
@@ -33,7 +35,7 @@ Use a brand-new Supabase project. In the Supabase Dashboard, open **SQL Editor**
 
 1. **`schema/001_fresh_schema.sql`**
    - Creates the full schema: tables, enum types, immutable ledgers, triggers, RBAC, RLS policies, audit trail, RPC functions, storage buckets, and performance indexes.
-   - Includes everything through migration `00033`.
+   - Includes everything through migration `00034`.
 2. **`seeds/001_admin.sql`**
    - Creates the single master moderator account.
    - No demo staff, customers, suppliers, products, prices, or stock are created.
@@ -106,6 +108,12 @@ For CI releases, set the GitHub Actions secrets `SUPABASE_URL`,
 running the workflow. All three are required because the apps have no compiled
 fallback project.
 
+Because a fresh project starts with an empty `app_versions` table, the first
+release would otherwise auto-select build `1`. OTA clients only update when
+`build_number` increases, so set the workflow's `build_number` input to a value
+greater than the last build installed on devices (for example `3`). After that,
+leave it at `0` to auto-increment from the database.
+
 `app_constants.dart` intentionally has no fallback project: a build without
 `SUPABASE_URL` and `SUPABASE_ANON_KEY` fails with a message explaining the
 `--dart-define` flags. This prevents an accidental release against an old
@@ -151,10 +159,13 @@ All state changes go through atomic, idempotent `SECURITY DEFINER` RPC functions
 - `rpc_open_pos_shift`, `rpc_close_pos_shift`
 - Staff/customer profile and PIN management RPCs
 
-### Storage
+### Storage & Free Tier Optimization (00034)
 
 - `product-images` bucket (public read, staff write).
 - `app-releases` bucket for OTA application packages.
+- **Storage Lifecycle & Auto-Purge:** `rpc_purge_historical_data` automatically archives and prunes closed orders (>60 days), audit logs (>30 days), and driver telemetry (>7 days) while strictly preserving products, customers, suppliers, ledgers, and wallets.
+- **Automated Pre-Purge Backup Action:** `.github/workflows/database_backup_and_prune.yml` exports historical datasets to compressed JSON artifacts in GitHub Artifacts before executing the database prune.
+- **Storage Inspection Tool:** `operations/check_storage_footprint.sql` audits disk usage against the 500 MB Supabase Free Tier ceiling.
 
 ---
 
@@ -163,7 +174,7 @@ All state changes go through atomic, idempotent `SECURITY DEFINER` RPC functions
 The baseline creates a `schema_migrations` table and records every bundled migration:
 
 ```
-00015, 00016, 00017, ... 00020a, 00020b, ... 00033
+00015, 00016, 00017, ... 00020a, 00020b, ... 00034
 ```
 
 It is read-only to clients. Future migrations should insert a row for their version after they run.

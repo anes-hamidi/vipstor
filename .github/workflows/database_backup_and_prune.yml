@@ -1,0 +1,223 @@
+name: Database Backup & Prune
+
+on:
+  schedule:
+    # Runs automatically on the 1st of every month at 02:00 UTC
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+    inputs:
+      order_retention_days:
+        description: 'Completed orders retention in days (older are archived and pruned)'
+        required: true
+        default: '60'
+      audit_retention_days:
+        description: 'Audit log retention in days (older are archived and pruned)'
+        required: true
+        default: '30'
+      telemetry_retention_days:
+        description: 'Driver location events retention in days'
+        required: true
+        default: '7'
+
+jobs:
+  backup-and-prune:
+    name: Backup Historical Data & Prune Storage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate Supabase Secrets
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
+            echo "::error::SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing from repository secrets."
+            exit 1
+          fi
+
+      - name: Calculate Cutoff Timestamps
+        id: cutoffs
+        run: |
+          ORDER_DAYS="${{ github.event.inputs.order_retention_days || '60' }}"
+          AUDIT_DAYS="${{ github.event.inputs.audit_retention_days || '30' }}"
+          TELEMETRY_DAYS="${{ github.event.inputs.telemetry_retention_days || '7' }}"
+
+          ORDER_CUTOFF=$(date -u -d "${ORDER_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')
+          AUDIT_CUTOFF=$(date -u -d "${AUDIT_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')
+          TELEMETRY_CUTOFF=$(date -u -d "${TELEMETRY_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')
+          TIMESTAMP=$(date -u '+%Y%m%d_%H%M%S')
+
+          echo "order_cutoff=${ORDER_CUTOFF}" >> $GITHUB_OUTPUT
+          echo "audit_cutoff=${AUDIT_CUTOFF}" >> $GITHUB_OUTPUT
+          echo "telemetry_cutoff=${TELEMETRY_CUTOFF}" >> $GITHUB_OUTPUT
+          echo "backup_tag=${TIMESTAMP}" >> $GITHUB_OUTPUT
+          echo "order_days=${ORDER_DAYS}" >> $GITHUB_OUTPUT
+          echo "audit_days=${AUDIT_DAYS}" >> $GITHUB_OUTPUT
+          echo "telemetry_days=${TELEMETRY_DAYS}" >> $GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Export Archivable Data to JSON
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ORDER_CUTOFF: ${{ steps.cutoffs.outputs.order_cutoff }}
+          AUDIT_CUTOFF: ${{ steps.cutoffs.outputs.audit_cutoff }}
+          TELEMETRY_CUTOFF: ${{ steps.cutoffs.outputs.telemetry_cutoff }}
+        run: |
+          mkdir -p backup_data
+          python - << 'EOF'
+          import os
+          import json
+          import requests
+          from datetime import datetime, timezone
+
+          supabase_url = os.environ['SUPABASE_URL'].rstrip('/')
+          supabase_key = os.environ['SUPABASE_KEY']
+          order_cutoff = os.environ['ORDER_CUTOFF']
+          audit_cutoff = os.environ['AUDIT_CUTOFF']
+          telemetry_cutoff = os.environ['TELEMETRY_CUTOFF']
+
+          headers = {
+              'apikey': supabase_key,
+              'Authorization': f'Bearer {supabase_key}',
+              'Accept': 'application/json'
+          }
+
+          def fetch_paginated(endpoint, query_params):
+              limit = 1000
+              offset = 0
+              all_rows = []
+              while True:
+                  params = query_params.copy()
+                  params['limit'] = limit
+                  params['offset'] = offset
+                  resp = requests.get(f"{supabase_url}/rest/v1/{endpoint}", headers=headers, params=params)
+                  resp.raise_for_status()
+                  data = resp.json()
+                  if not data:
+                      break
+                  all_rows.extend(data)
+                  if len(data) < limit:
+                      break
+                  offset += limit
+              return all_rows
+
+          # 1. Export Archivable Closed Orders & Nested Line Items
+          print(f"Exporting closed orders before {order_cutoff}...")
+          orders = fetch_paginated('orders', {
+              'status': 'in.(delivered,settled,cancelled)',
+              'created_at': f'lt.{order_cutoff}',
+              'select': '*,order_items(*)'
+          })
+          with open('backup_data/archived_orders.json', 'w', encoding='utf-8') as f:
+              json.dump(orders, f, ensure_ascii=False, indent=2)
+          print(f"Exported {len(orders)} orders.")
+
+          # 2. Export Archivable Audit Log entries
+          print(f"Exporting audit logs before {audit_cutoff}...")
+          audit_logs = fetch_paginated('audit_log', {
+              'created_at': f'lt.{audit_cutoff}',
+              'select': '*'
+          })
+          with open('backup_data/archived_audit_log.json', 'w', encoding='utf-8') as f:
+              json.dump(audit_logs, f, ensure_ascii=False, indent=2)
+          print(f"Exported {len(audit_logs)} audit records.")
+
+          # 3. Export Archivable Driver Location Events
+          print(f"Exporting telemetry events before {telemetry_cutoff}...")
+          telemetry = fetch_paginated('driver_location_events', {
+              'recorded_at': f'lt.{telemetry_cutoff}',
+              'select': '*'
+          })
+          with open('backup_data/archived_driver_telemetry.json', 'w', encoding='utf-8') as f:
+              json.dump(telemetry, f, ensure_ascii=False, indent=2)
+          print(f"Exported {len(telemetry)} telemetry records.")
+
+          # Write Manifest
+          manifest = {
+              'exported_at': datetime.now(timezone.utc).isoformat(),
+              'counts': {
+                  'orders': len(orders),
+                  'audit_entries': len(audit_logs),
+                  'telemetry_events': len(telemetry)
+              },
+              'cutoffs': {
+                  'order_cutoff': order_cutoff,
+                  'audit_cutoff': audit_cutoff,
+                  'telemetry_cutoff': telemetry_cutoff
+              }
+          }
+          with open('backup_data/manifest.json', 'w', encoding='utf-8') as f:
+              json.dump(manifest, f, indent=2)
+          EOF
+
+      - name: Compress Backup Archive
+        run: |
+          tar -czf "vip_database_backup_${{ steps.cutoffs.outputs.backup_tag }}.tar.gz" -C backup_data .
+          ls -lh vip_database_backup_*.tar.gz
+
+      - name: Upload Backup Artifact to GitHub Storage
+        uses: actions/upload-artifact@v4
+        with:
+          name: vip-database-backup-${{ steps.cutoffs.outputs.backup_tag }}
+          path: vip_database_backup_*.tar.gz
+          retention-days: 90
+
+      - name: Execute Prune RPC on Database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ORDER_DAYS: ${{ steps.cutoffs.outputs.order_days }}
+          AUDIT_DAYS: ${{ steps.cutoffs.outputs.audit_days }}
+          TELEMETRY_DAYS: ${{ steps.cutoffs.outputs.telemetry_days }}
+        run: |
+          python - << 'EOF'
+          import os
+          import requests
+          import json
+
+          supabase_url = os.environ['SUPABASE_URL'].rstrip('/')
+          supabase_key = os.environ['SUPABASE_KEY']
+          order_days = int(os.environ['ORDER_DAYS'])
+          audit_days = int(os.environ['AUDIT_DAYS'])
+          telemetry_days = int(os.environ['TELEMETRY_DAYS'])
+
+          headers = {
+              'apikey': supabase_key,
+              'Authorization': f'Bearer {supabase_key}',
+              'Content-Type': 'application/json'
+          }
+
+          payload = {
+              'p_order_retention_days': order_days,
+              'p_audit_retention_days': audit_days,
+              'p_telemetry_retention_days': telemetry_days
+          }
+
+          resp = requests.post(
+              f"{supabase_url}/rest/v1/rpc/rpc_purge_historical_data",
+              headers=headers,
+              json=payload
+          )
+          resp.raise_for_status()
+          result = resp.json()
+          print("Prune RPC Response:", json.dumps(result, indent=2))
+
+          # Save to step summary
+          summary_file = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary_file:
+              with open(summary_file, 'a', encoding='utf-8') as f:
+                  f.write("## 🧹 Database Backup & Storage Prune Report\n\n")
+                  f.write(f"- **Status:** `{result.get('status', 'complete')}`\n")
+                  f.write(f"- **Orders Purged (> {order_days}d):** {result.get('purged_orders', 0)}\n")
+                  f.write(f"- **Order Items Purged:** {result.get('purged_order_items', 0)}\n")
+                  f.write(f"- **Audit Log Entries Purged (> {audit_days}d):** {result.get('purged_audit_entries', 0)}\n")
+                  f.write(f"- **Telemetry Events Purged (> {telemetry_days}d):** {result.get('purged_telemetry_events', 0)}\n")
+                  f.write(f"- **Failed Operations Purged (> 14d):** {result.get('purged_failed_operations', 0)}\n")
+                  f.write(f"- **Executed At:** `{result.get('executed_at')}`\n\n")
+                  f.write("✅ **Pre-purge backup archive successfully saved to GitHub Artifacts (90-day retention).**\n")
+          EOF
