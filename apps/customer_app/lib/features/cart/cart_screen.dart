@@ -143,7 +143,7 @@ class CartScreen extends ConsumerWidget {
 
     final totalCentimes =
         cart.fold<int>(0, (sum, item) => sum + item.lineTotal);
-    final totalQuantity = cart.fold<int>(0, (sum, item) => sum + item.quantity);
+    final quantitySummary = _quantitySummary(cart);
     final unavailable = cart.where((item) => !item.isAvailable).toList();
     final overStock = cart.where((item) => item.exceedsStock).toList();
     final needsProfile = !profile.isComplete;
@@ -167,8 +167,12 @@ class CartScreen extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
-            Text(
-              cart.isEmpty ? 'سلة الطلب' : 'سلة الطلب ($totalQuantity)',
+            Flexible(
+              child: Text(
+                cart.isEmpty ? 'سلة الطلب' : 'سلة الطلب (${cart.length})',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -186,7 +190,7 @@ class CartScreen extends ConsumerWidget {
           : SafeArea(
               child: Container(
                 padding: const EdgeInsetsDirectional.fromSTEB(
-                    AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.md),
+                    AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.sm),
                 decoration: BoxDecoration(
                   color: isDark
                       ? const Color(0xFF1A1814)
@@ -217,24 +221,31 @@ class CartScreen extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('المجموع الكلي',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant)),
-                            Text(
-                              '$totalQuantity قطعة',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                fontSize: 10,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('المجموع الكلي',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      fontSize: 11,
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant)),
+                              if (quantitySummary.isNotEmpty)
+                                Text(
+                                  quantitySummary,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 9.5,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
-                        DzdPriceTag.hero(
+                        const SizedBox(width: AppSpacing.sm),
+                        DzdPriceTag.lg(
                           centimes: totalCentimes,
                           gold: true,
                         ),
@@ -261,7 +272,9 @@ class CartScreen extends ConsumerWidget {
                                 : 'وضع عدم الاتصال — تحقق من الاتصال قبل إتمام الطلب.',
                         color: needsOnlineSetup
                             ? colors.warning
-                            : (hasAccount ? const Color(0xFF34D399) : colors.warning),
+                            : (hasAccount
+                                ? const Color(0xFF34D399)
+                                : colors.warning),
                       ),
                     ],
                     const SizedBox(height: AppSpacing.sm),
@@ -280,17 +293,18 @@ class CartScreen extends ConsumerWidget {
                               : online
                                   ? 'تأكيد وإرسال الطلبية'
                                   : 'حفظ الطلبية وإرسالها لاحقاً',
-                      onPressed: isSubmitting ? null : () => _submit(context, ref),
+                      onPressed:
+                          isSubmitting ? null : () => _submit(context, ref),
                       loading: isSubmitting,
                       width: double.infinity,
-                      height: 50,
+                      height: 46,
                     ),
                   ],
                 ),
               ),
             ),
       body: ContentConstrainedBox.dashboard(
-        padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
+        padding: const EdgeInsetsDirectional.all(AppSpacing.md),
         child: cart.isEmpty
             ? AppStates.empty(
                 icon: Icons.shopping_cart_outlined,
@@ -301,11 +315,11 @@ class CartScreen extends ConsumerWidget {
               )
             : RefreshIndicator(
                 color: const Color(0xFFD4AF37),
-                backgroundColor: isDark
-                    ? const Color(0xFF1A1814)
-                    : const Color(0xFFFFFDF8),
-                onRefresh: () =>
-                    ref.read(customerCatalogProvider.notifier).refresh(silent: true),
+                backgroundColor:
+                    isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+                onRefresh: () => ref
+                    .read(customerCatalogProvider.notifier)
+                    .refresh(silent: true),
                 child: ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   children: [
@@ -318,7 +332,7 @@ class CartScreen extends ConsumerWidget {
                       theme: theme,
                     ),
                     if (unavailable.isNotEmpty || overStock.isNotEmpty) ...[
-                      const SizedBox(height: AppSpacing.md),
+                      const SizedBox(height: AppSpacing.sm),
                       _StockAlertCard(
                         unavailableCount: unavailable.length,
                         overStockCount: overStock.length,
@@ -333,12 +347,15 @@ class CartScreen extends ConsumerWidget {
                               },
                       ),
                     ],
-                    const SizedBox(height: AppSpacing.lg),
-                    SectionHeader(title: 'المنتجات (${cart.length})'),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
+                    SectionHeader(
+                      title: 'المنتجات (${cart.length})',
+                      dense: true,
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
                     ...cart.map(
                       (item) => Padding(
-                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        padding: const EdgeInsets.only(bottom: 6),
                         child: Dismissible(
                           key: ValueKey(item.product.id),
                           direction: DismissDirection.endToStart,
@@ -364,20 +381,31 @@ class CartScreen extends ConsumerWidget {
                         ),
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.md),
-                    _OrderSummaryCard(
-                      totalCentimes: totalCentimes,
-                      totalQuantity: totalQuantity,
-                      isDark: isDark,
-                      theme: theme,
-                    ),
-                    const SizedBox(height: AppSpacing.xxl),
+                    const SizedBox(height: AppSpacing.xl),
                   ],
                 ),
               ),
       ),
     );
   }
+}
+
+/// `2 كرتون · 3 كغ · 1 لتر` — totals quantities by their real sale unit
+/// instead of incorrectly calling every line a "piece".
+String _quantitySummary(List<CustomerCartItem> cart) {
+  final counts = <ProductUnit, int>{};
+  for (final item in cart) {
+    final unit = item.product.unitType;
+    counts.update(
+      unit,
+      (value) => value + item.quantity,
+      ifAbsent: () => item.quantity,
+    );
+  }
+  return ProductUnit.values
+      .where(counts.containsKey)
+      .map((unit) => '${counts[unit]} ${unit.arabicLabel}')
+      .join(' · ');
 }
 
 // ── Cart line ─────────────────────────────────────────────────────────────────
@@ -406,7 +434,10 @@ class _CartLine extends ConsumerWidget {
 
     return LuxuryCard(
       selected: overStock,
-      padding: const EdgeInsetsDirectional.all(AppSpacing.sm),
+      padding: const EdgeInsetsDirectional.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 6,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -414,61 +445,55 @@ class _CartLine extends ConsumerWidget {
           ClipRRect(
             borderRadius: AppRadius.smAll,
             child: SizedBox(
-              width: 64,
-              height: 72,
+              width: 50,
+              height: 50,
               child: _CartThumb(product: product),
             ),
           ),
-          const SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   product.nameAr.isNotEmpty ? product.nameAr : product.nameFr,
-                  maxLines: 2,
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 13,
+                    fontSize: 12.5,
                     color: unavailable
                         ? theme.colorScheme.onSurface.withValues(alpha: 0.5)
                         : null,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Text(
-                  '${DzdFormatter.formatCentimes(item.unitPrice)} / ${product.unit}',
+                  '${item.quantity} × ${DzdFormatter.formatCentimes(item.unitPrice)} دج / ${product.unitLabel}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    fontSize: 10.5,
+                    fontSize: 10,
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
                 if (unavailable || overStock) ...[
-                  const SizedBox(height: 4),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                    decoration: BoxDecoration(
-                      color: accent.withValues(alpha: 0.12),
-                      borderRadius: AppRadius.pillAll,
-                      border: Border.all(
-                        color: accent.withValues(alpha: 0.35),
-                      ),
-                    ),
-                    child: Text(
-                      unavailable
-                          ? 'نفدت الكمية — احذفه للمتابعة'
-                          : 'المتاح ${product.availableQty} فقط',
-                      style: TextStyle(
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.bold,
-                        color: accent,
-                      ),
+                  const SizedBox(height: 1),
+                  Text(
+                    unavailable
+                        ? 'نفدت الكمية — احذفه للمتابعة'
+                        : 'المتاح ${product.availableQty} ${product.unitLabel} فقط',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: accent,
                     ),
                   ),
                 ],
-                const SizedBox(height: AppSpacing.sm),
+                const SizedBox(height: 4),
                 Row(
                   children: [
                     _QtyButton(
@@ -484,13 +509,13 @@ class _CartLine extends ConsumerWidget {
                           product.id, item.quantity - 1),
                     ),
                     SizedBox(
-                      width: 34,
+                      width: 28,
                       child: Text(
                         '${item.quantity}',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                          fontSize: 12.5,
                         ),
                       ),
                     ),
@@ -508,7 +533,7 @@ class _CartLine extends ConsumerWidget {
                       gold: true,
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                        fontSize: 13,
                       ),
                     ),
                   ],
@@ -542,8 +567,8 @@ class _QtyButton extends StatelessWidget {
         onTap: onTap,
         borderRadius: AppRadius.smAll,
         child: Container(
-          width: 30,
-          height: 30,
+          width: 28,
+          height: 28,
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF221E14) : const Color(0xFFFBF4DC),
             borderRadius: AppRadius.smAll,
@@ -554,7 +579,7 @@ class _QtyButton extends StatelessWidget {
           ),
           child: Icon(
             icon,
-            size: 15,
+            size: 14,
             color: onTap == null ? color.withValues(alpha: 0.3) : color,
           ),
         ),
@@ -626,13 +651,15 @@ class _DeliveryCard extends StatelessWidget {
 
     return LuxuryCard(
       goldAccent: !needsProfile,
-      padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+      padding: const EdgeInsetsDirectional.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 38,
-            height: 38,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
               gradient: needsProfile ? null : AppGradients.gold,
               color: needsProfile ? cs.tertiaryContainer : null,
@@ -643,81 +670,58 @@ class _DeliveryCard extends StatelessWidget {
               needsProfile
                   ? Icons.info_outline_rounded
                   : Icons.local_shipping_outlined,
-              size: 19,
+              size: 16,
               color: needsProfile
                   ? cs.onTertiaryContainer
                   : const Color(0xFF1A1400),
             ),
           ),
-          const SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   children: [
-                    Text(
-                      needsProfile ? 'أكمل بيانات التوصيل' : 'التوصيل إلى',
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: gold,
-                        fontWeight: FontWeight.bold,
+                    Flexible(
+                      child: Text(
+                        needsProfile ? 'أكمل بيانات التوصيل' : profile.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: needsProfile ? gold : null,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                     if (!needsProfile && profile.isSynced) ...[
-                      const SizedBox(width: AppSpacing.xs),
+                      const SizedBox(width: 3),
                       Icon(Icons.verified_rounded,
-                          size: 13, color: colors.success),
+                          size: 12, color: colors.success),
                     ],
                   ],
                 ),
-                const SizedBox(height: 2),
-                if (needsProfile)
-                  Text(
-                    online
-                        ? 'نحتاج اسم المحل، الهاتف والعنوان مرة واحدة فقط.'
-                        : 'لا يمكن إنشاء الحساب دون اتصال. تحقق من الشبكة ثم أكمل البيانات.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontSize: 10.5,
-                    ),
-                  )
-                else ...[
-                  Text(profile.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 13)),
-                  if (profile.phone.isNotEmpty)
-                    Text(profile.phone,
-                        style: theme.textTheme.bodySmall),
-                  Text(
-                    [profile.wilaya, profile.commune, profile.addressText]
-                        .where((part) => part.trim().isNotEmpty)
-                        .join(' · '),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      fontSize: 10.5,
-                    ),
+                const SizedBox(height: 1),
+                Text(
+                  needsProfile
+                      ? (online
+                          ? 'نحتاج اسم المحل، الهاتف والعنوان مرة واحدة فقط.'
+                          : 'لا يمكن إنشاء الحساب دون اتصال. تحقق من الشبكة.')
+                      : [
+                          if (profile.phone.isNotEmpty) profile.phone,
+                          profile.wilaya,
+                          profile.commune,
+                          profile.addressText,
+                        ].where((part) => part.trim().isNotEmpty).join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 10,
                   ),
-                  if (profile.latitude != null && profile.longitude != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Row(
-                        children: [
-                          Icon(Icons.gps_fixed_rounded,
-                              size: 11, color: colors.success),
-                          const SizedBox(width: 3),
-                          Text(
-                            'موقع GPS محفوظ',
-                            style: TextStyle(
-                                fontSize: 9, color: colors.success),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
+                ),
               ],
             ),
           ),
@@ -725,10 +729,12 @@ class _DeliveryCard extends StatelessWidget {
             onPressed: onEdit,
             style: TextButton.styleFrom(
               visualDensity: VisualDensity.compact,
+              minimumSize: const Size(0, 28),
               padding: const EdgeInsets.symmetric(horizontal: 8),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             child: Text(needsProfile ? 'أكمل' : 'تعديل',
-                style: const TextStyle(fontSize: 11)),
+                style: const TextStyle(fontSize: 10.5)),
           ),
         ],
       ),
@@ -754,7 +760,10 @@ class _StockAlertCard extends StatelessWidget {
     final colors = context.appColors;
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+      padding: const EdgeInsetsDirectional.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
       decoration: BoxDecoration(
         color: colors.warningContainer,
         borderRadius: AppRadius.mdAll,
@@ -762,19 +771,19 @@ class _StockAlertCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.warning_amber_rounded,
-              size: 20, color: colors.warning),
+          Icon(Icons.warning_amber_rounded, size: 18, color: colors.warning),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   unavailableCount > 0
                       ? 'منتجات نفدت من المخزون'
                       : 'كمية تتجاوز المخزون المتاح',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.bold,
                     color: colors.onWarningContainer,
                   ),
@@ -784,7 +793,7 @@ class _StockAlertCard extends StatelessWidget {
                       ? 'احذف المنتجات غير المتوفرة قبل تأكيد الطلبية.'
                       : 'سيتم تعديل الكمية تلقائياً إلى الحد المتاح.',
                   style: theme.textTheme.bodySmall?.copyWith(
-                    fontSize: 10,
+                    fontSize: 9.5,
                     color: colors.onWarningContainer,
                   ),
                 ),
@@ -794,89 +803,19 @@ class _StockAlertCard extends StatelessWidget {
           if (onRemoveUnavailable != null)
             TextButton(
               onPressed: onRemoveUnavailable,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: const Size(0, 28),
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
               child: const Text(
                 'حذف غير المتوفر',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold),
               ),
             ),
         ],
       ),
-    );
-  }
-}
-
-class _OrderSummaryCard extends StatelessWidget {
-  final int totalCentimes;
-  final int totalQuantity;
-  final bool isDark;
-  final ThemeData theme;
-
-  const _OrderSummaryCard({
-    required this.totalCentimes,
-    required this.totalQuantity,
-    required this.isDark,
-    required this.theme,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final muted = theme.colorScheme.onSurfaceVariant;
-    return LuxuryCard(
-      padding: const EdgeInsetsDirectional.all(AppSpacing.md),
-      child: Column(
-        children: [
-          _row('عدد القطع', '$totalQuantity', muted),
-          const SizedBox(height: AppSpacing.xs),
-          _row(
-            'طريقة الدفع',
-            'نقداً عند التسليم أو على الحساب',
-            muted,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          const GoldDivider(),
-          const SizedBox(height: AppSpacing.sm),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'الإجمالي',
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              DzdPriceTag(centimes: totalCentimes, gold: true),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: Text(
-              'السعر النهائي يُثبَّت عند تأكيد الطلبية من المتجر.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                fontSize: 9.5,
-                color: muted,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _row(String label, String value, Color muted) {
-    return Row(
-      children: [
-        Text(label,
-            style: TextStyle(fontSize: 11, color: muted)),
-        const Spacer(),
-        Flexible(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: const TextStyle(
-                fontSize: 11, fontWeight: FontWeight.w600),
-          ),
-        ),
-      ],
     );
   }
 }

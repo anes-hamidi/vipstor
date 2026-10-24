@@ -1,5 +1,7 @@
 import 'package:equatable/equatable.dart';
 
+import 'product_unit.dart';
+
 enum PriceTier {
   retail,
   wholesale,
@@ -133,14 +135,43 @@ class ProductEntity extends Equatable {
 
   String localizedName(String lang) => lang == 'fr' ? nameFr : nameAr;
 
+  /// Canonical sale unit derived from the raw [unit] string.
+  ProductUnit get unitType => ProductUnit.fromString(unit);
+
+  /// Compact Arabic unit label, e.g. `كرتون` or `كغ`.
+  String get unitLabel => unitType.arabicLabel;
+
+  /// Bilingual unit label, e.g. `كرتون (Carton)`.
+  String get unitBilingualLabel => unitType.bilingualLabel;
+
+  /// Resolves the unit price that the backend will charge for [quantity].
+  ///
+  /// Mirrors the deployed `rpc_submit_customer_order`:
+  ///  1. Best matching row for the customer's tier at this quantity.
+  ///  2. Otherwise the entry-level (lowest `minQty`) price across all tiers.
+  ///
+  /// This avoids showing a stale/wrong retail row (or zero) when a product only
+  /// has wholesale/bulk prices, which previously made the cart disagree with
+  /// the order total computed by the server.
   int getPriceForQuantity(PriceTier tier, int quantity) {
-    final matches = prices.where((p) => p.tier == tier && quantity >= p.minQty).toList();
-    if (matches.isEmpty) {
-      final fallback = prices.where((p) => p.tier == PriceTier.retail).toList();
-      return fallback.isNotEmpty ? fallback.first.priceCentimes : lastUnitCostCentimes;
+    final qty = quantity < 1 ? 1 : quantity;
+
+    ProductPriceTier? best;
+    for (final price in prices) {
+      if (price.tier != tier || price.minQty > qty) continue;
+      if (best == null || price.minQty > best.minQty) best = price;
     }
-    matches.sort((a, b) => b.minQty.compareTo(a.minQty));
-    return matches.first.priceCentimes;
+    if (best != null) return best.priceCentimes;
+
+    if (prices.isNotEmpty) {
+      var fallback = prices.first;
+      for (final price in prices.skip(1)) {
+        if (price.minQty < fallback.minQty) fallback = price;
+      }
+      return fallback.priceCentimes;
+    }
+
+    return lastUnitCostCentimes;
   }
 
   ProductEntity copyWith({

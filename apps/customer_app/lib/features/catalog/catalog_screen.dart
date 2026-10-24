@@ -1525,7 +1525,7 @@ class _ProductDetailsSheet extends ConsumerWidget {
                   ),
                   _InfoCell(
                     label: 'الوحدة',
-                    value: product.unit.isNotEmpty ? product.unit : 'قطعة',
+                    value: product.unitType.bilingualLabel,
                   ),
                   if (product.packSize > 1)
                     _InfoCell(

@@ -407,6 +407,15 @@ CustomerCartItem? _cartItemFromJson(Map<String, dynamic> j) {
 
 class CustomerCartNotifier extends StateNotifier<List<CustomerCartItem>> {
   CustomerCartNotifier(this.ref) : super(_load(ref)) {
+    // A persisted cart may carry the tier captured on a previous run. The
+    // profile can already be loaded when this provider is created, so the
+    // profile listener below would never fire — refresh the tier immediately
+    // so prices match the customer's current tier.
+    if (state.isNotEmpty) {
+      final restored = List<CustomerCartItem>.from(state);
+      _recalculateTiersInPlace(restored);
+      state = restored;
+    }
     if (state.isEmpty) _loadAsync();
   }
 

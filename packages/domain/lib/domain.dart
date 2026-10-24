@@ -2,6 +2,7 @@ library;
 
 export 'entities/user_entity.dart';
 export 'entities/product_entity.dart';
+export 'entities/product_unit.dart';
 export 'entities/order_entity.dart';
 export 'entities/purchase_entity.dart';
 export 'entities/ledger_entry.dart';
