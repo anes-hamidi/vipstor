@@ -8,6 +8,7 @@ class AppUpdateDialog extends StatefulWidget {
   final String currentVersion;
   final int currentBuild;
   final AppUpdateService updateService;
+  final bool force;
 
   const AppUpdateDialog({
     super.key,
@@ -15,6 +16,7 @@ class AppUpdateDialog extends StatefulWidget {
     required this.currentVersion,
     required this.currentBuild,
     required this.updateService,
+    this.force = false,
   });
 
   /// Displays the update dialog in either blocking (mandatory) or dismissible mode
@@ -24,8 +26,9 @@ class AppUpdateDialog extends StatefulWidget {
     required String currentVersion,
     required int currentBuild,
     required AppUpdateService updateService,
+    bool force = false,
   }) async {
-    final isMandatory = release.isForceRequired(currentBuild);
+    final isMandatory = force || release.isForceRequired(currentBuild);
 
     await showDialog<void>(
       context: context,
@@ -37,6 +40,7 @@ class AppUpdateDialog extends StatefulWidget {
           currentVersion: currentVersion,
           currentBuild: currentBuild,
           updateService: updateService,
+          force: force,
         ),
       ),
     );
@@ -51,7 +55,7 @@ class _AppUpdateDialogState extends State<AppUpdateDialog> {
   double _downloadProgress = 0.0;
   String? _errorMessage;
 
-  bool get _isMandatory => widget.release.isForceRequired(widget.currentBuild);
+  bool get _isMandatory => widget.force || widget.release.isForceRequired(widget.currentBuild);
 
   Future<void> _startUpdate() async {
     if (_isDownloading) return;

@@ -60,13 +60,14 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     try {
       final service = ref.read(customerAppUpdateServiceProvider);
       final res = await service.checkForUpdate();
-      if (!mounted || !res.hasUpdate) return;
+      if (!mounted || !res.hasUpdate || res.newRelease == null) return;
       await AppUpdateDialog.show(
         context,
         release: res.newRelease!,
         currentVersion: res.currentVersion,
         currentBuild: res.currentBuild,
         updateService: service,
+        force: res.isForceUpdate,
       );
     } catch (e) {
       debugPrint('[Shell] Update check failed: $e');

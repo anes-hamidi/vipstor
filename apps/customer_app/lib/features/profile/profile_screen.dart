@@ -48,20 +48,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Future<void> _checkForUpdate() async {
+  Future<void> _checkForUpdate({bool force = false}) async {
     if (_checkingUpdate) return;
     setState(() => _checkingUpdate = true);
     try {
       final service = ref.read(customerAppUpdateServiceProvider);
-      final result = await service.checkForUpdate();
+      final result = await service.checkForUpdate(force: force);
       if (!mounted) return;
-      if (result.hasUpdate && result.newRelease != null) {
+      if (result.newRelease != null && (result.hasUpdate || force)) {
         await AppUpdateDialog.show(
           context,
           release: result.newRelease!,
           currentVersion: result.currentVersion,
           currentBuild: result.currentBuild,
           updateService: service,
+          force: force || result.isForceUpdate,
         );
       } else {
         _toast('أنت تستخدم أحدث إصدار من التطبيق.');
@@ -276,7 +277,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               _ActionTile(
                 icon: Icons.system_update_alt_rounded,
                 title: 'التحقق من التحديثات',
-                subtitle: 'احصل على أحدث مزايا التطبيق',
+                subtitle: 'احصل على أحدث مزايا التطبيق (اضغط مطولاً لفرض التحديث)',
                 trailing: _checkingUpdate
                     ? const SizedBox(
                         width: 16,
@@ -284,7 +285,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : null,
-                onTap: _checkForUpdate,
+                onTap: () => _checkForUpdate(force: false),
+                onLongPress: () => _checkForUpdate(force: true),
               ),
               _ActionTile(
                 icon: Icons.info_outline_rounded,
@@ -861,6 +863,7 @@ class _ActionTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final Widget? trailing;
   final bool accent;
   final bool destructive;
@@ -870,6 +873,7 @@ class _ActionTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.onTap,
+    this.onLongPress,
     this.trailing,
     this.accent = false,
     this.destructive = false,
@@ -892,6 +896,7 @@ class _ActionTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
+          onLongPress: onLongPress,
           borderRadius: AppRadius.mdAll,
           child: Container(
             padding: const EdgeInsetsDirectional.symmetric(
