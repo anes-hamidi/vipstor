@@ -1,25 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pinput/pinput.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
-import '../../../providers/staff_providers.dart';
 
-/// Minimized, responsive modal dialog for changing a staff member's 4-digit PIN.
+import '../../../providers/staff_providers.dart';
+import 'auth_theme.dart';
+
+/// Responsive modal for changing a staff member's 4-digit PIN.
 ///
-/// Features:
-/// - Disables native system keyboard pop-up (`useNativeKeyboard: false`).
-/// - Full on-screen tactile numpad + physical keyboard shortcut support.
-/// - Compact, responsive layout adapted for Mobile, Tablet, and Desktop.
-/// - Sleek VIP Gold & Obsidian design language.
+/// The dialog is composed from the shared auth palette, so it follows the
+/// active light/dark theme and role accent. The native keyboard remains
+/// suppressed (`useNativeKeyboard: false`) and input is handled by the tactile
+/// on-screen keypad or the physical keyboard shortcuts.
 class ChangePinDialog extends ConsumerStatefulWidget {
   final UserEntity staffMember;
 
-  const ChangePinDialog({
-    super.key,
-    required this.staffMember,
-  });
+  const ChangePinDialog({super.key, required this.staffMember});
 
   /// Opens the change PIN dialog with full responsiveness.
   static Future<bool?> show(
@@ -28,7 +25,7 @@ class ChangePinDialog extends ConsumerStatefulWidget {
   }) {
     return showDialog<bool>(
       context: context,
-      builder: (ctx) => ChangePinDialog(staffMember: staffMember),
+      builder: (_) => ChangePinDialog(staffMember: staffMember),
     );
   }
 
@@ -69,8 +66,10 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
   void _backspace() {
     if (_isProcessing) return;
     if (_pinController.text.isNotEmpty) {
-      _pinController.text =
-          _pinController.text.substring(0, _pinController.text.length - 1);
+      _pinController.text = _pinController.text.substring(
+        0,
+        _pinController.text.length - 1,
+      );
       if (_errorMessage != null) {
         setState(() => _errorMessage = null);
       }
@@ -147,14 +146,20 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
       setState(() => _isProcessing = false);
 
       if (success) {
+        final messenger = ScaffoldMessenger.of(context);
+        final ColorScheme scheme = Theme.of(context).colorScheme;
+
         ref.invalidate(liveStaffUsersProvider);
         Navigator.pop(context, true);
-        ScaffoldMessenger.of(context).showSnackBar(
+        messenger.showSnackBar(
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.check_circle_rounded,
-                    color: Colors.white, size: 20),
+                Icon(
+                  Icons.check_circle_rounded,
+                  color: scheme.onInverseSurface,
+                  size: 20,
+                ),
                 const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Text(
@@ -164,7 +169,6 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
                 ),
               ],
             ),
-            backgroundColor: context.appColors.success,
           ),
         );
       } else {
@@ -188,55 +192,23 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.appColors;
+    final AuthPalette p = context.authPalette;
 
-    // Pin theme definitions
-    final defaultPinTheme = PinTheme(
-      width: 46,
-      height: 48,
-      textStyle: TextStyle(
-        fontSize: 22,
-        fontWeight: FontWeight.bold,
-        color: colors.gold,
-      ),
-      decoration: BoxDecoration(
-        color: colors.obsidianCard,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.goldBorder.withValues(alpha: 0.6)),
-      ),
-    );
-
-    final focusedPinTheme = defaultPinTheme.copyWith(
-      decoration: BoxDecoration(
-        color: colors.obsidianCard,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.gold, width: 1.8),
-        boxShadow: const [AppShadows.goldGlowSm],
-      ),
-    );
-
-    final errorPinTheme = defaultPinTheme.copyWith(
-      decoration: BoxDecoration(
-        color: colors.error.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.error, width: 1.8),
-      ),
-    );
-
-    String stepTitle;
-    String stepSubtitle;
-    if (_currentStep == 1) {
-      stepTitle = 'أدخل رمز PIN الحالي';
-      stepSubtitle = 'التحقق من هوية ${widget.staffMember.name}';
-    } else if (_currentStep == 2) {
-      stepTitle = 'أدخل رمز PIN الجديد';
-      stepSubtitle = 'اختر 4 أرقام يسهل تذكرها لك';
-    } else {
-      stepTitle = 'تأكيد رمز PIN الجديد';
-      stepSubtitle = 'أعد كتابة الرمز الجديد لتأكيد الحفظ';
+    final String stepTitle;
+    final String stepSubtitle;
+    switch (_currentStep) {
+      case 1:
+        stepTitle = 'أدخل رمز PIN الحالي';
+        stepSubtitle = 'التحقق من هوية ${widget.staffMember.name}';
+      case 2:
+        stepTitle = 'أدخل رمز PIN الجديد';
+        stepSubtitle = 'اختر 4 أرقام يسهل تذكرها لك';
+      default:
+        stepTitle = 'تأكيد رمز PIN الجديد';
+        stepSubtitle = 'أعد كتابة الرمز الجديد لتأكيد الحفظ';
     }
 
-    // Hardware Keyboard shortcuts
+    // Hardware keyboard shortcuts.
     final shortcuts = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.escape): () =>
           Navigator.pop(context, false),
@@ -279,210 +251,95 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
       child: Focus(
         autofocus: true,
         child: Dialog(
-          backgroundColor: colors.obsidianSurface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(color: colors.goldBorder.withValues(alpha: 0.5)),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.xl,
           ),
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 330),
-            child: SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Header
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: colors.gold.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
+            constraints: const BoxConstraints(maxWidth: 390),
+            child: AuthPanel(
+              radius: AppRadius.xxl,
+              child: SingleChildScrollView(
+                physics: const ClampingScrollPhysics(),
+                padding: const EdgeInsetsDirectional.fromSTEB(
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildHeader(p),
+                    const SizedBox(height: AppSpacing.md),
+                    Divider(color: p.border, height: 1),
+                    const SizedBox(height: AppSpacing.md),
+                    _buildStepIndicator(p),
+                    const SizedBox(height: AppSpacing.md),
+                    Text(
+                      stepTitle,
+                      textAlign: TextAlign.center,
+                      style: p.theme.textTheme.titleMedium?.copyWith(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: p.text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      stepSubtitle,
+                      textAlign: TextAlign.center,
+                      style: p.theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 11,
+                        color: p.muted,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Center(
+                      child: AuthPinField(
+                        controller: _pinController,
+                        focusNode: _focusNode,
+                        isError: _errorMessage != null,
+                        obscuringCharacter: '●',
+                        fieldWidth: 50,
+                        fieldHeight: 54,
+                        onCompleted: _onPinSubmitted,
+                        onChanged: (_) {
+                          if (_errorMessage != null) {
+                            setState(() => _errorMessage = null);
+                          }
+                        },
+                      ),
+                    ),
+                    AnimatedSize(
+                      duration: AppMotion.fast,
+                      curve: AppMotion.enterCurve,
+                      child: _errorMessage == null
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              padding: const EdgeInsetsDirectional.only(
+                                top: AppSpacing.sm,
+                              ),
+                              child: AuthErrorBanner(message: _errorMessage!),
                             ),
-                            child: Icon(Icons.password_rounded,
-                                color: colors.gold, size: 18),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'تغيير رمز PIN',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: colors.onGold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.close_rounded,
-                            size: 18,
-                            color: colors.onGold.withValues(alpha: 0.6)),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => Navigator.pop(context, false),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Divider(
-                      color: colors.goldBorder.withValues(alpha: 0.3),
-                      height: 1),
-                  const SizedBox(height: 12),
-
-                  // Step indicators
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildStepDot(1, 'القديم', colors),
-                      Container(
-                        width: 24,
-                        height: 2,
-                        color: _currentStep > 1
-                            ? colors.gold
-                            : colors.goldBorder.withValues(alpha: 0.4),
-                      ),
-                      _buildStepDot(2, 'الجديد', colors),
-                      Container(
-                        width: 24,
-                        height: 2,
-                        color: _currentStep > 2
-                            ? colors.gold
-                            : colors.goldBorder.withValues(alpha: 0.4),
-                      ),
-                      _buildStepDot(3, 'التأكيد', colors),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Title and Subtitle
-                  Text(
-                    stepTitle,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.bold,
-                      color: colors.onGold,
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    stepSubtitle,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: colors.onGold.withValues(alpha: 0.6),
+                    const SizedBox(height: AppSpacing.md),
+                    AuthNumericKeypad(
+                      maxWidth: 280,
+                      keyHeight: 46,
+                      enabled: !_isProcessing,
+                      clearLabel: 'C',
+                      backspaceLabel: '⌫',
+                      onDigit: _appendDigit,
+                      onBackspace: _backspace,
+                      onClear: _clear,
                     ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Pinput 4-Digit Field (Native Keyboard Suppressed)
-                  Directionality(
-                    textDirection: TextDirection.ltr,
-                    child: Pinput(
-                      controller: _pinController,
-                      focusNode: _focusNode,
-                      autofocus: false,
-                      useNativeKeyboard: false, // Prevents system clavier popup
-                      showCursor: false,
-                      length: 4,
-                      obscureText: true,
-                      obscuringCharacter: '●',
-                      defaultPinTheme: defaultPinTheme,
-                      focusedPinTheme: focusedPinTheme,
-                      errorPinTheme: errorPinTheme,
-                      hapticFeedbackType: HapticFeedbackType.mediumImpact,
-                      onCompleted: _onPinSubmitted,
-                      onChanged: (_) {
-                        if (_errorMessage != null) {
-                          setState(() => _errorMessage = null);
-                        }
-                      },
-                    ),
-                  ),
-
-                  // Error Message
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.error_outline_rounded,
-                            size: 14, color: colors.error),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            _errorMessage!,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: colors.error,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    _buildFooter(p),
                   ],
-
-                  const SizedBox(height: 12),
-
-                  // Virtual Keypad
-                  _buildKeypad(colors),
-
-                  const SizedBox(height: 10),
-
-                  // Actions
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      if (_currentStep > 1)
-                        TextButton.icon(
-                          onPressed: _resetSteps,
-                          icon: Icon(Icons.refresh_rounded,
-                              size: 14, color: colors.gold),
-                          label: Text(
-                            'البدء من جديد',
-                            style: TextStyle(fontSize: 11, color: colors.gold),
-                          ),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        )
-                      else
-                        const SizedBox.shrink(),
-                      if (_isProcessing)
-                        SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(colors.gold),
-                          ),
-                        )
-                      else
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          style: TextButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          child: Text(
-                            'إلغاء',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colors.onGold.withValues(alpha: 0.7),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -491,119 +348,179 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
     );
   }
 
-  Widget _buildStepDot(int step, String label, AppColors colors) {
-    final isDone = _currentStep > step;
-    final isCurrent = _currentStep == step;
+  Widget _buildHeader(AuthPalette p) {
+    return Row(
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: p.accentSoft,
+            borderRadius: AppRadius.mdAll,
+            border: Border.all(color: p.accent.withValues(alpha: 0.26)),
+          ),
+          child: Icon(Icons.password_rounded, color: p.accent, size: 19),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'تغيير رمز PIN',
+                style: p.theme.textTheme.titleMedium?.copyWith(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: p.text,
+                ),
+              ),
+              Text(
+                widget.staffMember.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: p.theme.textTheme.labelSmall?.copyWith(color: p.muted),
+              ),
+            ],
+          ),
+        ),
+        IconButton(
+          tooltip: 'إغلاق',
+          icon: Icon(Icons.close_rounded, size: 18, color: p.muted),
+          visualDensity: VisualDensity.compact,
+          onPressed: () => Navigator.pop(context, false),
+        ),
+      ],
+    );
+  }
 
-    Color bg = colors.obsidianCard;
-    Color fg = colors.onGold.withValues(alpha: 0.5);
-    if (isDone) {
-      bg = colors.gold;
-      fg = const Color(0xFF1A1400);
-    } else if (isCurrent) {
-      bg = colors.gold.withValues(alpha: 0.2);
-      fg = colors.gold;
-    }
+  Widget _buildStepIndicator(AuthPalette p) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _buildStepDot(p, 1, 'القديم'),
+        _buildStepConnector(p, active: _currentStep > 1),
+        _buildStepDot(p, 2, 'الجديد'),
+        _buildStepConnector(p, active: _currentStep > 2),
+        _buildStepDot(p, 3, 'التأكيد'),
+      ],
+    );
+  }
+
+  Widget _buildStepConnector(AuthPalette p, {required bool active}) {
+    return AnimatedContainer(
+      duration: AppMotion.fast,
+      width: 26,
+      height: 2,
+      margin: const EdgeInsetsDirectional.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: 10,
+      ),
+      decoration: BoxDecoration(
+        color: active ? p.accent : p.border,
+        borderRadius: AppRadius.pillAll,
+      ),
+    );
+  }
+
+  Widget _buildStepDot(AuthPalette p, int step, String label) {
+    final bool isDone = _currentStep > step;
+    final bool isCurrent = _currentStep == step;
+
+    final Color background = isDone
+        ? p.accent
+        : (isCurrent ? p.accentSoft : p.panelAlt);
+    final Color foreground = isDone
+        ? p.onAccent
+        : (isCurrent ? p.accent : p.muted);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 22,
-          height: 22,
+        AnimatedContainer(
+          duration: AppMotion.fast,
+          width: 24,
+          height: 24,
           decoration: BoxDecoration(
-            color: bg,
+            color: background,
             shape: BoxShape.circle,
-            border: isCurrent
-                ? Border.all(color: colors.gold, width: 1.5)
-                : Border.all(color: colors.goldBorder.withValues(alpha: 0.4)),
+            border: Border.all(
+              color: isCurrent || isDone ? p.accent : p.border,
+              width: isCurrent ? 1.5 : 1,
+            ),
+            boxShadow: isCurrent
+                ? [
+                    BoxShadow(
+                      color: p.accent.withValues(alpha: 0.20),
+                      blurRadius: 8,
+                    ),
+                  ]
+                : null,
           ),
           alignment: Alignment.center,
           child: isDone
-              ? const Icon(Icons.check, size: 12, color: Color(0xFF1A1400))
+              ? Icon(Icons.check_rounded, size: 13, color: foreground)
               : Text(
                   '$step',
-                  style: TextStyle(
+                  style: p.theme.textTheme.labelSmall?.copyWith(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
-                    color: fg,
+                    color: foreground,
                   ),
                 ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 3),
         Text(
           label,
-          style: TextStyle(
+          style: p.theme.textTheme.labelSmall?.copyWith(
             fontSize: 9.5,
-            fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-            color: isCurrent ? colors.gold : colors.onGold.withValues(alpha: 0.5),
+            fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
+            color: isCurrent ? p.accent : p.muted,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildKeypad(AppColors colors) {
-    const rows = [
-      ['1', '2', '3'],
-      ['4', '5', '6'],
-      ['7', '8', '9'],
-      ['C', '0', '⌫'],
-    ];
-
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 240),
-      child: Column(
-        children: rows.map((row) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: row.map((key) {
-                final isAction = key == 'C' || key == '⌫';
-                return InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: () {
-                    if (key == 'C') {
-                      _clear();
-                    } else if (key == '⌫') {
-                      _backspace();
-                    } else {
-                      _appendDigit(key);
-                    }
-                  },
-                  child: Container(
-                    width: 66,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: isAction
-                          ? colors.obsidianSurface
-                          : colors.obsidianCard,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isAction
-                            ? colors.goldBorder.withValues(alpha: 0.35)
-                            : colors.goldBorder.withValues(alpha: 0.5),
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      key,
-                      style: TextStyle(
-                        fontSize: isAction ? 14 : 16,
-                        fontWeight: FontWeight.bold,
-                        color: isAction
-                            ? (key == 'C' ? colors.error : colors.gold)
-                            : colors.onGold,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
+  Widget _buildFooter(AuthPalette p) {
+    return Row(
+      children: [
+        if (_currentStep > 1)
+          TextButton.icon(
+            onPressed: _isProcessing ? null : _resetSteps,
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            icon: Icon(Icons.refresh_rounded, size: 14, color: p.accent),
+            label: Text(
+              'البدء من جديد',
+              style: p.theme.textTheme.labelSmall?.copyWith(
+                fontSize: 11,
+                color: p.accent,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-          );
-        }).toList(),
-      ),
+          )
+        else
+          const SizedBox.shrink(),
+        const Spacer(),
+        if (_isProcessing)
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: p.accent),
+          )
+        else
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            child: Text(
+              'إلغاء',
+              style: p.theme.textTheme.labelSmall?.copyWith(
+                fontSize: 12,
+                color: p.muted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
