@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
@@ -6,6 +7,7 @@ import 'package:core/core.dart';
 import '../../../providers/staff_providers.dart';
 import '../services/pos_thermal_printer.dart';
 
+/// A responsive, high-fidelity screen for settling delivery drivers' COD collections and drawer intake.
 class DriverSettlementDialog extends ConsumerStatefulWidget {
   final String? initialDriverId;
   final String? initialDriverName;
@@ -22,6 +24,7 @@ class DriverSettlementDialog extends ConsumerStatefulWidget {
     required this.receiverRole,
   });
 
+  /// Opens the driver settlement screen as a dedicated fullscreen screen route.
   static Future<void> show(
     BuildContext context, {
     String? initialDriverId,
@@ -30,15 +33,16 @@ class DriverSettlementDialog extends ConsumerStatefulWidget {
     required String receiverName,
     required String receiverRole,
   }) {
-    return showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => DriverSettlementDialog(
-        initialDriverId: initialDriverId,
-        initialDriverName: initialDriverName,
-        receiverId: receiverId,
-        receiverName: receiverName,
-        receiverRole: receiverRole,
+    return Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => DriverSettlementDialog(
+          initialDriverId: initialDriverId,
+          initialDriverName: initialDriverName,
+          receiverId: receiverId,
+          receiverName: receiverName,
+          receiverRole: receiverRole,
+        ),
       ),
     );
   }
@@ -155,14 +159,12 @@ class _DriverSettlementDialogState
             : _notesController.text.trim(),
       );
 
-      // If active cashier shift, register the incoming cash into drawer
       if (widget.receiverRole == 'cashier' && countedCentimes > 0) {
         ref.read(posActiveShiftProvider.notifier).registerDriverSettlement(
               cashCentimes: countedCentimes,
             );
       }
 
-      // Audit log
       ref.read(staffAuditLoggerProvider).logDriverSettlement(
             cashierId: widget.receiverId,
             cashierName: widget.receiverName,
@@ -178,7 +180,6 @@ class _DriverSettlementDialogState
                 : _notesController.text.trim(),
           );
 
-      // Print receipt if requested
       if (_autoPrintVoucher) {
         try {
           await PosThermalPrinterService.printDriverSettlementVoucher(
@@ -191,7 +192,6 @@ class _DriverSettlementDialogState
         } catch (_) {}
       }
 
-      // Invalidate relevant providers
       ref.invalidate(pendingDriverSettlementsProvider);
       ref.invalidate(recentSettlementsProvider);
       ref.invalidate(driverWalletBalanceProvider);
@@ -226,634 +226,665 @@ class _DriverSettlementDialogState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final colors = context.appColors;
     final role = context.roleTheme;
+    final brand = role.roleBrandColor;
     final driversAsync = ref.watch(pendingDriverSettlementsProvider);
 
-    return Dialog(
-      backgroundColor: colors.obsidianSurface,
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.lgAll),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680, maxHeight: 780),
-        child: Padding(
-          padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Header
-              Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: role.badgeBackground,
-                      borderRadius: AppRadius.mdAll,
-                    ),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.pop(context),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: colorScheme.surface,
+          appBar: AppBar(
+            elevation: 0,
+            scrolledUnderElevation: 2,
+            backgroundColor: colorScheme.surfaceContainer,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              tooltip: 'رجوع [Esc]',
+              onPressed:
+                  _isSubmitting ? null : () => Navigator.pop(context),
+            ),
+            title: Row(
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: role.badgeBackground,
+                    borderRadius: AppRadius.smAll,
+                    border: Border.all(color: brand.withValues(alpha: 0.30)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
                     child: Icon(Icons.handshake_rounded,
-                        color: role.badgeText, size: 24),
+                        size: 20, color: role.badgeText),
                   ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'تسوية عهدة سائق التوصيل (Cash Close)',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: colors.onObsidian,
-                          ),
-                        ),
-                        Text(
-                          'المستلم: ${widget.receiverName} (${widget.receiverRole == "cashier" ? "أمين الصندوق" : "المشرف"})',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: colors.gold),
-                        ),
-                      ],
-                    ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'تسوية عهدة سائق التوصيل (Cash Close)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 17),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'المستلم: ${widget.receiverName} (${widget.receiverRole == "cashier" ? "أمين الصندوق" : "المشرف"})',
+                        style:
+                            theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed:
-                        _isSubmitting ? null : () => Navigator.pop(context),
-                  ),
-                ],
+                ),
+              ],
+            ),
+          ),
+          body: driversAsync.when(
+            loading: () =>
+                const Center(child: AppLoadingView(message: 'جاري جلب بيانات السائقين...')),
+            error: (e, _) => Center(
+              child: AppErrorView(
+                message: 'تعذر تحميل السائقين: $e',
+                onRetry: () =>
+                    ref.invalidate(pendingDriverSettlementsProvider),
               ),
-              const SizedBox(height: AppSpacing.md),
-              const Divider(height: 1),
-              const SizedBox(height: AppSpacing.md),
+            ),
+            data: (drivers) {
+              if (drivers.isEmpty) {
+                return const Center(
+                  child: AppEmptyView(
+                    icon: Icons.local_shipping_outlined,
+                    title: 'لا يوجد سائقو توصيل مسجلون',
+                    description: 'قم بإضافة سائقين أولاً لتمكين تسوية العهدة.',
+                  ),
+                );
+              }
 
-              // Content Body
-              Expanded(
-                child: driversAsync.when(
-                  data: (drivers) {
-                    if (drivers.isEmpty) {
-                      return AppStates.empty(
-                        icon: Icons.local_shipping_outlined,
-                        title: 'لا يوجد سائقو توصيل مسجلون',
-                        description:
-                            'قم بإضافة سائقين أولاً لتمكين تسوية العهدة.',
-                      );
-                    }
+              if (_selectedDriverId == null && drivers.isNotEmpty) {
+                final found = drivers.firstWhere(
+                  (d) => d.pendingCashCentimes > 0,
+                  orElse: () => drivers.first,
+                );
+                _selectedDriverId = found.driverId;
+                _selectedDriverName = found.driverName;
+                _selectedDriverPhone = found.driverPhone;
+                _amountController.text =
+                    (found.pendingCashCentimes / 100).toStringAsFixed(0);
+              }
 
-                    // Auto-select if initial ID or single driver
-                    if (_selectedDriverId == null && drivers.isNotEmpty) {
-                      final found = drivers.firstWhere(
-                        (d) => d.pendingCashCentimes > 0,
-                        orElse: () => drivers.first,
-                      );
-                      _selectedDriverId = found.driverId;
-                      _selectedDriverName = found.driverName;
-                      _selectedDriverPhone = found.driverPhone;
-                      _amountController.text =
-                          (found.pendingCashCentimes / 100).toStringAsFixed(0);
-                    }
+              final selectedDriver = drivers.firstWhere(
+                (d) => d.driverId == _selectedDriverId,
+                orElse: () => drivers.first,
+              );
 
-                    final selectedDriver = drivers.firstWhere(
-                      (d) => d.driverId == _selectedDriverId,
-                      orElse: () => drivers.first,
-                    );
+              final expectedCentimes = selectedDriver.pendingCashCentimes;
+              final countedCentimes = _enteredCentimes;
+              final diffCentimes = countedCentimes - expectedCentimes;
 
-                    final expectedCentimes = selectedDriver.pendingCashCentimes;
-                    final countedCentimes = _enteredCentimes;
-                    final diffCentimes = countedCentimes - expectedCentimes;
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth >= 840;
 
-                    return SingleChildScrollView(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Driver Selector Bar
-                          Text(
-                            'اختر السائق المطلوب تسويته:',
-                            style: theme.textTheme.labelMedium?.copyWith(
-                              color: colors.onObsidian.withValues(alpha: 0.65),
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.xs),
-                          Container(
-                            height: 60,
+                  if (isWide) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Left Column: Drivers List & Selected Driver Orders Preview
+                        SizedBox(
+                          width: 400,
+                          child: Container(
                             decoration: BoxDecoration(
-                              color: colors.obsidianCard,
-                              borderRadius: AppRadius.mdAll,
-                              border: Border.all(
-                                  color: colors.gold.withValues(alpha: 0.2)),
-                            ),
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 8),
-                              itemCount: drivers.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 8),
-                              itemBuilder: (ctx, i) {
-                                final d = drivers[i];
-                                final isSel = d.driverId == _selectedDriverId;
-                                return ChoiceChip(
-                                  label: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.person_pin_circle_rounded,
-                                        size: 16,
-                                        color: isSel
-                                            ? theme.colorScheme.onPrimary
-                                            : colors.gold,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        d.driverName,
-                                        style: TextStyle(
-                                          fontWeight: isSel
-                                              ? FontWeight.bold
-                                              : FontWeight.normal,
-                                          color: isSel
-                                              ? theme.colorScheme.onPrimary
-                                              : colors.onObsidian,
-                                        ),
-                                      ),
-                                      if (d.pendingCashCentimes > 0) ...[
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: isSel
-                                                ? theme.colorScheme.onPrimary
-                                                    .withValues(alpha: 0.2)
-                                                : colors.gold
-                                                    .withValues(alpha: 0.2),
-                                            borderRadius: AppRadius.pillAll,
-                                          ),
-                                          child: Text(
-                                            DzdFormatter.formatCentimes(
-                                                d.pendingCashCentimes),
-                                            style: TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                              color: isSel
-                                                  ? theme.colorScheme.onPrimary
-                                                  : colors.gold,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                  selected: isSel,
-                                  selectedColor: colors.gold,
-                                  backgroundColor: colors.obsidianSurface,
-                                  onSelected: (_) => _onDriverSelected(d),
-                                );
-                              },
-                            ),
-                          ),
-
-                          const SizedBox(height: AppSpacing.md),
-
-                          // Driver Summary Card
-                          LuxuryCard(
-                            padding:
-                                const EdgeInsetsDirectional.all(AppSpacing.md),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'الكاش المتوقع بالعهدة (Expected):',
-                                        style:
-                                            theme.textTheme.bodySmall?.copyWith(
-                                          color: colors.onObsidian
-                                              .withValues(alpha: 0.65),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        DzdFormatter.formatCentimes(
-                                            expectedCentimes),
-                                        style: theme.textTheme.headlineSmall
-                                            ?.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: colors.gold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: colors.obsidianSurface,
-                                    borderRadius: AppRadius.smAll,
-                                    border: Border.all(
-                                        color:
-                                            colors.gold.withValues(alpha: 0.3)),
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      Text(
-                                        'طلبات غير مسواة',
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(
-                                          color: colors.onObsidian
-                                              .withValues(alpha: 0.65),
-                                        ),
-                                      ),
-                                      Text(
-                                        '${selectedDriver.unsettledOrdersCount} طلبات',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(height: AppSpacing.md),
-
-                          // Unsettled Orders Preview (Collapsible)
-                          Consumer(
-                            builder: (context, ref, _) {
-                              final ordersAsync = ref.watch(
-                                  driverUnsettledOrdersProvider(
-                                      selectedDriver.driverId));
-                              return ordersAsync.when(
-                                data: (orders) {
-                                  if (orders.isEmpty) {
-                                    return const SizedBox.shrink();
-                                  }
-                                  return ExpansionTile(
-                                    tilePadding: EdgeInsets.zero,
-                                    title: Text(
-                                      'عرض تفاصيل الطلبات المشمولة (${orders.length} طلبات)',
-                                      style:
-                                          theme.textTheme.labelMedium?.copyWith(
-                                        color: colors.gold,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    children: [
-                                      Container(
-                                        constraints: const BoxConstraints(
-                                            maxHeight: 140),
-                                        child: ListView.separated(
-                                          itemCount: orders.length,
-                                          separatorBuilder: (_, __) =>
-                                              const Divider(height: 1),
-                                          itemBuilder: (ctx, idx) {
-                                            final o = orders[idx];
-                                            return ListTile(
-                                              dense: true,
-                                              contentPadding: EdgeInsets.zero,
-                                              title: Text(
-                                                'طلب #${o.orderNumber ?? o.id.substring(0, 6)} - ${o.customerName ?? "زبون"}',
-                                                style: const TextStyle(
-                                                    fontSize: 12),
-                                              ),
-                                              trailing: Text(
-                                                DzdFormatter.formatCentimes(
-                                                    o.paidAmountCentimes),
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: colors.success,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                        ),
-                                      ),
-                                    ],
-                                  );
-                                },
-                                loading: () => const SizedBox.shrink(),
-                                error: (_, __) => const SizedBox.shrink(),
-                              );
-                            },
-                          ),
-
-                          const SizedBox(height: AppSpacing.sm),
-
-                          // Cash Counted Input
-                          Row(
-                            children: [
-                              Text(
-                                'المبلغ المقبوض فعلياً (Counted Cash):',
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: colors.onObsidian,
+                              color: colorScheme.surfaceContainerLow,
+                              border: BorderDirectional(
+                                end: BorderSide(
+                                  color: colorScheme.outlineVariant
+                                      .withValues(alpha: 0.5),
                                 ),
                               ),
-                              const Spacer(),
-                              TextButton.icon(
-                                icon: const Icon(Icons.check_circle_outline,
-                                    size: 16),
-                                label: const Text('مطابقة تامة للمتوقع',
-                                    style: TextStyle(fontSize: 12)),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: colors.gold,
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 8),
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _amountController.text =
-                                        (expectedCentimes / 100)
-                                            .toStringAsFixed(0);
-                                  });
-                                },
-                              ),
-                              TextButton.icon(
-                                icon: Icon(
-                                  _showDenominations
-                                      ? Icons.keyboard_arrow_up
-                                      : Icons.calculate_outlined,
-                                  size: 16,
-                                ),
-                                label: Text(
-                                  _showDenominations
-                                      ? 'إخفاء الفئات'
-                                      : 'عد الفئات',
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                style: TextButton.styleFrom(
-                                  foregroundColor: colors.gold,
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 8),
-                                ),
-                                onPressed: () => setState(() =>
-                                    _showDenominations = !_showDenominations),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          TextField(
-                            controller: _amountController,
-                            keyboardType: const TextInputType.numberWithOptions(
-                                decimal: false),
-                            style: theme.textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: colors.gold,
                             ),
-                            decoration: InputDecoration(
-                              filled: true,
-                              fillColor: colors.obsidianCard,
-                              suffixText: 'دج (DZD)',
-                              prefixIcon:
-                                  const Icon(Icons.attach_money_rounded),
-                              border: const OutlineInputBorder(
-                                  borderRadius: AppRadius.mdAll),
-                            ),
-                            onChanged: (_) => setState(() {}),
-                          ),
-
-                          // Denominations breakdown (Accordion)
-                          if (_showDenominations) ...[
-                            const SizedBox(height: AppSpacing.md),
-                            Container(
-                              padding: const EdgeInsetsDirectional.all(
-                                  AppSpacing.md),
-                              decoration: BoxDecoration(
-                                color: colors.obsidianCard,
-                                borderRadius: AppRadius.mdAll,
-                                border: Border.all(
-                                    color: colors.gold.withValues(alpha: 0.2)),
-                              ),
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(AppSpacing.lg),
                               child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   Text(
-                                    'تفصيل الفئات النقدية:',
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                      color: colors.gold,
-                                    ),
+                                    'اختر سائق التوصيل:',
+                                    style: theme.textTheme.titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.bold),
                                   ),
-                                  const SizedBox(height: AppSpacing.xs),
-                                  Wrap(
-                                    spacing: 12,
-                                    runSpacing: 8,
-                                    children:
-                                        _denomControllers.entries.map((entry) {
-                                      final denom = entry.key;
-                                      final ctrl = entry.value;
-                                      return SizedBox(
-                                        width: 130,
-                                        child: Row(
-                                          children: [
-                                            Text(
-                                              '$denom: ',
-                                              style: const TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.bold),
-                                            ),
-                                            Expanded(
-                                              child: SizedBox(
-                                                height: 36,
-                                                child: TextField(
-                                                  controller: ctrl,
-                                                  keyboardType:
-                                                      TextInputType.number,
-                                                  style: const TextStyle(
-                                                      fontSize: 12),
-                                                  textAlign: TextAlign.center,
-                                                  decoration: InputDecoration(
-                                                    contentPadding:
-                                                        EdgeInsets.zero,
-                                                    filled: true,
-                                                    fillColor:
-                                                        colors.obsidianSurface,
-                                                    border:
-                                                        const OutlineInputBorder(
-                                                            borderRadius:
-                                                                AppRadius
-                                                                    .smAll),
-                                                  ),
-                                                  onChanged: (_) =>
-                                                      _recalcFromDenominations(),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
+                                  const SizedBox(height: AppSpacing.sm),
+                                  ...drivers.map((d) {
+                                    final isSel = d.driverId == _selectedDriverId;
+                                    return Padding(
+                                      padding:
+                                          const EdgeInsets.only(bottom: 6),
+                                      child: ListTile(
+                                        selected: isSel,
+                                        selectedTileColor: colorScheme
+                                            .primaryContainer
+                                            .withValues(alpha: 0.25),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: AppRadius.mdAll,
+                                          side: BorderSide(
+                                            color: isSel
+                                                ? brand
+                                                : colorScheme.outlineVariant
+                                                    .withValues(alpha: 0.4),
+                                          ),
                                         ),
-                                      );
-                                    }).toList(),
-                                  ),
+                                        onTap: () => _onDriverSelected(d),
+                                        leading: CircleAvatar(
+                                          backgroundColor: isSel
+                                              ? brand
+                                              : colorScheme
+                                                  .surfaceContainerHighest,
+                                          child: Icon(
+                                            Icons.person_pin_circle_rounded,
+                                            size: 20,
+                                            color: isSel
+                                                ? Colors.white
+                                                : colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                        title: Text(
+                                          d.driverName,
+                                          style: TextStyle(
+                                            fontWeight: isSel
+                                                ? FontWeight.bold
+                                                : FontWeight.w600,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          'طلبات غير مسواة: ${d.unsettledOrdersCount}',
+                                          style: theme.textTheme.bodySmall,
+                                        ),
+                                        trailing: DzdPriceTag(
+                                          centimes: d.pendingCashCentimes,
+                                          color: d.pendingCashCentimes > 0
+                                              ? brand
+                                              : null,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    );
+                                  }),
+                                  const Divider(height: 24),
+                                  _buildOrdersListPreview(selectedDriver.driverId,
+                                      theme, colorScheme, colors),
                                 ],
                               ),
                             ),
-                          ],
-
-                          const SizedBox(height: AppSpacing.md),
-
-                          // Difference / Discrepancy Indicator
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: AppSpacing.md, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: diffCentimes == 0
-                                  ? colors.success.withValues(alpha: 0.12)
-                                  : (diffCentimes < 0
-                                      ? colors.error.withValues(alpha: 0.12)
-                                      : theme.colorScheme.primary
-                                          .withValues(alpha: 0.12)),
-                              borderRadius: AppRadius.mdAll,
-                              border: Border.all(
-                                color: diffCentimes == 0
-                                    ? colors.success
-                                    : (diffCentimes < 0
-                                        ? colors.error
-                                        : theme.colorScheme.primary),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  diffCentimes == 0
-                                      ? Icons.check_circle_rounded
-                                      : (diffCentimes < 0
-                                          ? Icons.warning_amber_rounded
-                                          : Icons.info_outline),
-                                  color: diffCentimes == 0
-                                      ? colors.success
-                                      : (diffCentimes < 0
-                                          ? colors.error
-                                          : theme.colorScheme.primary),
-                                  size: 22,
-                                ),
-                                const SizedBox(width: AppSpacing.sm),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        diffCentimes == 0
-                                            ? 'مطابقة تامة — المبلغ المستلم يطابق العهدة تماماً'
-                                            : (diffCentimes < 0
-                                                ? 'عجز في العهدة (Shortage): ${DzdFormatter.formatCentimes(diffCentimes.abs())}'
-                                                : 'فائض في العهدة (Overage): ${DzdFormatter.formatCentimes(diffCentimes)}'),
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                          color: diffCentimes == 0
-                                              ? colors.success
-                                              : (diffCentimes < 0
-                                                  ? colors.error
-                                                  : theme.colorScheme.primary),
+                          ),
+                        ),
+                        // Right Column: Counting, Denominations, Discrepancy, Actions
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(AppSpacing.xl),
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 620),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    _buildDriverSummaryBanner(
+                                        selectedDriver, theme, colors, brand),
+                                    AppSpacing.gapLg,
+                                    _buildCountingSection(
+                                        expectedCentimes,
+                                        theme,
+                                        colorScheme,
+                                        colors,
+                                        brand),
+                                    AppSpacing.gapLg,
+                                    _buildDifferenceIndicator(
+                                        diffCentimes, theme, colors),
+                                    AppSpacing.gapLg,
+                                    TextField(
+                                      controller: _notesController,
+                                      maxLines: 2,
+                                      decoration: InputDecoration(
+                                        labelText: diffCentimes != 0
+                                            ? 'ملاحظات وتوضيح الفارق (إلزامي في حال وجود عجز/فائض) *'
+                                            : 'ملاحظات التسوية (اختياري)',
+                                        labelStyle: TextStyle(
+                                          color: diffCentimes != 0
+                                              ? colors.error
+                                              : null,
+                                          fontSize: 12,
                                         ),
+                                        filled: true,
+                                        fillColor:
+                                            colorScheme.surfaceContainerLow,
+                                        border: const OutlineInputBorder(
+                                            borderRadius: AppRadius.mdAll),
                                       ),
-                                      if (diffCentimes != 0)
-                                        Text(
-                                          'يرجى تدوين سبب الفارق في الملاحظات لإرفاقه في تقرير التدقيق.',
-                                          style: TextStyle(
-                                              fontSize: 10,
-                                              color: theme.colorScheme
-                                                  .onSurfaceVariant),
-                                        ),
-                                    ],
-                                  ),
+                                    ),
+                                    AppSpacing.gapMd,
+                                    CheckboxListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      title: const Text(
+                                        'طباعة وصل تسوية العهدة تلقائيًا (80mm)',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                      subtitle: const Text(
+                                        'إصدار سند استلام نقدية موقع للطرفين',
+                                        style: TextStyle(fontSize: 11),
+                                      ),
+                                      value: _autoPrintVoucher,
+                                      onChanged: (v) => setState(() =>
+                                          _autoPrintVoucher = v ?? true),
+                                    ),
+                                    AppSpacing.gapLg,
+                                    GoldButton.icon(
+                                      icon: _isSubmitting
+                                          ? Icons.hourglass_top_rounded
+                                          : Icons.check_circle_rounded,
+                                      label: _isSubmitting
+                                          ? 'جاري الترحيل...'
+                                          : 'تأكيد التسوية وترحيل الكاش للدرج',
+                                      onPressed: _isSubmitting
+                                          ? null
+                                          : () => _submitSettlement(
+                                                expectedCentimes,
+                                                selectedDriver
+                                                    .unsettledOrdersCount,
+                                              ),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          ),
-
-                          const SizedBox(height: AppSpacing.md),
-
-                          // Notes Field
-                          TextField(
-                            controller: _notesController,
-                            maxLines: 2,
-                            decoration: InputDecoration(
-                              labelText: diffCentimes != 0
-                                  ? 'ملاحظات وتوضيح الفارق (إلزامي في حال وجود عجز/فائض) *'
-                                  : 'ملاحظات التسوية (اختياري)',
-                              labelStyle: TextStyle(
-                                color: diffCentimes != 0 ? colors.error : null,
-                                fontSize: 12,
                               ),
-                              filled: true,
-                              fillColor: colors.obsidianCard,
-                              border: const OutlineInputBorder(
-                                  borderRadius: AppRadius.mdAll),
                             ),
                           ),
+                        ),
+                      ],
+                    );
+                  }
 
-                          const SizedBox(height: AppSpacing.sm),
+                  // Mobile Layout
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildMobileDriverSelector(drivers, theme, colors, brand),
+                        AppSpacing.gapMd,
+                        _buildDriverSummaryBanner(
+                            selectedDriver, theme, colors, brand),
+                        AppSpacing.gapMd,
+                        _buildOrdersListPreview(
+                            selectedDriver.driverId, theme, colorScheme, colors),
+                        AppSpacing.gapMd,
+                        _buildCountingSection(
+                            expectedCentimes, theme, colorScheme, colors, brand),
+                        AppSpacing.gapMd,
+                        _buildDifferenceIndicator(diffCentimes, theme, colors),
+                        AppSpacing.gapMd,
+                        TextField(
+                          controller: _notesController,
+                          maxLines: 2,
+                          decoration: InputDecoration(
+                            labelText: diffCentimes != 0
+                                ? 'ملاحظات وتوضيح الفارق *'
+                                : 'ملاحظات التسوية (اختياري)',
+                            filled: true,
+                            fillColor: colorScheme.surfaceContainerLow,
+                            border: const OutlineInputBorder(
+                                borderRadius: AppRadius.mdAll),
+                          ),
+                        ),
+                        AppSpacing.gapSm,
+                        CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: const Text('طباعة وصل التسوية تلقائياً'),
+                          value: _autoPrintVoucher,
+                          onChanged: (v) =>
+                              setState(() => _autoPrintVoucher = v ?? true),
+                        ),
+                        AppSpacing.gapLg,
+                        GoldButton.icon(
+                          icon: Icons.check_circle_rounded,
+                          label: _isSubmitting
+                              ? 'جاري الترحيل...'
+                              : 'تأكيد التسوية وترحيل الكاش',
+                          onPressed: _isSubmitting
+                              ? null
+                              : () => _submitSettlement(
+                                    expectedCentimes,
+                                    selectedDriver.unsettledOrdersCount,
+                                  ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
 
-                          // Auto print voucher toggle
-                          CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text(
-                                'طباعة وصل التسوية تلقائياً (وصل حراري 80mm)'),
-                            value: _autoPrintVoucher,
-                            activeColor: colors.gold,
-                            onChanged: (v) =>
-                                setState(() => _autoPrintVoucher = v ?? true),
+  Widget _buildMobileDriverSelector(List<DriverSettlementSummaryEntity> drivers,
+      ThemeData theme, dynamic colors, Color brand) {
+    return SizedBox(
+      height: 48,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: drivers.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (ctx, i) {
+          final d = drivers[i];
+          final isSel = d.driverId == _selectedDriverId;
+          return ChoiceChip(
+            label: Text('${d.driverName} (${DzdFormatter.formatCentimes(d.pendingCashCentimes)})'),
+            selected: isSel,
+            onSelected: (_) => _onDriverSelected(d),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildDriverSummaryBanner(DriverSettlementSummaryEntity selectedDriver,
+      ThemeData theme, dynamic colors, Color brand) {
+    return LuxuryCard(
+      goldAccent: true,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'الكاش المتوقع بالعهدة (Expected):',
+                style: theme.textTheme.bodySmall?.copyWith(fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              DzdPriceTag.hero(
+                centimes: selectedDriver.pendingCashCentimes,
+                gold: true,
+              ),
+            ],
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: brand.withValues(alpha: 0.12),
+              borderRadius: AppRadius.mdAll,
+              border: Border.all(color: brand.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              children: [
+                const Text(
+                  'طلبات غير مسواة',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  '${selectedDriver.unsettledOrdersCount} طلبات',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOrdersListPreview(String driverId, ThemeData theme,
+      ColorScheme colorScheme, dynamic colors) {
+    final ordersAsync = ref.watch(driverUnsettledOrdersProvider(driverId));
+    return ordersAsync.when(
+      data: (orders) {
+        if (orders.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Container(
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainer,
+            borderRadius: AppRadius.mdAll,
+            border: Border.all(
+                color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+          ),
+          child: ExpansionTile(
+            title: Text(
+              'الطلبات المشمولة بالعهدة (${orders.length}):',
+              style: theme.textTheme.labelMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            children: [
+              Container(
+                constraints: const BoxConstraints(maxHeight: 180),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: orders.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (ctx, idx) {
+                    final o = orders[idx];
+                    return ListTile(
+                      dense: true,
+                      title: Text(
+                        'طلب #${o.orderNumber ?? o.id.substring(0, 6)} - ${o.customerName ?? "زبون"}',
+                        style: const TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                      trailing: DzdPriceTag(
+                        centimes: o.paidAmountCentimes,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildCountingSection(int expectedCentimes, ThemeData theme,
+      ColorScheme colorScheme, dynamic colors, Color brand) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'المبلغ المقبوض فعليًا (Counted Cash):',
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            Row(
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.check_circle_outline, size: 16),
+                  label: const Text('مطابقة تامة'),
+                  onPressed: () {
+                    setState(() {
+                      _amountController.text =
+                          (expectedCentimes / 100).toStringAsFixed(0);
+                    });
+                  },
+                ),
+                TextButton.icon(
+                  icon: Icon(
+                    _showDenominations
+                        ? Icons.keyboard_arrow_up
+                        : Icons.calculate_outlined,
+                    size: 16,
+                  ),
+                  label: Text(_showDenominations ? 'إخفاء الفئات' : 'عد الفئات'),
+                  onPressed: () => setState(
+                      () => _showDenominations = !_showDenominations),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _amountController,
+          keyboardType:
+              const TextInputType.numberWithOptions(decimal: false),
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          decoration: InputDecoration(
+            suffixText: 'دج (DZD)',
+            prefixIcon: const Icon(Icons.attach_money_rounded, size: 28),
+            filled: true,
+            fillColor: colorScheme.surfaceContainerLow,
+            border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        if (_showDenominations) ...[
+          AppSpacing.gapMd,
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainer,
+              borderRadius: AppRadius.mdAll,
+              border: Border.all(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'تفصيل عد الفئات النقدية:',
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: _denomControllers.entries.map((entry) {
+                    final denom = entry.key;
+                    final ctrl = entry.value;
+                    return SizedBox(
+                      width: 140,
+                      child: Row(
+                        children: [
+                          Text(
+                            '$denom: ',
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                          Expanded(
+                            child: SizedBox(
+                              height: 40,
+                              child: TextField(
+                                controller: ctrl,
+                                keyboardType: TextInputType.number,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold),
+                                decoration: const InputDecoration(
+                                  contentPadding: EdgeInsets.zero,
+                                  border: OutlineInputBorder(),
+                                ),
+                                onChanged: (_) => _recalcFromDenominations(),
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     );
-                  },
-                  loading: () =>
-                      AppStates.loading(message: 'جاري جلب بيانات السائقين...'),
-                  error: (e, _) => AppStates.error(
-                    'تعذر تحميل السائقين: $e',
-                    onRetry: () =>
-                        ref.invalidate(pendingDriverSettlementsProvider),
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDifferenceIndicator(
+      int diffCentimes, ThemeData theme, dynamic colors) {
+    final isMatch = diffCentimes == 0;
+    final isShort = diffCentimes < 0;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isMatch
+            ? colors.successContainer
+            : (isShort ? colors.errorContainer : colors.warningContainer),
+        borderRadius: AppRadius.mdAll,
+        border: Border.all(
+          color: isMatch
+              ? colors.success
+              : (isShort ? colors.error : colors.warning),
+          width: 1.2,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isMatch
+                ? Icons.check_circle_rounded
+                : (isShort
+                    ? Icons.warning_amber_rounded
+                    : Icons.info_outline_rounded),
+            color: isMatch
+                ? colors.onSuccessContainer
+                : (isShort
+                    ? colors.onErrorContainer
+                    : colors.onWarningContainer),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isMatch
+                      ? 'مطابقة تامة — المبلغ المستلم يطابق العهدة تماماً'
+                      : (isShort
+                          ? 'عجز في العهدة (Shortage): ${DzdFormatter.formatCentimes(diffCentimes.abs())}'
+                          : 'فائض في العهدة (Overage): ${DzdFormatter.formatCentimes(diffCentimes)}'),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: isMatch
+                        ? colors.onSuccessContainer
+                        : (isShort
+                            ? colors.onErrorContainer
+                            : colors.onWarningContainer),
                   ),
                 ),
-              ),
-
-              const SizedBox(height: AppSpacing.md),
-              const Divider(height: 1),
-              const SizedBox(height: AppSpacing.md),
-
-              // Action Buttons
-              driversAsync.when(
-                data: (drivers) {
-                  final selectedDriver = drivers.firstWhere(
-                    (d) => d.driverId == _selectedDriverId,
-                    orElse: () => drivers.first,
-                  );
-                  return Row(
-                    children: [
-                      OutlinedButton(
-                        onPressed:
-                            _isSubmitting ? null : () => Navigator.pop(context),
-                        child: const Text('إلغاء'),
-                      ),
-                      const Spacer(),
-                      GoldButton.icon(
-                        icon: Icons.check_circle_rounded,
-                        label: _isSubmitting
-                            ? 'جاري الترحيل...'
-                            : 'تأكيد التسوية وترحيل الكاش',
-                        onPressed: _isSubmitting
-                            ? null
-                            : () => _submitSettlement(
-                                  selectedDriver.pendingCashCentimes,
-                                  selectedDriver.unsettledOrdersCount,
-                                ),
-                      ),
-                    ],
-                  );
-                },
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-            ],
+                if (!isMatch)
+                  const Text(
+                    'يرجى تدوين سبب الفارق في حقل الملاحظات أسفله لإرفاقه في تقرير التدقيق.',
+                    style: TextStyle(fontSize: 11),
+                  ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

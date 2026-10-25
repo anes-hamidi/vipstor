@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pinput/pinput.dart';
 import 'package:staff_app/providers/staff_providers.dart';
@@ -12,6 +13,7 @@ enum CashierPinMode {
   switchCashier,
 }
 
+/// A responsive, luxury lock-screen and cashier authorization screen using PIN.
 class CashierPinDialog extends ConsumerStatefulWidget {
   final CashierPinMode mode;
   final UserEntity? lockedUser;
@@ -21,6 +23,23 @@ class CashierPinDialog extends ConsumerStatefulWidget {
     this.mode = CashierPinMode.switchCashier,
     this.lockedUser,
   });
+
+  /// Opens the cashier PIN authentication screen as a dedicated fullscreen screen route.
+  static Future<bool?> show(
+    BuildContext context, {
+    CashierPinMode mode = CashierPinMode.switchCashier,
+    UserEntity? lockedUser,
+  }) {
+    return Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => CashierPinDialog(
+          mode: mode,
+          lockedUser: lockedUser,
+        ),
+      ),
+    );
+  }
 
   @override
   ConsumerState<CashierPinDialog> createState() => _CashierPinDialogState();
@@ -77,7 +96,7 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
       _errorMessage = null;
     });
 
-    await Future.delayed(const Duration(milliseconds: 350));
+    await Future.delayed(const Duration(milliseconds: 300));
 
     final targetUser = _selectedStaff ?? ref.read(authStateProvider);
     if (targetUser == null) {
@@ -141,9 +160,10 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
     final colorScheme = theme.colorScheme;
     final isLockMode = widget.mode == CashierPinMode.unlockTerminal;
     final colors = context.appColors;
+
     final defaultPinTheme = PinTheme(
-      width: 60,
-      height: 64,
+      width: 64,
+      height: 68,
       textStyle: theme.textTheme.headlineMedium?.copyWith(
         fontWeight: FontWeight.bold,
         color: colors.gold,
@@ -176,257 +196,287 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
       ),
     );
 
-    return Dialog(
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.xlAll),
-      backgroundColor: colors.obsidianCard,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
-        child: Padding(
-          padding: const EdgeInsetsDirectional.all(AppSpacing.xl),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              // Header icon — error gradient while locked, role brand otherwise
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  gradient: isLockMode
-                      ? LinearGradient(
-                          colors: [
-                            colorScheme.error,
-                            colorScheme.errorContainer,
-                          ],
-                        )
-                      : null,
-                  color: isLockMode ? null : colors.gold,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: (isLockMode ? colorScheme.error : colors.gold)
-                          .withValues(alpha: 0.35),
-                      blurRadius: 14,
-                    ),
-                  ],
-                ),
-                child: Icon(
-                  isLockMode
-                      ? Icons.lock_outline_rounded
-                      : Icons.lock_person_outlined,
-                  size: 34,
-                  color:
-                      isLockMode ? colorScheme.onError : colorScheme.onPrimary,
-                ),
-              ),
-              AppSpacing.gapMd,
-
-              // Title
-              Text(
-                isLockMode
-                    ? 'شاشة الكاشير مقفلة'
-                    : 'التبديل السريع للكاشير (PIN)',
-                style: theme.textTheme.titleLarge
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                isLockMode
-                    ? 'أدخل رمز PIN المكون من 4 أرقام لفتح قفل الشاشة ومتابعة البيع'
-                    : 'اختر حساب الكاشير ثم أدخل رمز PIN للتبديل الفوري',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: colorScheme.onSurfaceVariant),
-              ),
-              AppSpacing.gapLg,
-
-              // Staff Selector (when in Switch Mode)
-              if (!isLockMode) ...[
-                Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text(
-                    'اختر الكاشير:',
-                    style: theme.textTheme.labelMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
+    return CallbackShortcuts(
+      bindings: {
+        if (!isLockMode)
+          const SingleActivator(LogicalKeyboardKey.escape): () =>
+              Navigator.pop(context, false),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: colors.obsidianCard,
+          appBar: AppBar(
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            leading: isLockMode
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    tooltip: 'رجوع [Esc]',
+                    onPressed: () => Navigator.pop(context, false),
+                  ),
+            title: Text(
+              isLockMode
+                  ? 'قفل شاشة نقطة البيع'
+                  : 'التبديل السريع لأمين الصندوق',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+            ),
+            actions: [
+              if (_selectedStaff != null)
+                Padding(
+                  padding:
+                      const EdgeInsetsDirectional.only(end: AppSpacing.md),
+                  child: TextButton.icon(
+                    onPressed: () async {
+                      await showDialog(
+                        context: context,
+                        builder: (_) =>
+                            ChangePinDialog(staffMember: _selectedStaff!),
+                      );
+                    },
+                    icon: const Icon(Icons.password_rounded, size: 16),
+                    label: const Text('تغيير رمز PIN'),
                   ),
                 ),
-                AppSpacing.gapSm,
-                Container(
-                  padding: const EdgeInsetsDirectional.symmetric(
-                      horizontal: AppSpacing.md),
-                  decoration: BoxDecoration(
-                    color: colors.obsidianSurface,
-                    borderRadius: AppRadius.mdAll,
-                    border:
-                        Border.all(color: colors.gold.withValues(alpha: 0.3)),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      isExpanded: true,
-                      value: _selectedStaff?.id,
-                      items: _availableStaff.map((staff) {
-                        return DropdownMenuItem<String>(
-                          value: staff.id,
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 14,
-                                backgroundColor: colorScheme.primaryContainer,
-                                child: Icon(Icons.person,
-                                    size: 16, color: colorScheme.primary),
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
-                              Text(staff.name,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13)),
-                              const Spacer(),
-                              Text(
-                                staff.role == UserRole.manager
-                                    ? 'مشرف'
-                                    : 'كاشير',
-                                style: TextStyle(
-                                    fontSize: 11,
-                                    color: colorScheme.onSurfaceVariant),
-                              ),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        if (val != null) {
-                          final selected = _availableStaff.firstWhere(
-                            (s) => s.id == val,
-                            orElse: () => _availableStaff.first,
-                          );
-                          setState(() {
-                            _selectedStaff = selected;
-                            _errorMessage = null;
-                            _pinController.clear();
-                          });
-                          _focusNode.requestFocus();
-                        }
-                      },
-                    ),
-                  ),
-                ),
-                AppSpacing.gapLg,
-              ] else if (_selectedStaff != null) ...[
-                Container(
-                  padding: const EdgeInsetsDirectional.symmetric(
-                      horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerHighest
-                        .withValues(alpha: 0.5),
-                    borderRadius: AppRadius.pillAll,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircleAvatar(
-                        radius: 12,
-                        backgroundColor: colorScheme.primary,
-                        child: Icon(Icons.person,
-                            size: 14, color: colorScheme.onPrimary),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Text(_selectedStaff!.name,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 12)),
-                    ],
-                  ),
-                ),
-                AppSpacing.gapLg,
-              ],
-
-              // Pinput 4-Digit Field
-              Directionality(
-                textDirection: TextDirection.ltr,
-                child: Pinput(
-                  controller: _pinController,
-                  focusNode: _focusNode,
-                  autofocus: true,
-                  length: 4,
-                  obscureText: true,
-                  obscuringCharacter: '●',
-                  defaultPinTheme: defaultPinTheme,
-                  focusedPinTheme: focusedPinTheme,
-                  errorPinTheme: errorPinTheme,
-                  hapticFeedbackType: HapticFeedbackType.mediumImpact,
-                  onCompleted: _verifyPin,
-                  onChanged: (_) {
-                    if (_errorMessage != null) {
-                      setState(() => _errorMessage = null);
-                    }
-                  },
-                ),
-              ),
-
-              // Error Message
-              if (_errorMessage != null) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.error_outline,
-                        size: 14, color: colorScheme.error),
-                    const SizedBox(width: 4),
-                    Text(
-                      _errorMessage!,
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: colorScheme.error,
-                          fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ],
-
-              AppSpacing.gapLg,
-
-              // Virtual Number Keypad (Touch / Pointer-First Friendly)
-              _buildKeypad(theme, colorScheme),
-
-              if (_selectedStaff != null) ...[
-                const SizedBox(height: AppSpacing.sm),
-                TextButton.icon(
-                  onPressed: () async {
-                    await showDialog(
-                      context: context,
-                      builder: (_) =>
-                          ChangePinDialog(staffMember: _selectedStaff!),
-                    );
-                  },
-                  icon: const Icon(Icons.password_rounded, size: 15),
-                  label: const Text('تغيير رمز PIN',
-                      style: TextStyle(fontSize: 12)),
-                ),
-              ],
-
-              AppSpacing.gapSm,
-
-              // Footer Actions
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  if (!isLockMode)
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('إلغاء'),
-                    )
-                  else
-                    const SizedBox.shrink(),
-                  if (_isVerifying)
-                    const CircularProgressIndicator.adaptive()
-                  else
-                    GoldButton.icon(
-                      onPressed: () => _verifyPin(_pinController.text),
-                      icon: Icons.check_rounded,
-                      label: isLockMode ? 'فتح القفل' : 'تأكيد',
-                    ),
-                ],
-              ),
             ],
+          ),
+          body: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(AppSpacing.xl),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Icon Header
+                    Container(
+                      width: 76,
+                      height: 76,
+                      decoration: BoxDecoration(
+                        gradient: isLockMode
+                            ? LinearGradient(
+                                colors: [
+                                  colorScheme.error,
+                                  colorScheme.errorContainer,
+                                ],
+                              )
+                            : null,
+                        color: isLockMode ? null : colors.gold,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color:
+                                (isLockMode ? colorScheme.error : colors.gold)
+                                    .withValues(alpha: 0.35),
+                            blurRadius: 16,
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        isLockMode
+                            ? Icons.lock_outline_rounded
+                            : Icons.lock_person_rounded,
+                        size: 38,
+                        color: isLockMode
+                            ? colorScheme.onError
+                            : colorScheme.onPrimary,
+                      ),
+                    ),
+                    AppSpacing.gapLg,
+
+                    // Title & Description
+                    Text(
+                      isLockMode
+                          ? 'شاشة الكاشير مقفلة'
+                          : 'المصادقة بواسطة رمز PIN',
+                      style: theme.textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      isLockMode
+                          ? 'أدخل رمز PIN الخاص بك المكون من 4 أرقام لفتح قفل الشاشة ومتابعة العمليات'
+                          : 'اختر حساب الكاشير ثم أدخل رمز PIN للتبديل الفوري',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    AppSpacing.gapXl,
+
+                    // Staff Selector (when in Switch Mode)
+                    if (!isLockMode) ...[
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: Text(
+                          'اختر حساب الموظف:',
+                          style: theme.textTheme.labelMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      AppSpacing.gapSm,
+                      Container(
+                        padding: const EdgeInsetsDirectional.symmetric(
+                            horizontal: AppSpacing.md),
+                        decoration: BoxDecoration(
+                          color: colors.obsidianSurface,
+                          borderRadius: AppRadius.mdAll,
+                          border: Border.all(
+                              color: colors.gold.withValues(alpha: 0.3)),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            isExpanded: true,
+                            value: _selectedStaff?.id,
+                            items: _availableStaff.map((staff) {
+                              return DropdownMenuItem<String>(
+                                value: staff.id,
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 14,
+                                      backgroundColor:
+                                          colorScheme.primaryContainer,
+                                      child: Icon(Icons.person,
+                                          size: 16,
+                                          color: colorScheme.primary),
+                                    ),
+                                    const SizedBox(width: AppSpacing.sm),
+                                    Text(
+                                      staff.name,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      staff.role == UserRole.manager
+                                          ? 'مشرف'
+                                          : 'كاشير',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: colorScheme.onSurfaceVariant),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                final selected = _availableStaff.firstWhere(
+                                  (s) => s.id == val,
+                                  orElse: () => _availableStaff.first,
+                                );
+                                setState(() {
+                                  _selectedStaff = selected;
+                                  _errorMessage = null;
+                                  _pinController.clear();
+                                });
+                                _focusNode.requestFocus();
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                      AppSpacing.gapLg,
+                    ] else if (_selectedStaff != null) ...[
+                      Container(
+                        padding: const EdgeInsetsDirectional.symmetric(
+                            horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest
+                              .withValues(alpha: 0.5),
+                          borderRadius: AppRadius.pillAll,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircleAvatar(
+                              radius: 14,
+                              backgroundColor: colorScheme.primary,
+                              child: Icon(Icons.person,
+                                  size: 16, color: colorScheme.onPrimary),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            Text(
+                              _selectedStaff!.name,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                      AppSpacing.gapLg,
+                    ],
+
+                    // Pinput 4-Digit Field
+                    Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: Pinput(
+                        controller: _pinController,
+                        focusNode: _focusNode,
+                        autofocus: true,
+                        length: 4,
+                        obscureText: true,
+                        obscuringCharacter: '●',
+                        defaultPinTheme: defaultPinTheme,
+                        focusedPinTheme: focusedPinTheme,
+                        errorPinTheme: errorPinTheme,
+                        hapticFeedbackType: HapticFeedbackType.mediumImpact,
+                        onCompleted: _verifyPin,
+                        onChanged: (_) {
+                          if (_errorMessage != null) {
+                            setState(() => _errorMessage = null);
+                          }
+                        },
+                      ),
+                    ),
+
+                    // Error Message
+                    if (_errorMessage != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.error_outline_rounded,
+                              size: 16, color: colorScheme.error),
+                          const SizedBox(width: 6),
+                          Text(
+                            _errorMessage!,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: colorScheme.error,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+
+                    AppSpacing.gapXl,
+
+                    // Touch Numpad
+                    _buildKeypad(theme, colorScheme),
+
+                    AppSpacing.gapLg,
+
+                    if (_isVerifying)
+                      const CircularProgressIndicator()
+                    else
+                      SizedBox(
+                        width: 280,
+                        child: GoldButton.icon(
+                          onPressed: () => _verifyPin(_pinController.text),
+                          icon: Icons.check_circle_rounded,
+                          label: isLockMode ? 'فتح القفل' : 'تأكيد الرمز',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -435,7 +485,7 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
 
   Widget _buildKeypad(ThemeData theme, ColorScheme colorScheme) {
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 280),
+      constraints: const BoxConstraints(maxWidth: 290),
       child: Column(
         children: [
           for (var row in [
@@ -471,8 +521,8 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
                       }
                     },
                     child: Container(
-                      width: 72,
-                      height: 48,
+                      width: 76,
+                      height: 52,
                       decoration: BoxDecoration(
                         color: isAction
                             ? colorScheme.surfaceContainer
@@ -480,14 +530,15 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
                                 .withValues(alpha: 0.6),
                         borderRadius: AppRadius.mdAll,
                         border: Border.all(
-                            color: colorScheme.outlineVariant
-                                .withValues(alpha: 0.5)),
+                          color:
+                              colorScheme.outlineVariant.withValues(alpha: 0.5),
+                        ),
                       ),
                       alignment: Alignment.center,
                       child: Text(
                         key,
                         style: TextStyle(
-                          fontSize: isAction ? 15 : 18,
+                          fontSize: isAction ? 18 : 22,
                           fontWeight: FontWeight.bold,
                           color: isAction
                               ? colorScheme.error

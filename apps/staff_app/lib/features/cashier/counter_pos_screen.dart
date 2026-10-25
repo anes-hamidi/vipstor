@@ -215,12 +215,9 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     }
   }
 
-  // Modals & Dialog Openers
+  // Modals & Screen Openers
   void _openCustomerSearch() async {
-    final customer = await showDialog<CustomerProfileEntity?>(
-      context: context,
-      builder: (_) => const CustomerSelectDialog(),
-    );
+    final customer = await CustomerSelectDialog.show(context);
     ref.read(posActiveCustomerProvider.notifier).state = customer;
     _ensureBarcodeFocus();
   }
@@ -228,10 +225,7 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
   void _openCustomerDebtModal([CustomerProfileEntity? targetCustomer]) async {
     var customer = targetCustomer ?? ref.read(posActiveCustomerProvider);
     if (customer == null) {
-      customer = await showDialog<CustomerProfileEntity?>(
-        context: context,
-        builder: (_) => const CustomerSelectDialog(),
-      );
+      customer = await CustomerSelectDialog.show(context);
       if (customer != null) {
         ref.read(posActiveCustomerProvider.notifier).state = customer;
       }
@@ -249,13 +243,11 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     }
     final cashierName = user?.name ?? 'الكاشير';
 
-    final paid = await showDialog<bool>(
-      context: context,
-      builder: (_) => CustomerDebtDialog(
-        customer: customer!,
-        cashierId: cashierId,
-        cashierName: cashierName,
-      ),
+    final paid = await CustomerDebtDialog.show(
+      context,
+      customer: customer,
+      cashierId: cashierId,
+      cashierName: cashierName,
     );
 
     if (paid == true && mounted) {
@@ -288,10 +280,7 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
       return;
     }
 
-    final customData = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) => const CustomItemDialog(),
-    );
+    final customData = await CustomItemDialog.show(context);
     if (customData != null) {
       ref.read(posCartProvider.notifier).addCustomItem(
             customData['name'] as String,
@@ -316,24 +305,15 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
   }
 
   void _openSalesHistory() {
-    showDialog(
-      context: context,
-      builder: (_) => const SalesHistoryDialog(),
-    ).then((_) => _ensureBarcodeFocus());
+    SalesHistoryDialog.show(context).then((_) => _ensureBarcodeFocus());
   }
 
   void _openSalesReturns() {
-    showDialog(
-      context: context,
-      builder: (_) => const SalesReturnDialog(),
-    ).then((_) => _ensureBarcodeFocus());
+    SalesReturnDialog.show(context).then((_) => _ensureBarcodeFocus());
   }
 
   void _openShiftAudit() {
-    showDialog(
-      context: context,
-      builder: (_) => const ShiftAuditDialog(),
-    ).then((_) => _ensureBarcodeFocus());
+    ShiftAuditDialog.show(context).then((_) => _ensureBarcodeFocus());
   }
 
   void _openSupplierPaymentModal() {
@@ -393,10 +373,7 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
   }
 
   void _openPrinterSettings() {
-    showDialog(
-      context: context,
-      builder: (_) => const PrinterSettingsDialog(),
-    ).then((_) => _ensureBarcodeFocus());
+    PrinterSettingsDialog.show(context).then((_) => _ensureBarcodeFocus());
   }
 
   void _openEditProfile() async {
@@ -418,13 +395,10 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
   void _openPinDialog(
       {CashierPinMode mode = CashierPinMode.switchCashier}) async {
     final user = ref.read(authStateProvider);
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: mode == CashierPinMode.switchCashier,
-      builder: (_) => CashierPinDialog(
-        mode: mode,
-        lockedUser: user,
-      ),
+    final result = await CashierPinDialog.show(
+      context,
+      mode: mode,
+      lockedUser: user,
     );
 
     if (result == true && mounted) {
@@ -443,9 +417,9 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
   }
 
   void _openItemDiscount(PosCartItem item) async {
-    final discount = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (_) => ItemDiscountDialog(item: item),
+    final discount = await ItemDiscountDialog.show(
+      context,
+      item: item,
     );
     if (discount != null) {
       ref.read(posCartProvider.notifier).setItemDiscount(
@@ -478,9 +452,9 @@ class _CounterPosScreenState extends ConsumerState<CounterPosScreen> {
     final cart = ref.read(posCartProvider);
     if (cart.isEmpty) return;
 
-    final result = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (ctx) => PosCheckoutDialog(totalCentimes: totalCentimes),
+    final result = await PosCheckoutDialog.show(
+      context,
+      totalCentimes: totalCentimes,
     );
 
     if (result != null && mounted) {

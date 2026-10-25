@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
@@ -6,6 +7,7 @@ import 'package:core/core.dart';
 import '../../../providers/staff_providers.dart';
 import '../services/pos_thermal_printer.dart';
 
+/// A responsive, high-fidelity screen for paying suppliers in cash and printing disbursal vouchers.
 class SupplierPaymentDialog extends ConsumerStatefulWidget {
   final SupplierProfileEntity? initialSupplier;
   final String payerId;
@@ -20,6 +22,7 @@ class SupplierPaymentDialog extends ConsumerStatefulWidget {
     required this.payerRole,
   });
 
+  /// Opens supplier payment screen as a dedicated fullscreen screen route.
   static Future<void> show(
     BuildContext context, {
     SupplierProfileEntity? initialSupplier,
@@ -27,14 +30,15 @@ class SupplierPaymentDialog extends ConsumerStatefulWidget {
     required String payerName,
     required String payerRole,
   }) {
-    return showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => SupplierPaymentDialog(
-        initialSupplier: initialSupplier,
-        payerId: payerId,
-        payerName: payerName,
-        payerRole: payerRole,
+    return Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (ctx) => SupplierPaymentDialog(
+          initialSupplier: initialSupplier,
+          payerId: payerId,
+          payerName: payerName,
+          payerRole: payerRole,
+        ),
       ),
     );
   }
@@ -133,8 +137,6 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
       return;
     }
 
-    // Role-specific validations:
-    // If Cashier: check that active shift exists and drawer has enough cash
     final isCashier = widget.payerRole.toLowerCase().contains('cashier');
     if (isCashier) {
       final activeShift = ref.read(posActiveShiftProvider);
@@ -222,14 +224,12 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
         notes: notes,
       );
 
-      // If cashier, register cash withdrawal in the active drawer
       if (isCashier) {
         ref.read(posActiveShiftProvider.notifier).registerSupplierCashPayment(
               cashCentimes: payCentimes,
             );
       }
 
-      // Refresh providers
       ref.invalidate(suppliersWithBalancesProvider);
       ref.invalidate(suppliersProvider);
       ref.invalidate(purchasesListProvider);
@@ -280,211 +280,253 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final colors = context.appColors;
     final role = context.roleTheme;
     final brand = role.roleBrandColor;
     final isCashier = widget.payerRole.toLowerCase().contains('cashier');
     final activeShift = ref.watch(posActiveShiftProvider);
 
-    return Dialog(
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.xlAll),
-      backgroundColor: theme.colorScheme.surface,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680, maxHeight: 720),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 1. Header
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.sm),
-                    decoration: BoxDecoration(
-                      color: role.badgeBackground,
-                      borderRadius: AppRadius.mdAll,
-                      border: Border.all(
-                        color: brand.withValues(alpha: 0.30),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: brand.withValues(alpha: 0.18),
-                          blurRadius: 10,
-                        ),
-                      ],
-                    ),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.pop(context),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: colorScheme.surface,
+          appBar: AppBar(
+            elevation: 0,
+            scrolledUnderElevation: 2,
+            backgroundColor: colorScheme.surfaceContainer,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              tooltip: 'رجوع [Esc]',
+              onPressed: () => Navigator.pop(context),
+            ),
+            title: Row(
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: role.badgeBackground,
+                    borderRadius: AppRadius.smAll,
+                    border: Border.all(color: brand.withValues(alpha: 0.30)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
                     child: Icon(Icons.payments_rounded,
-                        color: role.badgeText, size: 24),
+                        size: 20, color: role.badgeText),
                   ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'سداد مستحقات الموردين (نقدًا)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 17),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'المسؤول: ${widget.payerName} | الدور: ${widget.payerRole}',
+                        style:
+                            theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              if (isCashier && activeShift != null)
+                Padding(
+                  padding:
+                      const EdgeInsetsDirectional.only(end: AppSpacing.md),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: colors.successContainer,
+                      borderRadius: AppRadius.pillAll,
+                      border: Border.all(color: colors.success),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
+                        Icon(Icons.point_of_sale_rounded,
+                            size: 16, color: colors.onSuccessContainer),
+                        const SizedBox(width: 6),
                         Text(
-                          'سداد مستحقات الموردين (نقدًا - Cash Only)',
-                          style: theme.textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          'المسؤول: ${widget.payerName} | الصلاحية: ${widget.payerRole}',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: theme.colorScheme.outline),
+                          'نقد الدرج: ${DzdFormatter.formatCentimes(activeShift.expectedCashInDrawerCentimes)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: colors.onSuccessContainer,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  if (isCashier && activeShift != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        borderRadius: AppRadius.mdAll,
-                        border:
-                            Border.all(color: theme.colorScheme.outlineVariant),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text('نقد الدرج المتوفر',
-                              style: theme.textTheme.labelSmall),
-                          Text(
-                            DzdFormatter.formatCentimes(
-                                activeShift.expectedCashInDrawerCentimes),
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green.shade700,
+                ),
+            ],
+          ),
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 840;
+
+              if (isWide) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Left: Supplier Search & Balance List
+                    SizedBox(
+                      width: 400,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerLow,
+                          border: BorderDirectional(
+                            end: BorderSide(
+                              color: colorScheme.outlineVariant
+                                  .withValues(alpha: 0.5),
                             ),
                           ),
-                        ],
+                        ),
+                        child: _buildSupplierSelector(theme, colorScheme, colors),
                       ),
                     ),
-                  const SizedBox(width: AppSpacing.sm),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-              const Divider(height: AppSpacing.xl),
-
-              // 2. Body
-              Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Left Column: Supplier Selection / Switch
+                    // Right: Payment Form & Execution
                     Expanded(
-                      flex: 4,
-                      child: _buildSupplierSelector(theme),
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(AppSpacing.xl),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 620),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _buildPaymentForm(
+                                    theme, colorScheme, colors, brand),
+                                AppSpacing.gapLg,
+                                CheckboxListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: const Text(
+                                    'طباعة سند صرف فوري (80mm Thermal Voucher)',
+                                    style: TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  subtitle: const Text(
+                                    'إخراج إيصال الصرف المالي الموقع من الكاشير والمورد',
+                                    style: TextStyle(fontSize: 11),
+                                  ),
+                                  value: _autoPrintVoucher,
+                                  onChanged: (v) => setState(
+                                      () => _autoPrintVoucher = v ?? true),
+                                ),
+                                AppSpacing.gapLg,
+                                GoldButton.icon(
+                                  onPressed:
+                                      _isSubmitting ? null : _handlePayment,
+                                  icon: _isSubmitting
+                                      ? Icons.hourglass_top_rounded
+                                      : Icons.check_circle_rounded,
+                                  label: _isSubmitting
+                                      ? 'جاري تسجيل الصرف...'
+                                      : 'تأكيد وصرف المبلغ نقدًا للمورد',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                    const VerticalDivider(width: AppSpacing.xl),
-                    // Right Column: Cash Payment Form
-                    Expanded(
-                      flex: 5,
-                      child: _buildPaymentForm(theme),
+                  ],
+                );
+              }
+
+              // Mobile Layout
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: 260,
+                      child: _buildSupplierSelector(theme, colorScheme, colors),
+                    ),
+                    const Divider(height: 32),
+                    _buildPaymentForm(theme, colorScheme, colors, brand),
+                    AppSpacing.gapMd,
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('طباعة سند صرف فوري'),
+                      value: _autoPrintVoucher,
+                      onChanged: (v) =>
+                          setState(() => _autoPrintVoucher = v ?? true),
+                    ),
+                    AppSpacing.gapLg,
+                    GoldButton.icon(
+                      onPressed: _isSubmitting ? null : _handlePayment,
+                      icon: Icons.check_circle_rounded,
+                      label: _isSubmitting ? 'جاري الصرف...' : 'تأكيد الصرف نقدًا',
                     ),
                   ],
                 ),
-              ),
-
-              const Divider(height: AppSpacing.xl),
-
-              // 3. Actions
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: _autoPrintVoucher,
-                        onChanged: (v) =>
-                            setState(() => _autoPrintVoucher = v ?? true),
-                      ),
-                      Text(
-                        'طباعة سند صرف فوري (80mm Thermal)',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      OutlinedButton(
-                        onPressed:
-                            _isSubmitting ? null : () => Navigator.pop(context),
-                        child: const Text('إلغاء'),
-                      ),
-                      const SizedBox(width: AppSpacing.md),
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: brand,
-                          foregroundColor: theme.colorScheme.onPrimary,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.lg,
-                              vertical: AppSpacing.md),
-                          shape: const RoundedRectangleBorder(
-                              borderRadius: AppRadius.mdAll),
-                        ),
-                        onPressed: _isSubmitting ? null : _handlePayment,
-                        icon: _isSubmitting
-                            ? SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: theme.colorScheme.onPrimary),
-                              )
-                            : const Icon(Icons.check_circle_rounded, size: 20),
-                        label: Text(
-                          _isSubmitting
-                              ? 'جاري المعالجة...'
-                              : 'تأكيد وصرف المبلغ نقدًا',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
+              );
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSupplierSelector(ThemeData theme) {
+  Widget _buildSupplierSelector(
+      ThemeData theme, ColorScheme colorScheme, dynamic colors) {
     final suppliersAsync = ref.watch(suppliersWithBalancesProvider);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'اختيار المورد المستحق',
-          style:
-              theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        TextField(
-          controller: _searchController,
-          decoration: const InputDecoration(
-            hintText: 'بحث باسم المورد أو رقم الهاتف...',
-            prefixIcon: Icon(Icons.search_rounded, size: 20),
-            isDense: true,
-            border: OutlineInputBorder(borderRadius: AppRadius.mdAll),
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'اختيار المورد المستحق:',
+                style: theme.textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'بحث باسم المورد أو رقم الهاتف...',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  filled: true,
+                  fillColor: colorScheme.surfaceContainer,
+                  border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
           ),
-          onChanged: (_) => setState(() {}),
         ),
-        const SizedBox(height: AppSpacing.sm),
+        const Divider(height: 1),
         Expanded(
           child: suppliersAsync.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            loading: () =>
+                const Center(child: AppLoadingView(message: 'جاري تحميل الموردين...')),
             error: (err, _) => Center(
-              child: Text('تعذر تحميل قائمة الموردين: $err',
-                  style: theme.textTheme.bodySmall),
+              child: AppErrorView(
+                message: 'تعذر تحميل قائمة الموردين: $err',
+                onRetry: () => ref.invalidate(suppliersWithBalancesProvider),
+              ),
             ),
             data: (suppliers) {
               final query = _searchController.text.trim().toLowerCase();
@@ -495,108 +537,70 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
               }).toList();
 
               if (filtered.isEmpty) {
-                return Center(
-                  child: Text('لا يوجد موردين مطابقين',
-                      style: theme.textTheme.bodySmall),
+                return const Center(
+                  child: AppEmptyView(
+                    icon: Icons.business_outlined,
+                    title: 'لا يوجد موردين',
+                    description: 'لم يتم العثور على موردين مطابقين.',
+                  ),
                 );
               }
 
               return ListView.separated(
                 itemCount: filtered.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final s = filtered[index];
                   final isSelected = _selectedSupplier?.id == s.id;
-                  return InkWell(
+                  final hasDebt = s.currentBalanceCentimes > 0;
+
+                  return ListTile(
+                    selected: isSelected,
+                    selectedTileColor:
+                        colorScheme.primaryContainer.withValues(alpha: 0.25),
                     onTap: () => _onSupplierSelected(s),
-                    borderRadius: AppRadius.mdAll,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? theme.colorScheme.primaryContainer
-                                .withValues(alpha: 0.3)
-                            : theme.colorScheme.surfaceContainerHighest
-                                .withValues(alpha: 0.3),
-                        borderRadius: AppRadius.mdAll,
-                        border: Border.all(
+                    leading: CircleAvatar(
+                      backgroundColor: isSelected
+                          ? colorScheme.primary
+                          : colorScheme.surfaceContainerHighest,
+                      child: Text(
+                        s.name.isNotEmpty ? s.name[0].toUpperCase() : 'S',
+                        style: TextStyle(
                           color: isSelected
-                              ? theme.colorScheme.primary
-                              : Colors.transparent,
-                          width: 1.5,
+                              ? colorScheme.onPrimary
+                              : colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 18,
-                            backgroundColor: isSelected
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.surfaceContainerHighest,
-                            child: Text(
-                              s.name.isNotEmpty ? s.name[0].toUpperCase() : 'S',
-                              style: TextStyle(
-                                color: isSelected
-                                    ? theme.colorScheme.onPrimary
-                                    : theme.colorScheme.onSurfaceVariant,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  s.name,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    fontWeight: isSelected
-                                        ? FontWeight.bold
-                                        : FontWeight.w600,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (s.phone.isNotEmpty)
-                                  Text(s.phone,
-                                      style: theme.textTheme.labelSmall
-                                          ?.copyWith(
-                                              color:
-                                                  theme.colorScheme.outline)),
-                              ],
-                            ),
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Text(
-                                DzdFormatter.formatCentimes(
-                                    s.currentBalanceCentimes),
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: s.currentBalanceCentimes > 0
-                                      ? context.appColors.error
-                                      : context.appColors.success,
-                                ),
-                              ),
-                              Text(
-                                s.currentBalanceCentimes > 0
-                                    ? 'مستحق له'
-                                    : 'خالص',
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  fontSize: 10,
-                                  color: s.currentBalanceCentimes > 0
-                                      ? context.appColors.error
-                                      : context.appColors.success,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                    ),
+                    title: Text(
+                      s.name,
+                      style: TextStyle(
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.w600,
                       ),
+                    ),
+                    subtitle: s.phone.isNotEmpty
+                        ? Text(s.phone, style: theme.textTheme.bodySmall)
+                        : null,
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        DzdPriceTag(
+                          centimes: s.currentBalanceCentimes,
+                          color: hasDebt ? colors.error : colors.success,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          hasDebt ? 'مستحق له' : 'خالص',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: hasDebt ? colors.error : colors.success,
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 },
@@ -608,220 +612,181 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
     );
   }
 
-  Widget _buildPaymentForm(ThemeData theme) {
+  Widget _buildPaymentForm(ThemeData theme, ColorScheme colorScheme,
+      dynamic colors, Color brand) {
     final balanceCentimes = _selectedSupplier?.currentBalanceCentimes ?? 0;
     final payCentimes = _enteredCentimes;
     final remainingCentimes = balanceCentimes - payCentimes;
 
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Selected Supplier Summary Card
-          Container(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest
-                  .withValues(alpha: 0.5),
-              borderRadius: AppRadius.lgAll,
-              border: Border.all(
-                  color:
-                      theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _selectedSupplier?.name ??
-                            'يرجى اختيار المورد من القائمة',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Selected Supplier Summary Card
+        LuxuryCard(
+          goldAccent: true,
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      _selectedSupplier?.name ?? 'يرجى اختيار المورد من القائمة',
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.shade100,
-                        borderRadius: AppRadius.smAll,
-                        border: Border.all(color: Colors.amber.shade700),
-                      ),
-                      child: const Text(
-                        'دفع نقدًا فقط (CASH ONLY)',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.brown),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('إجمالي مستحقات المورد الحالية:',
-                        style: theme.textTheme.bodySmall),
-                    Text(
-                      DzdFormatter.formatCentimes(balanceCentimes),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: balanceCentimes > 0
-                            ? Colors.red.shade700
-                            : Colors.grey,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-
-          // Quick Presets
-          if (balanceCentimes > 0) ...[
-            Text('نسب التسديد السريع:', style: theme.textTheme.labelMedium),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                _buildPresetButton('25%', () => _applyPresetPercent(0.25)),
-                const SizedBox(width: 6),
-                _buildPresetButton('50%', () => _applyPresetPercent(0.50)),
-                const SizedBox(width: 6),
-                _buildPresetButton('75%', () => _applyPresetPercent(0.75)),
-                const SizedBox(width: 6),
-                _buildPresetButton(
-                    '100% (تسديد كامل)', () => _applyPresetPercent(1.00),
-                    isPrimary: true),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-          ],
-
-          // Amount Input
-          Text('المبلغ المراد صرفه نقداً (د.ج):',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          TextField(
-            controller: _amountController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: theme.textTheme.headlineSmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: theme.colorScheme.primary,
-            ),
-            decoration: InputDecoration(
-              suffixText: 'د.ج',
-              prefixIcon: const Icon(Icons.attach_money_rounded),
-              hintText: '0',
-              filled: true,
-              fillColor: theme.colorScheme.surfaceContainerHighest
-                  .withValues(alpha: 0.3),
-              border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: AppSpacing.md),
-
-          // Remaining Balance Preview
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: remainingCentimes <= 0
-                  ? Colors.green.shade50
-                  : Colors.amber.shade50,
-              borderRadius: AppRadius.mdAll,
-              border: Border.all(
-                color: remainingCentimes <= 0
-                    ? Colors.green.shade300
-                    : Colors.amber.shade300,
+                  ),
+                  Chip(
+                    label: const Text('دفع نقدًا فقط (Cash Only)'),
+                    backgroundColor: brand.withValues(alpha: 0.12),
+                    side: BorderSide(color: brand.withValues(alpha: 0.3)),
+                  ),
+                ],
               ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  remainingCentimes <= 0
-                      ? 'الرصيد المتبقي بعد السداد (خالص):'
-                      : 'الرصيد المتبقي بذمة المؤسسة:',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: remainingCentimes <= 0
-                        ? Colors.green.shade800
-                        : Colors.amber.shade900,
+              const Divider(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('إجمالي مستحقات المورد الحالية:'),
+                  DzdPriceTag(
+                    centimes: balanceCentimes,
+                    color: balanceCentimes > 0 ? colors.error : null,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 16),
                   ),
-                ),
-                Text(
-                  DzdFormatter.formatCentimes(
-                      remainingCentimes.clamp(0, double.infinity).toInt()),
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: remainingCentimes <= 0
-                        ? Colors.green.shade800
-                        : Colors.amber.shade900,
-                  ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ),
-          const SizedBox(height: AppSpacing.md),
+        ),
+        AppSpacing.gapLg,
 
-          // Caller PIN confirmation
-          Text('رمز PIN الخاص بك لتأكيد الصرف:',
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(fontWeight: FontWeight.w600)),
+        // Quick Presets
+        if (balanceCentimes > 0) ...[
+          Text('نسب التسديد السريع:',
+              style: theme.textTheme.labelMedium
+                  ?.copyWith(fontWeight: FontWeight.bold)),
           const SizedBox(height: 6),
-          TextField(
-            controller: _pinController,
-            obscureText: true,
-            keyboardType: TextInputType.number,
-            maxLength: 8,
-            decoration: const InputDecoration(
-              hintText: '••••',
-              prefixIcon: Icon(Icons.lock_outline_rounded),
-              helperText: 'مطلوب لمنع أي عملية صرف غير مصرح بها',
-              counterText: '',
-              isDense: true,
-              border: OutlineInputBorder(borderRadius: AppRadius.mdAll),
-            ),
+          Row(
+            children: [
+              _buildPresetButton('25%', () => _applyPresetPercent(0.25)),
+              const SizedBox(width: 6),
+              _buildPresetButton('50%', () => _applyPresetPercent(0.50)),
+              const SizedBox(width: 6),
+              _buildPresetButton('75%', () => _applyPresetPercent(0.75)),
+              const SizedBox(width: 6),
+              _buildPresetButton(
+                  '100% (تسديد كامل)', () => _applyPresetPercent(1.00),
+                  isPrimary: true, brand: brand),
+            ],
           ),
-          const SizedBox(height: AppSpacing.md),
-
-          // Notes
-          Text('ملاحظات وسند الصرف (اختياري):',
-              style: theme.textTheme.bodySmall),
-          const SizedBox(height: 4),
-          TextField(
-            controller: _notesController,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              hintText: 'مثال: تسديد دفعة نقدية عن فاتورة استلام شحنة...',
-              isDense: true,
-              border: OutlineInputBorder(borderRadius: AppRadius.mdAll),
-            ),
-          ),
+          AppSpacing.gapLg,
         ],
-      ),
+
+        // Amount Input
+        TextField(
+          controller: _amountController,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          decoration: InputDecoration(
+            labelText: 'المبلغ المراد صرفه نقدًا (دج) *',
+            suffixText: 'دج',
+            prefixIcon: const Icon(Icons.attach_money_rounded, size: 28),
+            filled: true,
+            fillColor: colorScheme.surfaceContainerLow,
+            border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        AppSpacing.gapMd,
+
+        // Remaining Balance Live Preview
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: remainingCentimes <= 0
+                ? colors.successContainer
+                : colors.warningContainer,
+            borderRadius: AppRadius.mdAll,
+            border: Border.all(
+              color: remainingCentimes <= 0 ? colors.success : colors.warning,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                remainingCentimes <= 0
+                    ? 'الرصيد المتبقي بعد السداد (خالص):'
+                    : 'الرصيد المتبقي بذمة المحل:',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: remainingCentimes <= 0
+                      ? colors.onSuccessContainer
+                      : colors.onWarningContainer,
+                ),
+              ),
+              DzdPriceTag(
+                centimes: remainingCentimes.clamp(0, double.infinity).toInt(),
+                color: remainingCentimes <= 0
+                    ? colors.onSuccessContainer
+                    : colors.onWarningContainer,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+        AppSpacing.gapLg,
+
+        // PIN Field
+        TextField(
+          controller: _pinController,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          maxLength: 8,
+          decoration: InputDecoration(
+            labelText: 'رمز PIN الخاص بك لتأكيد العملية *',
+            hintText: '••••',
+            prefixIcon: const Icon(Icons.lock_outline_rounded),
+            helperText: 'مطلوب لحماية الصندوق وتسجيل التدقيق المالي',
+            counterText: '',
+            filled: true,
+            fillColor: colorScheme.surfaceContainerLow,
+            border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+          ),
+        ),
+        AppSpacing.gapMd,
+
+        // Notes
+        TextField(
+          controller: _notesController,
+          maxLines: 2,
+          decoration: InputDecoration(
+            labelText: 'ملاحظات وسند الصرف (اختياري)',
+            hintText: 'مثال: تسديد دفعة نقدية عن فاتورة استلام شحنة...',
+            filled: true,
+            fillColor: colorScheme.surfaceContainerLow,
+            border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildPresetButton(String label, VoidCallback onTap,
-      {bool isPrimary = false}) {
+      {bool isPrimary = false, Color? brand}) {
     return Expanded(
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          backgroundColor: isPrimary ? Colors.amber.shade100 : null,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          backgroundColor: isPrimary ? brand?.withValues(alpha: 0.15) : null,
           side: BorderSide(
-            color: isPrimary ? Colors.amber.shade800 : Colors.grey.shade400,
+            color: isPrimary && brand != null ? brand : Colors.grey.shade400,
           ),
           shape: const RoundedRectangleBorder(borderRadius: AppRadius.smAll),
         ),
@@ -831,7 +796,7 @@ class _SupplierPaymentDialogState extends ConsumerState<SupplierPaymentDialog> {
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.bold,
-            color: isPrimary ? Colors.amber.shade900 : null,
+            color: isPrimary && brand != null ? brand : null,
           ),
         ),
       ),

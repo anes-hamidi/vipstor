@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
@@ -6,6 +7,7 @@ import 'package:core/core.dart';
 import '../../../providers/staff_providers.dart';
 import '../services/pos_thermal_printer.dart';
 
+/// A responsive, high-fidelity screen for collecting customer debts, viewing ledger history, and printing statements.
 class CustomerDebtDialog extends ConsumerStatefulWidget {
   final CustomerProfileEntity customer;
   final String cashierId;
@@ -18,11 +20,31 @@ class CustomerDebtDialog extends ConsumerStatefulWidget {
     required this.cashierName,
   });
 
+  /// Opens the customer debt management screen as a dedicated fullscreen screen route.
+  static Future<bool?> show(
+    BuildContext context, {
+    required CustomerProfileEntity customer,
+    required String cashierId,
+    required String cashierName,
+  }) {
+    return Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => CustomerDebtDialog(
+          customer: customer,
+          cashierId: cashierId,
+          cashierName: cashierName,
+        ),
+      ),
+    );
+  }
+
   @override
   ConsumerState<CustomerDebtDialog> createState() => _CustomerDebtDialogState();
 }
 
-class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with SingleTickerProviderStateMixin {
+class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _amountController = TextEditingController();
   final _notesController = TextEditingController();
@@ -40,9 +62,9 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
     _currentCustomer = widget.customer;
     _tabController = TabController(length: 2, vsync: this);
 
-    // Default amount = full debt
     if (_currentCustomer.currentDebtCentimes > 0) {
-      _amountController.text = (_currentCustomer.currentDebtCentimes / 100).toStringAsFixed(0);
+      _amountController.text =
+          (_currentCustomer.currentDebtCentimes / 100).toStringAsFixed(0);
     }
   }
 
@@ -61,7 +83,8 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
   }
 
   void _applyPresetPercent(double factor) {
-    final amountCentimes = (_currentCustomer.currentDebtCentimes * factor).round();
+    final amountCentimes =
+        (_currentCustomer.currentDebtCentimes * factor).round();
     _amountController.text = (amountCentimes / 100).toStringAsFixed(0);
     setState(() {});
   }
@@ -78,7 +101,8 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
       return;
     }
 
-    if (payCentimes > _currentCustomer.currentDebtCentimes && _currentCustomer.currentDebtCentimes > 0) {
+    if (payCentimes > _currentCustomer.currentDebtCentimes &&
+        _currentCustomer.currentDebtCentimes > 0) {
       final confirm = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -88,8 +112,12 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
             'المبلغ المدخل (${DzdFormatter.formatCentimes(payCentimes)}) يفوق الدين الحالي (${DzdFormatter.formatCentimes(_currentCustomer.currentDebtCentimes)}). هل تود المتابعة؟',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('تأكيد')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('إلغاء')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('تأكيد')),
           ],
         ),
       );
@@ -105,22 +133,25 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
         customerId: _currentCustomer.id,
         amountCentimes: payCentimes,
         paymentMethod: _paymentMethod,
-        notes: _notesController.text.trim().isNotEmpty ? _notesController.text.trim() : null,
-        referenceNumber: _paymentMethod == 'cheque' ? _chequeRefController.text.trim() : null,
+        notes: _notesController.text.trim().isNotEmpty
+            ? _notesController.text.trim()
+            : null,
+        referenceNumber: _paymentMethod == 'cheque'
+            ? _chequeRefController.text.trim()
+            : null,
       );
 
-      // Register cash payment in shift if method is cash
       if (_paymentMethod == 'cash') {
-        ref.read(posActiveShiftProvider.notifier).registerDebtCashPayment(cashCentimes: payCentimes);
+        ref
+            .read(posActiveShiftProvider.notifier)
+            .registerDebtCashPayment(cashCentimes: payCentimes);
       }
 
-      // Refresh customer data
       final updatedCustomer = await repo.getCustomerById(_currentCustomer.id);
       if (updatedCustomer != null) {
         ref.read(posActiveCustomerProvider.notifier).state = updatedCustomer;
       }
 
-      // Print thermal voucher if enabled
       if (_autoPrintVoucher) {
         await PosThermalPrinterService.printCustomerDebtVoucher(
           result: result,
@@ -133,7 +164,8 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✓ تم تحصيل مبلغ ${DzdFormatter.formatCentimes(payCentimes)} بنجاح!'),
+          content: Text(
+              '✓ تم تحصيل مبلغ ${DzdFormatter.formatCentimes(payCentimes)} بنجاح!'),
           backgroundColor: context.appColors.success,
         ),
       );
@@ -155,66 +187,181 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final colors = context.appColors;
-    final isCompact = MediaQuery.of(context).size.width < 700;
+    final role = context.roleTheme;
+    final brand = role.roleBrandColor;
 
-    return Dialog(
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.lgAll),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 720,
-          maxHeight: MediaQuery.of(context).size.height * 0.88,
-        ),
-        child: Padding(
-          padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Top Header with Customer Summary Card
-              _buildCustomerHeaderCard(theme, colors),
-              AppSpacing.gapSm,
-
-              // Tabs
-              TabBar(
-                controller: _tabController,
-                tabs: const [
-                  Tab(icon: Icon(Icons.payments_outlined, size: 20), text: 'سداد دين (تحصيل)'),
-                  Tab(icon: Icon(Icons.receipt_long_outlined, size: 20), text: 'كشف الحساب وسجل الديون'),
-                ],
-              ),
-              AppSpacing.gapMd,
-
-              // Tab Views
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildPaymentCollectionTab(theme, colors, isCompact),
-                    _buildStatementLedgerTab(theme, colors),
-                  ],
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.pop(context),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: colorScheme.surface,
+          appBar: AppBar(
+            elevation: 0,
+            scrolledUnderElevation: 2,
+            backgroundColor: colorScheme.surfaceContainer,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              tooltip: 'رجوع [Esc]',
+              onPressed: () => Navigator.pop(context),
+            ),
+            title: Row(
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: role.badgeBackground,
+                    borderRadius: AppRadius.smAll,
+                    border: Border.all(color: brand.withValues(alpha: 0.30)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(Icons.account_balance_wallet_rounded,
+                        size: 20, color: role.badgeText),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'سداد ديون الزبون: ${_currentCustomer.name}',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 17),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        'أمين الصندوق: ${widget.cashierName} | الهاتف: ${_currentCustomer.phone}',
+                        style:
+                            theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              Padding(
+                padding: const EdgeInsetsDirectional.only(end: AppSpacing.md),
+                child: Chip(
+                  avatar: Icon(Icons.credit_card_rounded,
+                      size: 16, color: colors.warning),
+                  label: Text(
+                    'الدين الحالي: ${DzdFormatter.formatCentimes(_currentCustomer.currentDebtCentimes)}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: _currentCustomer.currentDebtCentimes > 0
+                          ? colors.warning
+                          : colors.success,
+                    ),
+                  ),
+                  backgroundColor: colors.warningContainer.withValues(alpha: 0.3),
+                  side: BorderSide(color: colors.warning.withValues(alpha: 0.4)),
                 ),
               ),
+            ],
+          ),
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 880;
 
-              // Bottom Cancel Action
-              const Divider(height: 1),
-              AppSpacing.gapSm,
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              if (isWide) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Left Column: Payment Form
+                    SizedBox(
+                      width: 440,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerLow,
+                          border: BorderDirectional(
+                            end: BorderSide(
+                              color: colorScheme.outlineVariant
+                                  .withValues(alpha: 0.5),
+                            ),
+                          ),
+                        ),
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.all(AppSpacing.lg),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildCustomerHeaderCard(theme, colors),
+                              AppSpacing.gapLg,
+                              _buildPaymentCollectionSection(
+                                  theme, colorScheme, colors, brand),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Right Column: Statement Ledger & Unpaid Invoices
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(AppSpacing.xl),
+                        child: _buildStatementLedgerTab(
+                            theme, colorScheme, colors),
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              // Mobile Layout: Tabs for Payment vs Statement
+              return Column(
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('إغلاق [Esc]'),
+                  Padding(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: _buildCustomerHeaderCard(theme, colors),
+                  ),
+                  TabBar(
+                    controller: _tabController,
+                    tabs: const [
+                      Tab(
+                        icon: Icon(Icons.payments_outlined, size: 18),
+                        text: 'سداد دين (تحصيل)',
+                      ),
+                      Tab(
+                        icon: Icon(Icons.receipt_long_outlined, size: 18),
+                        text: 'كشف الحساب والديون',
+                      ),
+                    ],
+                  ),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        SingleChildScrollView(
+                          padding: const EdgeInsets.all(AppSpacing.md),
+                          child: _buildPaymentCollectionSection(
+                              theme, colorScheme, colors, brand),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(AppSpacing.md),
+                          child: _buildStatementLedgerTab(
+                              theme, colorScheme, colors),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
-              ),
-            ],
+              );
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _buildCustomerHeaderCard(ThemeData theme, AppColors colors) {
+  Widget _buildCustomerHeaderCard(ThemeData theme, dynamic colors) {
     final hasDebt = _currentCustomer.currentDebtCentimes > 0;
     final isOverLimit = _currentCustomer.isCreditExceeded(0);
 
@@ -222,81 +369,94 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
       padding: const EdgeInsetsDirectional.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: isOverLimit
-            ? theme.colorScheme.errorContainer.withValues(alpha: 0.5)
-            : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+            ? theme.colorScheme.errorContainer.withValues(alpha: 0.3)
+            : theme.colorScheme.surfaceContainer,
         borderRadius: AppRadius.mdAll,
         border: Border.all(
-          color: isOverLimit ? theme.colorScheme.error : theme.colorScheme.outlineVariant,
-          width: 1,
+          color: isOverLimit
+              ? theme.colorScheme.error
+              : theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
         ),
       ),
-      child: Row(
+      child: Column(
         children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: hasDebt ? colors.warningContainer : theme.colorScheme.primaryContainer,
-            child: Icon(
-              Icons.account_balance_wallet,
-              color: hasDebt ? colors.onWarningContainer : theme.colorScheme.onPrimaryContainer,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: hasDebt
+                    ? colors.warningContainer
+                    : theme.colorScheme.primaryContainer,
+                child: Icon(
+                  Icons.person_rounded,
+                  color: hasDebt
+                      ? colors.onWarningContainer
+                      : theme.colorScheme.onPrimaryContainer,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       _currentCustomer.name,
-                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
                     ),
-                    if (isOverLimit) ...[
-                      const SizedBox(width: AppSpacing.sm),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.error,
-                          borderRadius: AppRadius.xsAll,
-                        ),
-                        child: Text(
-                          'تجاوز سقف الائتمان',
-                          style: TextStyle(fontSize: 10, color: theme.colorScheme.onError, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
+                    Text(_currentCustomer.phone,
+                        style: theme.textTheme.bodySmall),
                   ],
                 ),
-                Text(_currentCustomer.phone, style: theme.textTheme.bodySmall),
-              ],
-            ),
+              ),
+              if (isOverLimit)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.error,
+                    borderRadius: AppRadius.xsAll,
+                  ),
+                  child: Text(
+                    'تجاوز سقف الائتمان',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: theme.colorScheme.onError,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+            ],
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          const Divider(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('إجمالي الدين: ', style: theme.textTheme.bodySmall),
+                  const Text('الدين الإجمالي الحالي:',
+                      style: TextStyle(fontSize: 11)),
                   DzdPriceTag(
                     centimes: _currentCustomer.currentDebtCentimes,
                     style: TextStyle(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.bold,
                       color: hasDebt ? theme.colorScheme.error : colors.success,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text('سقف الائتمان: ', style: theme.textTheme.bodySmall),
+                  const Text('سقف الائتمان الممنوح:',
+                      style: TextStyle(fontSize: 11)),
                   DzdPriceTag(
                     centimes: _currentCustomer.creditLimitCentimes,
-                    style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -307,181 +467,182 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
     );
   }
 
-  Widget _buildPaymentCollectionTab(ThemeData theme, AppColors colors, bool isCompact) {
+  Widget _buildPaymentCollectionSection(ThemeData theme,
+      ColorScheme colorScheme, dynamic colors, Color brand) {
     final payCentimes = _enteredCentimes;
     final prevCentimes = _currentCustomer.currentDebtCentimes;
-    final remainingCentimes = (prevCentimes - payCentimes) > 0 ? (prevCentimes - payCentimes) : 0;
+    final remainingCentimes =
+        (prevCentimes - payCentimes) > 0 ? (prevCentimes - payCentimes) : 0;
 
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          AppSpacing.gapMd,
-          // Presets Row
-          Text('خيارات السداد السريع:', style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold)),
-          AppSpacing.gapSm,
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: [
-              ActionChip(
-                avatar: const Icon(Icons.check_circle_outline, size: 16),
-                label: const Text('كامل الدين (100%)'),
-                onPressed: () => _applyPresetPercent(1.0),
-              ),
-              ActionChip(
-                avatar: const Icon(Icons.pie_chart_outline, size: 16),
-                label: const Text('النصف (50%)'),
-                onPressed: () => _applyPresetPercent(0.5),
-              ),
-              ActionChip(
-                avatar: const Icon(Icons.pie_chart_outline, size: 16),
-                label: const Text('الربع (25%)'),
-                onPressed: () => _applyPresetPercent(0.25),
-              ),
-            ],
-          ),
-          AppSpacing.gapMd,
-
-          // Amount Input
-          TextField(
-            controller: _amountController,
-            autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-            decoration: const InputDecoration(
-              labelText: 'المبلغ المقبوض (دج) *',
-              prefixIcon: Icon(Icons.money),
-              suffixText: 'دج',
-              border: OutlineInputBorder(borderRadius: AppRadius.mdAll),
-              helperText: 'أدخل المبلغ الذي يدفعه الزبون الآن',
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('خيارات السداد السريع:',
+            style: theme.textTheme.labelMedium
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: [
+            ActionChip(
+              avatar: const Icon(Icons.check_circle_outline, size: 16),
+              label: const Text('كامل الدين (100%)'),
+              onPressed: () => _applyPresetPercent(1.0),
             ),
-            onChanged: (_) => setState(() {}),
-          ),
-          AppSpacing.gapMd,
-
-          // Payment Method Selector
-          Text('طريقة الدفع:', style: theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold)),
-          AppSpacing.gapSm,
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(
-                value: 'cash',
-                label: Text('نقداً (درج الكاشير)'),
-                icon: Icon(Icons.attach_money),
-              ),
-              ButtonSegment(
-                value: 'card',
-                label: Text('بطاقة / ذهبية'),
-                icon: Icon(Icons.credit_card),
-              ),
-              ButtonSegment(
-                value: 'cheque',
-                label: Text('شيك بنكي'),
-                icon: Icon(Icons.account_balance),
-              ),
-            ],
-            selected: {_paymentMethod},
-            onSelectionChanged: (val) => setState(() => _paymentMethod = val.first),
-          ),
-          AppSpacing.gapMd,
-
-          if (_paymentMethod == 'cheque') ...[
-            TextField(
-              controller: _chequeRefController,
-              decoration: const InputDecoration(
-                labelText: 'رقم الشيك / اسم البنك *',
-                prefixIcon: Icon(Icons.pin),
-                border: OutlineInputBorder(borderRadius: AppRadius.mdAll),
-              ),
+            ActionChip(
+              avatar: const Icon(Icons.pie_chart_outline, size: 16),
+              label: const Text('النصف (50%)'),
+              onPressed: () => _applyPresetPercent(0.5),
             ),
-            AppSpacing.gapMd,
+            ActionChip(
+              avatar: const Icon(Icons.pie_chart_outline, size: 16),
+              label: const Text('الربع (25%)'),
+              onPressed: () => _applyPresetPercent(0.25),
+            ),
           ],
+        ),
+        AppSpacing.gapLg,
 
-          // Notes
+        // Amount Input
+        TextField(
+          controller: _amountController,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          decoration: InputDecoration(
+            labelText: 'المبلغ المقبوض من الزبون (دج) *',
+            prefixIcon: const Icon(Icons.money_rounded, size: 28),
+            suffixText: 'دج',
+            filled: true,
+            fillColor: colorScheme.surfaceContainerLow,
+            border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        AppSpacing.gapMd,
+
+        // Payment Method Selector
+        Text('طريقة الدفع والتحصيل:',
+            style: theme.textTheme.labelMedium
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 6),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(
+              value: 'cash',
+              label: Text('نقداً (بالدرج)'),
+              icon: Icon(Icons.payments_outlined, size: 16),
+            ),
+            ButtonSegment(
+              value: 'card',
+              label: Text('بطاقة بنكية'),
+              icon: Icon(Icons.credit_card_outlined, size: 16),
+            ),
+            ButtonSegment(
+              value: 'cheque',
+              label: Text('شيك بنكي'),
+              icon: Icon(Icons.account_balance_outlined, size: 16),
+            ),
+          ],
+          selected: {_paymentMethod},
+          onSelectionChanged: (val) =>
+              setState(() => _paymentMethod = val.first),
+        ),
+        AppSpacing.gapMd,
+
+        if (_paymentMethod == 'cheque') ...[
           TextField(
-            controller: _notesController,
-            decoration: const InputDecoration(
-              labelText: 'ملاحظات إضافية (اختياري)',
-              prefixIcon: Icon(Icons.note_alt_outlined),
-              border: OutlineInputBorder(borderRadius: AppRadius.mdAll),
+            controller: _chequeRefController,
+            decoration: InputDecoration(
+              labelText: 'رقم الشيك / اسم المصرف *',
+              prefixIcon: const Icon(Icons.pin),
+              filled: true,
+              fillColor: colorScheme.surfaceContainerLow,
+              border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
             ),
           ),
           AppSpacing.gapMd,
+        ],
 
-          // Real-time calculation summary card
-          Container(
-            padding: const EdgeInsetsDirectional.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
-              borderRadius: AppRadius.mdAll,
-            ),
-            child: Column(
-              children: [
-                _summaryRow('الرصيد السابق:', DzdPriceTag(centimes: prevCentimes)),
-                const SizedBox(height: 4),
-                _summaryRow(
-                  'المبلغ المقبوض:',
-                  DzdPriceTag(
-                    centimes: payCentimes,
-                    style: TextStyle(fontWeight: FontWeight.bold, color: colors.success),
-                  ),
-                ),
-                const Divider(height: 12),
-                _summaryRow(
-                  'الرصيد المتبقي بعد السداد:',
-                  DzdPriceTag(
-                    centimes: remainingCentimes,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      color: remainingCentimes > 0 ? theme.colorScheme.error : colors.success,
-                    ),
-                  ),
-                ),
-              ],
+        TextField(
+          controller: _notesController,
+          maxLines: 2,
+          decoration: InputDecoration(
+            labelText: 'ملاحظات إضافية (اختياري)',
+            prefixIcon: const Icon(Icons.note_alt_outlined),
+            filled: true,
+            fillColor: colorScheme.surfaceContainerLow,
+            border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+          ),
+        ),
+        AppSpacing.gapMd,
+
+        // Summary Card
+        Container(
+          padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: colorScheme.primaryContainer.withValues(alpha: 0.25),
+            borderRadius: AppRadius.mdAll,
+            border: Border.all(
+              color: colorScheme.primary.withValues(alpha: 0.3),
             ),
           ),
-          AppSpacing.gapMd,
-
-          // Auto-print toggle & Submit button
-          Row(
+          child: Column(
             children: [
-              Checkbox(
-                value: _autoPrintVoucher,
-                onChanged: (v) => setState(() => _autoPrintVoucher = v ?? true),
+              _summaryRow('الرصيد السابق:', DzdPriceTag(centimes: prevCentimes)),
+              const SizedBox(height: 4),
+              _summaryRow(
+                'المبلغ المقبوض الآن:',
+                DzdPriceTag(
+                  centimes: payCentimes,
+                  color: colors.success,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
-              const Expanded(
-                child: Text('طباعة سند قبض حراري فوري (80mm)'),
+              const Divider(height: 12),
+              _summaryRow(
+                'الرصيد المتبقي بعد السداد:',
+                DzdPriceTag(
+                  centimes: remainingCentimes,
+                  color: remainingCentimes > 0
+                      ? colorScheme.error
+                      : colors.success,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16),
+                ),
               ),
             ],
           ),
-          AppSpacing.gapSm,
+        ),
+        AppSpacing.gapMd,
 
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(50),
-              shape: const RoundedRectangleBorder(borderRadius: AppRadius.mdAll),
-            ),
-            onPressed: _isSubmitting ? null : _handleCollectDebt,
-            icon: _isSubmitting
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
-                : const Icon(Icons.check_circle, size: 20),
-            label: Text(
-              _isSubmitting
-                  ? 'جاري حفظ السداد وتحديث الحساب...'
-                  : 'تأكيد وقبض المبلغ [${DzdFormatter.formatCentimes(payCentimes)}]',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-            ),
-          ),
-        ],
-      ),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('طباعة سند قبض حراري فوري (80mm)'),
+          value: _autoPrintVoucher,
+          onChanged: (v) => setState(() => _autoPrintVoucher = v ?? true),
+        ),
+        AppSpacing.gapLg,
+
+        GoldButton.icon(
+          onPressed: _isSubmitting ? null : _handleCollectDebt,
+          icon: _isSubmitting
+              ? Icons.hourglass_top_rounded
+              : Icons.check_circle_rounded,
+          label: _isSubmitting
+              ? 'جاري حفظ السداد...'
+              : 'تأكيد وقبض المبلغ [${DzdFormatter.formatCentimes(payCentimes)}]',
+        ),
+      ],
     );
   }
 
-  Widget _buildStatementLedgerTab(ThemeData theme, AppColors colors) {
+  Widget _buildStatementLedgerTab(
+      ThemeData theme, ColorScheme colorScheme, dynamic colors) {
     final ledgerAsync = ref.watch(customerLedgerProvider(_currentCustomer.id));
-    final unpaidOrdersAsync = ref.watch(customerUnpaidOrdersProvider(_currentCustomer.id));
+    final unpaidOrdersAsync =
+        ref.watch(customerUnpaidOrdersProvider(_currentCustomer.id));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -490,13 +651,11 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'حركات الحساب والفواتير غير المسددة',
-              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+              'حركات الحساب والفواتير غير المسددة:',
+              style: theme.textTheme.titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
             ),
             FilledButton.tonalIcon(
-              style: FilledButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-              ),
               onPressed: () async {
                 final entries = ledgerAsync.value ?? [];
                 await PosThermalPrinterService.printCustomerAccountStatement(
@@ -510,18 +669,20 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
             ),
           ],
         ),
-        AppSpacing.gapSm,
+        AppSpacing.gapMd,
         Expanded(
           child: DefaultTabController(
             length: 2,
             child: Column(
               children: [
-                const TabBar(
-                  tabs: [
+                TabBar(
+                  labelColor: colorScheme.primary,
+                  tabs: const [
                     Tab(text: 'سجل الحركات المالية'),
                     Tab(text: 'الفواتير والوصولات غير المسددة'),
                   ],
                 ),
+                AppSpacing.gapSm,
                 Expanded(
                   child: TabBarView(
                     children: [
@@ -529,28 +690,45 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
                       ledgerAsync.when(
                         data: (entries) {
                           if (entries.isEmpty) {
-                            return const Center(child: Text('لا توجد حركات مالية مسجلة'));
+                            return const Center(
+                              child: AppEmptyView(
+                                icon: Icons.receipt_long_outlined,
+                                title: 'لا توجد حركات مالية',
+                                description:
+                                    'لا توجد قيود مسجلة في دفتر الأستاذ لهذا الزبون.',
+                              ),
+                            );
                           }
                           return ListView.separated(
                             itemCount: entries.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, idx) {
                               final e = entries[idx];
                               final isPayment = e.isDebtPayment;
                               return ListTile(
-                                visualDensity: VisualDensity.compact,
                                 leading: CircleAvatar(
                                   radius: 16,
-                                  backgroundColor: isPayment ? colors.successContainer : theme.colorScheme.errorContainer,
+                                  backgroundColor: isPayment
+                                      ? colors.successContainer
+                                      : colorScheme.errorContainer,
                                   child: Icon(
-                                    isPayment ? Icons.arrow_downward : Icons.arrow_upward,
+                                    isPayment
+                                        ? Icons.arrow_downward
+                                        : Icons.arrow_upward,
                                     size: 16,
-                                    color: isPayment ? colors.onSuccessContainer : theme.colorScheme.onErrorContainer,
+                                    color: isPayment
+                                        ? colors.onSuccessContainer
+                                        : colorScheme.onErrorContainer,
                                   ),
                                 ),
                                 title: Text(
-                                  isPayment ? 'سداد / دفعة دين' : 'مبيعات بالدين (وصل)',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  isPayment
+                                      ? 'سداد / دفعة دين'
+                                      : 'مبيعات بالدين (وصل)',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
                                 ),
                                 subtitle: Text(
                                   '${e.createdAt.toString().substring(0, 16)} ${e.notes != null ? '• ${e.notes}' : ''}',
@@ -560,56 +738,90 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
                                   '${isPayment ? '-' : '+'}${DzdFormatter.formatCentimes(e.amountChangeCentimes.abs())}',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                    color: isPayment ? colors.success : theme.colorScheme.error,
+                                    fontSize: 14,
+                                    color: isPayment
+                                        ? colors.success
+                                        : colorScheme.error,
                                   ),
                                 ),
                               );
                             },
                           );
                         },
-                        loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-                        error: (err, _) => Center(child: Text('تعذر تحميل الحركات: $err')),
+                        loading: () => const Center(
+                            child: AppLoadingView(
+                                message: 'جاري تحميل الحركات...')),
+                        error: (err, _) => Center(
+                            child: AppErrorView(
+                                message: 'تعذر تحميل الحركات: $err')),
                       ),
 
                       // 2. Unpaid Orders
                       unpaidOrdersAsync.when(
                         data: (unpaidList) {
                           if (unpaidList.isEmpty) {
-                            return const Center(child: Text('لا توجد فواتير معلقة غير مسددة'));
+                            return const Center(
+                              child: AppEmptyView(
+                                icon: Icons.check_circle_outline_rounded,
+                                title: 'لا توجد فواتير معلقة',
+                                description:
+                                    'جميع الفواتير والوصولات السابقة مسددة بالكامل.',
+                              ),
+                            );
                           }
                           return ListView.separated(
                             itemCount: unpaidList.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, idx) {
                               final order = unpaidList[idx];
                               return ExpansionTile(
                                 leading: const Icon(Icons.receipt_outlined),
                                 title: Text(
                                   'وصل #${order.orderId.length > 8 ? order.orderId.substring(0, 8) : order.orderId}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
                                 ),
                                 subtitle: Text(
                                   'بتاريخ: ${order.orderDate.toString().substring(0, 10)} | المتبقي: ${DzdFormatter.formatCentimes(order.remainingDebtCentimes)}',
-                                  style: TextStyle(color: theme.colorScheme.error, fontSize: 11),
+                                  style: TextStyle(
+                                      color: colorScheme.error, fontSize: 11),
                                 ),
                                 trailing: DzdPriceTag(
                                   centimes: order.totalAmountCentimes,
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
                                 ),
                                 children: [
                                   Padding(
-                                    padding: const EdgeInsetsDirectional.all(AppSpacing.sm),
+                                    padding: const EdgeInsets.all(
+                                        AppSpacing.sm),
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
                                       children: [
-                                        Text('المنتجات: ${order.itemsSummary.join(', ')}', style: theme.textTheme.bodySmall),
+                                        Text(
+                                          'المواد: ${order.itemsSummary.join(', ')}',
+                                          style: theme.textTheme.bodySmall,
+                                        ),
                                         const SizedBox(height: 4),
                                         Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
                                           children: [
-                                            Text('المدفوع: ${DzdFormatter.formatCentimes(order.paidAmountCentimes)}', style: theme.textTheme.bodySmall),
-                                            Text('المتبقي: ${DzdFormatter.formatCentimes(order.remainingDebtCentimes)}', style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.error, fontSize: 12)),
+                                            Text(
+                                              'المدفوع: ${DzdFormatter.formatCentimes(order.paidAmountCentimes)}',
+                                              style: theme.textTheme.bodySmall,
+                                            ),
+                                            Text(
+                                              'المتبقي: ${DzdFormatter.formatCentimes(order.remainingDebtCentimes)}',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: colorScheme.error,
+                                                fontSize: 12,
+                                              ),
+                                            ),
                                           ],
                                         ),
                                       ],
@@ -620,8 +832,12 @@ class _CustomerDebtDialogState extends ConsumerState<CustomerDebtDialog> with Si
                             },
                           );
                         },
-                        loading: () => const Center(child: CircularProgressIndicator.adaptive()),
-                        error: (err, _) => Center(child: Text('تعذر تحميل الفواتير: $err')),
+                        loading: () => const Center(
+                            child: AppLoadingView(
+                                message: 'جاري تحميل الفواتير...')),
+                        error: (err, _) => Center(
+                            child: AppErrorView(
+                                message: 'تعذر تحميل الفواتير: $err')),
                       ),
                     ],
                   ),

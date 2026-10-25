@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:core/core.dart';
@@ -6,8 +7,19 @@ import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
 import '../services/pos_thermal_printer.dart';
 
+/// A responsive, high-fidelity screen for cashier shift audits, cash counting, and Z-Reports.
 class ShiftAuditDialog extends ConsumerStatefulWidget {
   const ShiftAuditDialog({super.key});
+
+  /// Opens the shift audit as a dedicated fullscreen screen route.
+  static Future<void> show(BuildContext context) {
+    return Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const ShiftAuditDialog(),
+      ),
+    );
+  }
 
   @override
   ConsumerState<ShiftAuditDialog> createState() => _ShiftAuditDialogState();
@@ -47,6 +59,24 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
     return totalDzd * 100;
   }
 
+  void _adjustDenomination(int denom, int delta) {
+    final controller = _denominationControllers[denom];
+    if (controller == null) return;
+    final current = int.tryParse(controller.text.trim()) ?? 0;
+    final updated = (current + delta).clamp(0, 99999);
+    setState(() {
+      controller.text = updated.toString();
+    });
+  }
+
+  void _resetAllDenominations() {
+    setState(() {
+      for (final c in _denominationControllers.values) {
+        c.text = '0';
+      }
+    });
+  }
+
   void _handleOpenShift() {
     final user = ref.read(authStateProvider);
     final floatDzd =
@@ -82,6 +112,43 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
     );
   }
 
+  Future<void> _handlePrintXReport(PosShiftSession shift) async {
+    final counted = _calculatedCountedCashCentimes;
+    final denomCounts = <int, int>{};
+    _denominationControllers.forEach((k, v) {
+      denomCounts[k] = int.tryParse(v.text.trim()) ?? 0;
+    });
+
+    final tempZReport = ZReportSummary(
+      zNumber: shift.zReportNumber,
+      cashierName: shift.cashierName,
+      openedAt: shift.openedAt,
+      closedAt: DateTime.now(),
+      openingFloatCentimes: shift.openingFloatCentimes,
+      cashSalesCentimes: shift.cashSalesCentimes,
+      creditSalesCentimes: shift.creditSalesCentimes,
+      totalSalesCentimes: shift.cashSalesCentimes + shift.creditSalesCentimes,
+      returnsCentimes: shift.returnsCentimes,
+      collectedDebtCashCentimes: shift.collectedDebtCashCentimes,
+      supplierPaymentsCashCentimes: shift.supplierPaymentsCashCentimes,
+      driverSettlementCashCentimes: shift.driverSettlementCashCentimes,
+      expectedCashCentimes: shift.expectedCashInDrawerCentimes,
+      countedCashCentimes: counted,
+      varianceCentimes: counted - shift.expectedCashInDrawerCentimes,
+      denominations: denomCounts,
+    );
+
+    await PosThermalPrinterService.printZReport(tempZReport);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('تمت طباعة التقرير المرحلي (X-Report) بنجاح!'),
+          backgroundColor: context.appColors.success,
+        ),
+      );
+    }
+  }
+
   void _handleCloseShiftAndZReport(PosShiftSession shift) async {
     final counted = _calculatedCountedCashCentimes;
     final denomCounts = <int, int>{};
@@ -94,7 +161,6 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
           denominations: denomCounts,
         );
 
-    // Audit log shift close
     ref.read(staffAuditLoggerProvider).logShiftClosed(
           cashierId: shift.cashierId,
           cashierName: shift.cashierName,
@@ -110,7 +176,6 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
 
     Navigator.pop(context);
 
-    // Prompt for print
     await PosThermalPrinterService.printZReport(zReport);
 
     if (mounted) {
@@ -128,368 +193,667 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
   Widget build(BuildContext context) {
     final shift = ref.watch(posActiveShiftProvider);
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     final colors = context.appColors;
     final role = context.roleTheme;
+    final brand = role.roleBrandColor;
 
-    return Dialog(
-      shape: const RoundedRectangleBorder(borderRadius: AppRadius.lgAll),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720, maxHeight: 700),
-        child: Padding(
-          padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Row(
-                      children: [
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: role.badgeBackground,
-                            borderRadius: AppRadius.smAll,
-                            border: Border.all(
-                              color:
-                                  role.roleBrandColor.withValues(alpha: 0.30),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color:
-                                    role.roleBrandColor.withValues(alpha: 0.18),
-                                blurRadius: 10,
-                              ),
-                            ],
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(6),
-                            child: Icon(Icons.point_of_sale_rounded,
-                                size: 18, color: role.badgeText),
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Flexible(
-                          child: Text(
-                            shift == null
-                                ? 'فتح وردية صندوق جديدة'
-                                : 'جرد الصندوق وإغلاق الوردية (Z-Report)',
-                            style: theme.textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 2,
-                          ),
-                        ),
-                      ],
-                    ),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            Navigator.pop(context),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: colorScheme.surface,
+          appBar: AppBar(
+            elevation: 0,
+            scrolledUnderElevation: 2,
+            backgroundColor: colorScheme.surfaceContainer,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded),
+              tooltip: 'رجوع [Esc]',
+              onPressed: () => Navigator.pop(context),
+            ),
+            title: Row(
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: role.badgeBackground,
+                    borderRadius: AppRadius.smAll,
+                    border: Border.all(color: brand.withValues(alpha: 0.30)),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(context),
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Icon(Icons.calculate_rounded,
+                        size: 20, color: role.badgeText),
                   ),
-                ],
-              ),
-              const Divider(),
-              if (shift == null)
+                ),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.lock_open_rounded,
-                          size: 64, color: theme.colorScheme.onSurfaceVariant),
-                      AppSpacing.gapLg,
                       Text(
-                        'لا توجد وردية مفتوحة حاليًا',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold),
+                        shift == null
+                            ? 'فتح وردية صندوق جديدة'
+                            : 'جرد الصندوق وإغلاق الوردية (Z-Report)',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 17),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 8),
                       Text(
-                        'يرجى تحديد المبلغ النقدي الافتتاحي في درج الصندوق (Fond de caisse) لبدء العمليات:',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                      AppSpacing.gapLg,
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 320),
-                        child: TextField(
-                          controller: _openingFloatController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true),
-                          autofocus: true,
-                          decoration: const InputDecoration(
-                            labelText: 'الرصيد الافتتاحي (دج) *',
-                            prefixIcon: Icon(Icons.payments_outlined),
-                          ),
-                        ),
-                      ),
-                      AppSpacing.gapXl,
-                      GoldButton.icon(
-                        icon: Icons.login_rounded,
-                        label: 'فتح الوردية وبدء البيع',
-                        onPressed: _handleOpenShift,
+                        shift == null
+                            ? 'نظام إدارة الورديات المالية'
+                            : 'تقرير الإقفال المالي #${shift.zReportNumber}',
+                        style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
-                )
-              else
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        // Shift Summary Card
-                        LuxuryCard(
-                          goldAccent: true,
-                          padding: const EdgeInsets.all(AppSpacing.md),
-                          child: Column(
-                            children: [
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Flexible(
-                                      child: Text(
-                                          'رقم تقرير Z المرتقب: #${shift.zReportNumber}',
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold),
-                                          overflow: TextOverflow.ellipsis)),
-                                  Text(
-                                      'افتتحت في: ${shift.openedAt.toString().substring(11, 16)}',
-                                      style: theme.textTheme.bodySmall),
-                                ],
-                              ),
-                              const Divider(height: 16),
-                              Wrap(
-                                spacing: AppSpacing.md,
-                                runSpacing: AppSpacing.sm,
-                                children: [
-                                  _summaryMetric('الرصيد الافتتاحي',
-                                      shift.openingFloatCentimes),
-                                  _summaryMetric('المبيعات النقدية',
-                                      shift.cashSalesCentimes),
-                                  _summaryMetric('مبيعات الدين',
-                                      shift.creditSalesCentimes),
-                                  if (shift.collectedDebtCashCentimes > 0)
-                                    _summaryMetric('سداد ديون الزبائن (+)',
-                                        shift.collectedDebtCashCentimes),
-                                  if (shift.driverSettlementCashCentimes > 0)
-                                    _summaryMetric('تسويات عهدة السائقين (+)',
-                                        shift.driverSettlementCashCentimes),
-                                  if (shift.supplierPaymentsCashCentimes > 0)
-                                    _summaryMetric('مدفوعات الموردين (-)',
-                                        -shift.supplierPaymentsCashCentimes,
-                                        isNegative: true),
-                                  _summaryMetric(
-                                      'المسترجعات', -shift.returnsCentimes,
-                                      isNegative: true),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        AppSpacing.gapMd,
-                        Text(
-                          'جدول جرد وعد الفئات النقدية في الدرج:',
-                          style: theme.textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
-                        ),
-                        AppSpacing.gapSm,
-                        GridView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            childAspectRatio: 3.5,
-                            crossAxisSpacing: AppSpacing.md,
-                            mainAxisSpacing: AppSpacing.sm,
-                          ),
-                          itemCount: _denominationControllers.length,
-                          itemBuilder: (context, idx) {
-                            final denom =
-                                _denominationControllers.keys.elementAt(idx);
-                            final controller = _denominationControllers[denom]!;
-
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: AppSpacing.sm, vertical: 4),
-                              decoration: BoxDecoration(
-                                border: Border.all(
-                                    color: theme.colorScheme.outlineVariant),
-                                borderRadius: AppRadius.smAll,
-                              ),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 70,
-                                    child: Text(
-                                      '$denom دج',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13),
-                                    ),
-                                  ),
-                                  const Text('x'),
-                                  const SizedBox(width: AppSpacing.sm),
-                                  Expanded(
-                                    child: TextField(
-                                      controller: controller,
-                                      keyboardType: TextInputType.number,
-                                      decoration: const InputDecoration(
-                                        isDense: true,
-                                        contentPadding: EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 8),
-                                      ),
-                                      onChanged: (_) => setState(() {}),
-                                    ),
-                                  ),
-                                  const SizedBox(width: AppSpacing.sm),
-                                  Flexible(
-                                    child: Text(
-                                      '${((int.tryParse(controller.text.trim()) ?? 0) * denom)} دج',
-                                      textAlign: TextAlign.end,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        AppSpacing.gapLg,
-                        // Cash Variance Live Analysis
-                        Builder(
-                          builder: (context) {
-                            final counted = _calculatedCountedCashCentimes;
-                            final expected = shift.expectedCashInDrawerCentimes;
-                            final variance = counted - expected;
-                            final isMatch = variance == 0;
-                            final isOver = variance > 0;
-
-                            return Container(
-                              padding: const EdgeInsets.all(AppSpacing.md),
-                              decoration: BoxDecoration(
-                                color: isMatch
-                                    ? colors.successContainer
-                                    : (isOver
-                                        ? colors.warningContainer
-                                        : theme.colorScheme.errorContainer),
-                                borderRadius: AppRadius.mdAll,
-                              ),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Flexible(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                            'المتوقع بالدرج: ${DzdFormatter.formatCentimes(expected)}',
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold),
-                                            overflow: TextOverflow.ellipsis),
-                                        Text(
-                                            'المحسوب فعليًا: ${DzdFormatter.formatCentimes(counted)}',
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.bold),
-                                            overflow: TextOverflow.ellipsis),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(width: AppSpacing.sm),
-                                  Flexible(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          isMatch
-                                              ? 'الدرج متطابق تمامًا (0 دج)'
-                                              : (isOver
-                                                  ? 'فائض نقدي بالدرج'
-                                                  : 'عجز نقدي بالدرج'),
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: isMatch
-                                                ? colors.onSuccessContainer
-                                                : (isOver
-                                                    ? colors.onWarningContainer
-                                                    : theme.colorScheme
-                                                        .onErrorContainer),
-                                          ),
-                                        ),
-                                        DzdPriceTag(
-                                          centimes: variance.abs(),
-                                          color: isMatch
-                                              ? colors.onSuccessContainer
-                                              : (isOver
-                                                  ? colors.onWarningContainer
-                                                  : theme.colorScheme
-                                                      .onErrorContainer),
-                                          style: const TextStyle(
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.bold),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (shift != null) ...[
-                const Divider(),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Flexible(
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('إلغاء والعودة للبيع'),
-                      ),
-                    ),
-                    Flexible(
-                      child: GoldButton.icon(
-                        onPressed: () => _handleCloseShiftAndZReport(shift),
-                        icon: Icons.lock_rounded,
-                        label: 'تأكيد الإغلاق وطباعة Z-Report',
-                      ),
-                    ),
-                  ],
                 ),
               ],
+            ),
+            actions: [
+              if (shift != null)
+                Padding(
+                  padding:
+                      const EdgeInsetsDirectional.only(end: AppSpacing.md),
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.print_outlined, size: 16),
+                    label: const Text('طباعة X-Report'),
+                    onPressed: () => _handlePrintXReport(shift),
+                  ),
+                ),
             ],
+          ),
+          body: shift == null
+              ? _buildOpenShiftView(theme, colorScheme, colors, role, brand)
+              : _buildActiveShiftView(
+                  shift, theme, colorScheme, colors, role, brand),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOpenShiftView(ThemeData theme, ColorScheme colorScheme,
+      dynamic colors, dynamic role, Color brand) {
+    final presets = [5000.0, 10000.0, 15000.0, 20000.0, 30000.0];
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: LuxuryCard(
+            goldAccent: true,
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Icon(Icons.lock_open_rounded, size: 56, color: brand),
+                AppSpacing.gapMd,
+                Text(
+                  'بدء جلسة ووردية عمل جديدة',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'يرجى تحديد المبلغ النقدي المتوفر فعليًا في درج الصندوق (Fond de Caisse) قبل بدء استقبال الزبائن:',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                AppSpacing.gapLg,
+                TextField(
+                  controller: _openingFloatController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  autofocus: true,
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold),
+                  decoration: InputDecoration(
+                    labelText: 'الرصيد الافتتاحي بالدرج (دج) *',
+                    prefixIcon: const Icon(Icons.payments_outlined, size: 28),
+                    suffixText: 'دج',
+                    suffixStyle: const TextStyle(fontWeight: FontWeight.bold),
+                    filled: true,
+                    fillColor: colorScheme.surfaceContainerLow,
+                    border: const OutlineInputBorder(borderRadius: AppRadius.mdAll),
+                  ),
+                ),
+                AppSpacing.gapSm,
+                Wrap(
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xs,
+                  alignment: WrapAlignment.center,
+                  children: presets.map((amount) {
+                    return ActionChip(
+                      label: Text('${amount.toStringAsFixed(0)} دج'),
+                      labelStyle: TextStyle(
+                        color: role.badgeText,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      backgroundColor: role.badgeBackground,
+                      onPressed: () {
+                        setState(() {
+                          _openingFloatController.text =
+                              amount.toStringAsFixed(0);
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+                AppSpacing.gapXl,
+                GoldButton.icon(
+                  icon: Icons.login_rounded,
+                  label: 'تأكيد فتح الوردية وبدء البيع',
+                  onPressed: _handleOpenShift,
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _summaryMetric(String label, int centimes, {bool isNegative = false}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.onSurfaceVariant)),
-        const SizedBox(height: 2),
-        DzdPriceTag(
-          centimes: centimes.abs(),
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-        ),
-      ],
+  Widget _buildActiveShiftView(
+      PosShiftSession shift,
+      ThemeData theme,
+      ColorScheme colorScheme,
+      dynamic colors,
+      dynamic role,
+      Color brand) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 880;
+
+        if (isWide) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Left Panel: Pulse Metrics, Drawer Balance, Variance and Close Action
+              SizedBox(
+                width: 420,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerLow,
+                    border: BorderDirectional(
+                      end: BorderSide(
+                        color:
+                            colorScheme.outlineVariant.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildShiftHeaderCard(shift, theme, brand, role),
+                        AppSpacing.gapMd,
+                        _buildMetricsGrid(shift, theme),
+                        AppSpacing.gapMd,
+                        _buildVarianceAnalysisCard(shift, theme, colors),
+                        AppSpacing.gapLg,
+                        GoldButton.icon(
+                          onPressed: () => _handleCloseShiftAndZReport(shift),
+                          icon: Icons.lock_rounded,
+                          label: 'تأكيد الإغلاق النهائي وطباعة Z-Report',
+                        ),
+                        AppSpacing.gapSm,
+                        OutlinedButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('إلغاء والعودة لشاشة البيع'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Right Panel: Denominations Counting Grid
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(AppSpacing.xl),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 820),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'جدول جرد وعد الفئات النقدية بالدرج',
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'أدخل عدد الأوراق النقدية والقطع المعدنية المحسوبة في الدرج',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              TextButton.icon(
+                                icon: const Icon(Icons.refresh_rounded, size: 16),
+                                label: const Text('تصفير العداد'),
+                                onPressed: _resetAllDenominations,
+                              ),
+                            ],
+                          ),
+                          AppSpacing.gapLg,
+                          _buildDenominationsGrid(theme, colorScheme, brand),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+
+        // Mobile Layout: Single-column scroll
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildShiftHeaderCard(shift, theme, brand, role),
+              AppSpacing.gapMd,
+              _buildMetricsGrid(shift, theme),
+              AppSpacing.gapMd,
+              _buildVarianceAnalysisCard(shift, theme, colors),
+              AppSpacing.gapLg,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'جرد الفئات النقدية:',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  TextButton(
+                    onPressed: _resetAllDenominations,
+                    child: const Text('تصفير'),
+                  ),
+                ],
+              ),
+              AppSpacing.gapSm,
+              _buildDenominationsGrid(theme, colorScheme, brand),
+              AppSpacing.gapXl,
+              GoldButton.icon(
+                onPressed: () => _handleCloseShiftAndZReport(shift),
+                icon: Icons.lock_rounded,
+                label: 'تأكيد الإغلاق وطباعة Z-Report',
+              ),
+              AppSpacing.gapSm,
+              OutlinedButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('إلغاء'),
+              ),
+            ],
+          ),
+        );
+      },
     );
+  }
+
+  Widget _buildShiftHeaderCard(
+      PosShiftSession shift, ThemeData theme, Color brand, dynamic role) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: role.badgeBackground,
+        borderRadius: AppRadius.mdAll,
+        border: Border.all(color: brand.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'تقرير Z المرتقب: #${shift.zReportNumber}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+              Chip(
+                label: const Text('وردية نشطة', style: TextStyle(fontSize: 11)),
+                backgroundColor: brand.withValues(alpha: 0.15),
+                side: BorderSide(color: brand.withValues(alpha: 0.3)),
+                padding: EdgeInsets.zero,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Icon(Icons.schedule_rounded, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                'بدأت في: ${shift.openedAt.toString().substring(11, 16)}',
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              const Icon(Icons.person_outline_rounded, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                'الكاشير: ${shift.cashierName}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricsGrid(PosShiftSession shift, ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainer,
+        borderRadius: AppRadius.mdAll,
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'حركة النقد والعمليات المسجلة:',
+            style:
+                theme.textTheme.labelMedium?.copyWith(fontWeight: FontWeight.bold),
+          ),
+          const Divider(height: 16),
+          _metricRow('الرصيد الافتتاحي (Fond)', shift.openingFloatCentimes),
+          _metricRow('المبيعات النقدية (+)', shift.cashSalesCentimes),
+          _metricRow('مبيعات الدين (على الحساب)', shift.creditSalesCentimes),
+          if (shift.collectedDebtCashCentimes > 0)
+            _metricRow(
+                'تحصيل ديون الزبائن (+)', shift.collectedDebtCashCentimes),
+          if (shift.driverSettlementCashCentimes > 0)
+            _metricRow(
+                'تسويات عهدة السائقين (+)', shift.driverSettlementCashCentimes),
+          if (shift.supplierPaymentsCashCentimes > 0)
+            _metricRow('مدفوعات الموردين (-)', -shift.supplierPaymentsCashCentimes,
+                isNegative: true),
+          if (shift.returnsCentimes > 0)
+            _metricRow('المسترجعات للزبائن (-)', -shift.returnsCentimes,
+                isNegative: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _metricRow(String title, int centimes, {bool isNegative = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(fontSize: 12),
+          ),
+          DzdPriceTag(
+            centimes: centimes.abs(),
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: isNegative ? Colors.redAccent : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVarianceAnalysisCard(
+      PosShiftSession shift, ThemeData theme, dynamic colors) {
+    final counted = _calculatedCountedCashCentimes;
+    final expected = shift.expectedCashInDrawerCentimes;
+    final variance = counted - expected;
+    final isMatch = variance == 0;
+    final isOver = variance > 0;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: isMatch
+            ? colors.successContainer
+            : (isOver
+                ? colors.warningContainer
+                : theme.colorScheme.errorContainer),
+        borderRadius: AppRadius.mdAll,
+        border: Border.all(
+          color: isMatch
+              ? colors.success
+              : (isOver ? colors.warning : theme.colorScheme.error),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'المتوقع في الصندوق:',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                  color: isMatch
+                      ? colors.onSuccessContainer
+                      : (isOver
+                          ? colors.onWarningContainer
+                          : theme.colorScheme.onErrorContainer),
+                ),
+              ),
+              DzdPriceTag(
+                centimes: expected,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'المعدود فعليًا (الآن):',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                  color: isMatch
+                      ? colors.onSuccessContainer
+                      : (isOver
+                          ? colors.onWarningContainer
+                          : theme.colorScheme.onErrorContainer),
+                ),
+              ),
+              DzdPriceTag(
+                centimes: counted,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const Divider(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                isMatch
+                    ? 'الدرج متطابق تمامًا (0 دج)'
+                    : (isOver
+                        ? 'فائض نقدي بالدرج (+)'
+                        : 'عجز نقدي بالدرج (-)'),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: isMatch
+                      ? colors.onSuccessContainer
+                      : (isOver
+                          ? colors.onWarningContainer
+                          : theme.colorScheme.onErrorContainer),
+                ),
+              ),
+              DzdPriceTag(
+                centimes: variance.abs(),
+                color: isMatch
+                    ? colors.onSuccessContainer
+                    : (isOver
+                        ? colors.onWarningContainer
+                        : theme.colorScheme.onErrorContainer),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDenominationsGrid(
+      ThemeData theme, ColorScheme colorScheme, Color brand) {
+    return LayoutBuilder(builder: (context, constraints) {
+      final cols = constraints.maxWidth > 550 ? 2 : 1;
+      final entries = _denominationControllers.entries.toList();
+
+      return GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols,
+          childAspectRatio: 3.2,
+          crossAxisSpacing: AppSpacing.md,
+          mainAxisSpacing: AppSpacing.md,
+        ),
+        itemCount: entries.length,
+        itemBuilder: (context, idx) {
+          final entry = entries[idx];
+          final denom = entry.key;
+          final controller = entry.value;
+          final count = int.tryParse(controller.text.trim()) ?? 0;
+          final subtotalDzd = count * denom;
+
+          return Container(
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainer,
+              border: Border.all(
+                color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+              ),
+              borderRadius: AppRadius.mdAll,
+            ),
+            child: Row(
+              children: [
+                // Denomination Badge
+                Container(
+                  width: 80,
+                  alignment: Alignment.center,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHigh,
+                    borderRadius: AppRadius.smAll,
+                  ),
+                  child: Text(
+                    '$denom دج',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                // Stepper Controls (- / +)
+                IconButton.filledTonal(
+                  icon: const Icon(Icons.remove, size: 16),
+                  onPressed: () => _adjustDenomination(denom, -1),
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(36, 36),
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    textAlign: TextAlign.center,
+                    keyboardType: TextInputType.number,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton.filledTonal(
+                  icon: const Icon(Icons.add, size: 16),
+                  onPressed: () => _adjustDenomination(denom, 1),
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(36, 36),
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                // Subtotal
+                SizedBox(
+                  width: 90,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text(
+                        'المجموع:',
+                        style: TextStyle(fontSize: 10),
+                      ),
+                      Text(
+                        '$subtotalDzd دج',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: count > 0 ? brand : null,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    });
   }
 }
