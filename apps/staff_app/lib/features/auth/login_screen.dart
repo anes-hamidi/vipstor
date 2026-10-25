@@ -1,23 +1,25 @@
 import 'dart:async';
+
+import 'package:core/core.dart' show themeModeProvider;
+import 'package:data/data.dart';
+import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pinput/pinput.dart';
-import 'package:domain/domain.dart';
-import 'package:data/data.dart';
 import 'package:ui_kit/ui_kit.dart';
+
 import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
+import 'widgets/auth_theme.dart';
 import 'widgets/change_pin_dialog.dart';
 
-/// Minimized, responsive, and tactile Login Screen for VIP Staff App.
+/// Tactile staff sign-in terminal.
 ///
-/// Features:
-/// - Disables native system keyboard pop-up (`useNativeKeyboard: false`).
-/// - Full on-screen tactile numeric keypad with physical keyboard shortcut support.
-/// - Adaptive responsive design for Desktop, Tablet, and Mobile.
-/// - Minimalist VIP Gold & Obsidian visual styling.
-/// - Real-time connection status and background OTA update checks.
+/// The screen is fully themed: every surface, border, glow and text colour is
+/// derived from the active [ColorScheme] and role accent, so it stays legible
+/// in light and dark mode and follows the workspace palette. The on-screen
+/// keypad remains the only PIN entry surface (the native keyboard is disabled)
+/// while physical keyboard shortcuts stay available for desktop terminals.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -100,21 +102,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
     } else if (key == 'back') {
       if (_pinController.text.isNotEmpty) {
-        _pinController.text =
-            _pinController.text.substring(0, _pinController.text.length - 1);
+        _pinController.text = _pinController.text.substring(
+          0,
+          _pinController.text.length - 1,
+        );
         if (_errorMessage != null) {
           setState(() => _errorMessage = null);
         }
       }
-    } else {
-      if (_pinController.text.length < 4) {
-        _pinController.text = _pinController.text + key;
-        if (_errorMessage != null) {
-          setState(() => _errorMessage = null);
-        }
-        if (_pinController.text.length == 4) {
-          _handlePinLogin(_pinController.text);
-        }
+    } else if (_pinController.text.length < 4) {
+      _pinController.text = _pinController.text + key;
+      if (_errorMessage != null) {
+        setState(() => _errorMessage = null);
+      }
+      if (_pinController.text.length == 4) {
+        _handlePinLogin(_pinController.text);
       }
     }
   }
@@ -168,20 +170,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  void _openChangePinDialog() async {
+  void _openChangePinDialog() {
     if (_selectedStaff == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('يرجى تحديد حساب الموظف أولاً!'),
-          backgroundColor: context.appColors.warning,
-        ),
+        const SnackBar(content: Text('يرجى تحديد حساب الموظف أولاً!')),
       );
       return;
     }
-    await showDialog(
+
+    showDialog(
       context: context,
-      builder: (ctx) => ChangePinDialog(staffMember: _selectedStaff!),
+      builder: (_) => ChangePinDialog(staffMember: _selectedStaff!),
     );
+  }
+
+  void _toggleTheme() {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    ref.read(themeModeProvider.notifier).state =
+        isDark ? ThemeMode.light : ThemeMode.dark;
   }
 
   static IconData roleIcon(UserRole role) => switch (role) {
@@ -202,12 +208,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.appColors;
+    final AuthPalette p = context.authPalette;
     final staffAsync = ref.watch(liveStaffUsersProvider);
-    final width = MediaQuery.sizeOf(context).width;
-    final isWide = width >= 720;
+    final double width = MediaQuery.sizeOf(context).width;
+    final bool isWide = width >= 760;
 
-    // Hardware Keyboard shortcuts
+    // Hardware keyboard shortcuts.
     final shortcuts = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.backspace): () =>
           _pressKeypadKey('back'),
@@ -264,59 +270,60 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         child: Directionality(
           textDirection: TextDirection.rtl,
           child: Scaffold(
-            backgroundColor: colors.obsidian,
-            body: SafeArea(
-              child: Column(
-                children: [
-                  _buildTopBar(colors),
-                  Divider(
-                      color: colors.goldBorder.withValues(alpha: 0.35),
-                      height: 1),
-                  Expanded(
-                    child: staffAsync.when(
-                      data: (staffList) {
-                        final activeStaff =
-                            staffList.where((u) => u.active).toList();
+            backgroundColor: p.background,
+            body: AuthBackdrop(
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    _buildTopBar(p, width),
+                    Expanded(
+                      child: staffAsync.when(
+                        data: (staffList) {
+                          final activeStaff =
+                              staffList.where((u) => u.active).toList();
 
-                        // Pre-select staff if none selected
-                        if (_selectedStaff == null && activeStaff.isNotEmpty) {
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted && _selectedStaff == null) {
-                              setState(
-                                  () => _selectedStaff = activeStaff.first);
-                            }
-                          });
-                        }
+                          if (_selectedStaff == null &&
+                              activeStaff.isNotEmpty) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (mounted && _selectedStaff == null) {
+                                setState(
+                                  () => _selectedStaff = activeStaff.first,
+                                );
+                              }
+                            });
+                          }
 
-                        // Apply search & role filters
-                        final filtered = activeStaff.where((u) {
-                          final matchesSearch = _searchQuery.isEmpty ||
-                              u.name
-                                  .toLowerCase()
-                                  .contains(_searchQuery.toLowerCase()) ||
-                              u.phone.contains(_searchQuery);
-                          final matchesRole =
-                              _filterRole == null || u.role == _filterRole;
-                          return matchesSearch && matchesRole;
-                        }).toList();
+                          final filtered = activeStaff.where((u) {
+                            final matchesSearch = _searchQuery.isEmpty ||
+                                u.name.toLowerCase().contains(
+                                      _searchQuery.toLowerCase(),
+                                    ) ||
+                                u.phone.contains(_searchQuery);
+                            final matchesRole =
+                                _filterRole == null || u.role == _filterRole;
+                            return matchesSearch && matchesRole;
+                          }).toList();
 
-                        return isWide
-                            ? _buildDesktopLayout(colors, activeStaff, filtered)
-                            : _buildMobileLayout(colors, activeStaff);
-                      },
-                      loading: () => Center(
-                        child: AppStates.loading(
-                            message: 'جاري تحميل طاقم العمل...'),
-                      ),
-                      error: (err, _) => Center(
-                        child: AppStates.error(
-                          'تعذر الاتصال بالخادم وتحميل بيانات الموظفين',
-                          onRetry: () => ref.invalidate(liveStaffUsersProvider),
+                          return isWide
+                              ? _buildDesktopLayout(p, filtered)
+                              : _buildMobileLayout(p, activeStaff);
+                        },
+                        loading: () => Center(
+                          child: AppStates.loading(
+                            message: 'جاري تحميل طاقم العمل...',
+                          ),
+                        ),
+                        error: (err, _) => Center(
+                          child: AppStates.error(
+                            'تعذر الاتصال بالخادم وتحميل بيانات الموظفين',
+                            onRetry: () =>
+                                ref.invalidate(liveStaffUsersProvider),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -328,32 +335,46 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // ───────────────────────────────────────────────────────────────────────────
   // TOP BAR
   // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildTopBar(AppColors colors) {
+  Widget _buildTopBar(AuthPalette p, double width) {
+    final ThemeData theme = p.theme;
     final t = _currentTime;
-    final timeStr =
+    final String timeStr =
         '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
-    final isOnline = ConnectivityService.instance.isOnline;
+    final bool isOnline = ConnectivityService.instance.isOnline;
+    final bool isDark = theme.brightness == Brightness.dark;
+    final bool showSubtitle = width >= 600;
+    final bool showClock = width >= 520;
+    final bool compactStatus = width < 560;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: colors.obsidianSurface,
+      padding: EdgeInsetsDirectional.symmetric(
+        horizontal: width < 520 ? AppSpacing.md : AppSpacing.lg,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: p.panel.withValues(alpha: 0.94),
+        border: Border(bottom: BorderSide(color: p.border)),
+        boxShadow: [
+          BoxShadow(
+            color: p.shadow.withValues(alpha: p.isDark ? 0.28 : 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
       child: Row(
         children: [
-          // VIP Logo Emblem
           Container(
-            padding: const EdgeInsets.all(6),
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
-              gradient: AppGradients.gold,
-              borderRadius: BorderRadius.circular(8),
-              boxShadow: const [AppShadows.goldGlowSm],
+              gradient: p.accentGradient,
+              borderRadius: AppRadius.lgAll,
+              boxShadow: p.accentGlow,
             ),
-            child: const Icon(
-              Icons.storefront_rounded,
-              color: Color(0xFF1A1400),
-              size: 18,
-            ),
+            child: Icon(Icons.storefront_rounded, color: p.onAccent, size: 18),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -361,81 +382,274 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               children: [
                 Text(
                   'منظومة متجر الجملة VIP',
-                  style: TextStyle(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
                     fontSize: 13.5,
-                    fontWeight: FontWeight.bold,
-                    color: colors.onGold,
+                    fontWeight: FontWeight.w800,
+                    color: p.text,
                   ),
                 ),
-                Text(
-                  'تسجيل دخول الموظفين برمز PIN',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: colors.onGold.withValues(alpha: 0.6),
+                if (showSubtitle)
+                  Text(
+                    'تسجيل دخول الموظفين برمز PIN',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontSize: 10.5,
+                      color: p.muted,
+                    ),
                   ),
-                ),
               ],
             ),
           ),
+          AuthStatusPill(
+            label: isOnline ? 'متصل' : 'محلي (Offline)',
+            color: isOnline ? p.success : p.warning,
+            compact: compactStatus,
+          ),
+          if (showClock) ...[
+            const SizedBox(width: AppSpacing.sm),
+            _buildClockPill(p, timeStr),
+          ],
+          const SizedBox(width: AppSpacing.xs),
+          _buildThemeToggle(p, isDark),
+        ],
+      ),
+    );
+  }
 
-          // Online / Offline Status
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+  Widget _buildClockPill(AuthPalette p, String timeStr) {
+    return Container(
+      padding: const EdgeInsetsDirectional.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 5,
+      ),
+      decoration: BoxDecoration(
+        color: p.field,
+        borderRadius: AppRadius.pillAll,
+        border: Border.all(color: p.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.schedule_rounded, size: 12, color: p.accent),
+          const SizedBox(width: 5),
+          Text(
+            timeStr,
+            style: p.theme.textTheme.labelSmall?.copyWith(
+              fontSize: 10.5,
+              fontWeight: FontWeight.bold,
+              color: p.text,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThemeToggle(AuthPalette p, bool isDark) {
+    return Tooltip(
+      message:
+          isDark ? 'التبديل إلى المظهر الفاتح' : 'التبديل إلى المظهر الداكن',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _toggleTheme,
+          borderRadius: AppRadius.pillAll,
+          child: Ink(
+            width: 34,
+            height: 34,
             decoration: BoxDecoration(
-              color: (isOnline ? colors.success : colors.warning)
-                  .withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: (isOnline ? colors.success : colors.warning)
-                    .withValues(alpha: 0.35),
+              color: p.field,
+              shape: BoxShape.circle,
+              border: Border.all(color: p.border),
+            ),
+            child: Icon(
+              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              size: 17,
+              color: p.accent,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // DESKTOP / TABLET DUAL-PANE LAYOUT
+  // ───────────────────────────────────────────────────────────────────────────
+  Widget _buildDesktopLayout(AuthPalette p, List<UserEntity> filteredStaff) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            flex: 5,
+            child: AuthPanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildDirectoryHeader(p, filteredStaff.length),
+                  Divider(color: p.border, height: 1),
+                  Expanded(
+                    child: filteredStaff.isEmpty
+                        ? _buildEmptyDirectory(p)
+                        : GridView.builder(
+                            padding: const EdgeInsets.all(AppSpacing.md),
+                            gridDelegate:
+                                const SliverGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: 220,
+                              mainAxisExtent: 78,
+                              crossAxisSpacing: AppSpacing.sm,
+                              mainAxisSpacing: AppSpacing.sm,
+                            ),
+                            itemCount: filteredStaff.length,
+                            itemBuilder: (_, i) =>
+                                _buildStaffCard(p, filteredStaff[i]),
+                          ),
+                  ),
+                ],
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isOnline ? colors.success : colors.warning,
-                  ),
+          ),
+          const SizedBox(width: AppSpacing.lg),
+          Expanded(
+            flex: 4,
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsetsDirectional.symmetric(
+                  vertical: AppSpacing.sm,
                 ),
-                const SizedBox(width: 5),
-                Text(
-                  isOnline ? 'متصل' : 'محلي (Offline)',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.bold,
-                    color: isOnline ? colors.success : colors.warning,
-                  ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: _buildPinTerminalCard(p),
                 ),
-              ],
+              ),
             ),
           ),
-          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
 
-          // Clock Pill
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: colors.obsidianCard,
-              borderRadius: BorderRadius.circular(6),
-              border:
-                  Border.all(color: colors.goldBorder.withValues(alpha: 0.6)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.access_time_rounded, size: 12, color: colors.gold),
-                const SizedBox(width: 5),
-                Text(
-                  timeStr,
-                  style: TextStyle(
+  Widget _buildDirectoryHeader(AuthPalette p, int count) {
+    final ThemeData theme = p.theme;
+
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: p.accentSoft,
+                  borderRadius: AppRadius.mdAll,
+                  border: Border.all(color: p.accent.withValues(alpha: 0.24)),
+                ),
+                child: Icon(Icons.groups_rounded, size: 16, color: p.accent),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'طاقم العمل والورديات',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: p.text,
+                      ),
+                    ),
+                    Text(
+                      'اختر حساب الموظف ثم أدخل رمز PIN',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: p.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsetsDirectional.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: p.accentSoft,
+                  borderRadius: AppRadius.pillAll,
+                  border: Border.all(color: p.accent.withValues(alpha: 0.24)),
+                ),
+                child: Text(
+                  '$count موظف',
+                  style: theme.textTheme.labelSmall?.copyWith(
                     fontSize: 10.5,
+                    color: p.accent,
                     fontWeight: FontWeight.bold,
-                    color: colors.gold,
                   ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _searchController,
+            onChanged: (v) => setState(() => _searchQuery = v),
+            cursorColor: p.accent,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 12.5,
+              color: p.text,
+            ),
+            decoration: _searchDecoration(
+              p,
+              hint: 'ابحث عن موظف بالاسم أو الهاتف...',
+              showClear: _searchQuery.isNotEmpty,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _AuthFilterChip(
+                  label: 'الكل',
+                  selected: _filterRole == null,
+                  onTap: () => setState(() => _filterRole = null),
+                ),
+                const SizedBox(width: 6),
+                _AuthFilterChip(
+                  label: 'كاشير',
+                  selected: _filterRole == UserRole.cashier,
+                  onTap: () => setState(() => _filterRole = UserRole.cashier),
+                ),
+                const SizedBox(width: 6),
+                _AuthFilterChip(
+                  label: 'مدير مخزن',
+                  selected: _filterRole == UserRole.manager,
+                  onTap: () => setState(() => _filterRole = UserRole.manager),
+                ),
+                const SizedBox(width: 6),
+                _AuthFilterChip(
+                  label: 'مشرف عام',
+                  selected: _filterRole == UserRole.moderator,
+                  onTap: () => setState(() => _filterRole = UserRole.moderator),
+                ),
+                const SizedBox(width: 6),
+                _AuthFilterChip(
+                  label: 'سائق',
+                  selected: _filterRole == UserRole.driver,
+                  onTap: () => setState(() => _filterRole = UserRole.driver),
                 ),
               ],
             ),
@@ -445,300 +659,158 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // DESKTOP / TABLET DUAL-PANE LAYOUT
-  // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildDesktopLayout(
-    AppColors colors,
-    List<UserEntity> allStaff,
-    List<UserEntity> filteredStaff,
-  ) {
-    return Row(
-      children: [
-        // Staff Directory (Right in LTR, Left in RTL)
-        Expanded(
-          flex: 5,
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border(
-                left:
-                    BorderSide(color: colors.goldBorder.withValues(alpha: 0.35)),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'طاقم العمل والورديات',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: colors.onGold,
-                            ),
-                          ),
-                          Text(
-                            '${filteredStaff.length} موظف',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              color: colors.gold,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
+  InputDecoration _searchDecoration(
+    AuthPalette p, {
+    required String hint,
+    bool showClear = false,
+  }) {
+    final OutlineInputBorder border = OutlineInputBorder(
+      borderRadius: AppRadius.mdAll,
+      borderSide: BorderSide(color: p.border),
+    );
 
-                      // Search input
-                      TextField(
-                        controller: _searchController,
-                        onChanged: (v) => setState(() => _searchQuery = v),
-                        style: TextStyle(fontSize: 12.5, color: colors.onGold),
-                        decoration: InputDecoration(
-                          hintText: 'ابحث عن موظف بالاسم أو الهاتف...',
-                          hintStyle: TextStyle(
-                            fontSize: 11.5,
-                            color: colors.onGold.withValues(alpha: 0.45),
-                          ),
-                          prefixIcon: Icon(Icons.search_rounded,
-                              size: 17, color: colors.gold),
-                          isDense: true,
-                          filled: true,
-                          fillColor: colors.obsidianSurface,
-                          contentPadding: const EdgeInsets.symmetric(
-                              vertical: 8, horizontal: 10),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: colors.goldBorder),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
-                                color: colors.goldBorder.withValues(alpha: 0.4)),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide:
-                                BorderSide(color: colors.gold, width: 1.5),
-                          ),
-                          suffixIcon: _searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: const Icon(Icons.close_rounded, size: 15),
-                                  onPressed: () {
-                                    _searchController.clear();
-                                    setState(() => _searchQuery = '');
-                                  },
-                                )
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-
-                      // Role filter chips
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            _buildFilterChip(colors, label: 'الكل', role: null),
-                            const SizedBox(width: 6),
-                            _buildFilterChip(colors,
-                                label: 'كاشير', role: UserRole.cashier),
-                            const SizedBox(width: 6),
-                            _buildFilterChip(colors,
-                                label: 'مدير مخزن', role: UserRole.manager),
-                            const SizedBox(width: 6),
-                            _buildFilterChip(colors,
-                                label: 'مشرف عام', role: UserRole.moderator),
-                            const SizedBox(width: 6),
-                            _buildFilterChip(colors,
-                                label: 'سائق', role: UserRole.driver),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Divider(
-                    color: colors.goldBorder.withValues(alpha: 0.25),
-                    height: 1),
-
-                // Staff Cards Grid
-                Expanded(
-                  child: filteredStaff.isEmpty
-                      ? Center(
-                          child: Text(
-                            'لم يتم العثور على موظف مطابق',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              color: colors.onGold.withValues(alpha: 0.5),
-                            ),
-                          ),
-                        )
-                      : GridView.builder(
-                          padding: const EdgeInsets.all(14),
-                          gridDelegate:
-                              const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 210,
-                            mainAxisExtent: 82,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
-                          ),
-                          itemCount: filteredStaff.length,
-                          itemBuilder: (_, i) =>
-                              _buildStaffCard(colors, filteredStaff[i]),
-                        ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        // PIN Terminal Pane
-        Expanded(
-          flex: 4,
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 340),
-                child: _buildPinTerminalCard(colors),
-              ),
-            ),
-          ),
-        ),
-      ],
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: p.theme.textTheme.bodySmall?.copyWith(
+        fontSize: 11.5,
+        color: p.faint,
+      ),
+      prefixIcon: Icon(Icons.search_rounded, size: 17, color: p.accent),
+      isDense: true,
+      filled: true,
+      fillColor: p.field,
+      contentPadding: const EdgeInsetsDirectional.symmetric(
+        vertical: AppSpacing.sm,
+        horizontal: AppSpacing.md,
+      ),
+      border: border,
+      enabledBorder: border,
+      focusedBorder: border.copyWith(
+        borderSide: BorderSide(color: p.accent, width: 1.4),
+      ),
+      suffixIcon: showClear
+          ? IconButton(
+              tooltip: 'مسح البحث',
+              onPressed: () {
+                _searchController.clear();
+                setState(() => _searchQuery = '');
+              },
+              icon: Icon(Icons.close_rounded, size: 15, color: p.muted),
+            )
+          : null,
     );
   }
 
-  Widget _buildFilterChip(AppColors colors,
-      {required String label, required UserRole? role}) {
-    final isSelected = _filterRole == role;
-    return InkWell(
-      onTap: () => setState(() => _filterRole = role),
-      borderRadius: BorderRadius.circular(6),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? colors.gold.withValues(alpha: 0.18)
-              : colors.obsidianCard,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isSelected
-                ? colors.gold
-                : colors.goldBorder.withValues(alpha: 0.4),
-            width: isSelected ? 1.5 : 1.0,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-            color:
-                isSelected ? colors.gold : colors.onGold.withValues(alpha: 0.7),
-          ),
+  Widget _buildEmptyDirectory(AuthPalette p) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.person_search_rounded, size: 34, color: p.faint),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'لم يتم العثور على موظف مطابق',
+              textAlign: TextAlign.center,
+              style: p.theme.textTheme.bodySmall?.copyWith(color: p.muted),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildStaffCard(AppColors colors, UserEntity staff) {
-    final isSelected = _selectedStaff?.id == staff.id;
+  Widget _buildStaffCard(AuthPalette p, UserEntity staff) {
+    final ThemeData theme = p.theme;
+    final bool isSelected = _selectedStaff?.id == staff.id;
 
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedStaff = staff;
-          _errorMessage = null;
-          _pinController.clear();
-        });
-      },
-      borderRadius: BorderRadius.circular(10),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? colors.gold.withValues(alpha: 0.12)
-              : colors.obsidianSurface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isSelected
-                ? colors.gold
-                : colors.goldBorder.withValues(alpha: 0.4),
-            width: isSelected ? 1.6 : 1.0,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _selectedStaff = staff;
+            _errorMessage = null;
+            _pinController.clear();
+          });
+        },
+        borderRadius: AppRadius.lgAll,
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          curve: AppMotion.moveCurve,
+          padding: const EdgeInsetsDirectional.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
           ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: colors.gold.withValues(alpha: 0.18),
-                    blurRadius: 10,
-                  ),
-                ]
-              : null,
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: isSelected ? AppGradients.gold : null,
-                color: isSelected ? null : colors.obsidianCard,
-                border: Border.all(
-                  color: isSelected
-                      ? colors.gold
-                      : colors.goldBorder.withValues(alpha: 0.6),
+          decoration: BoxDecoration(
+            color: isSelected ? p.accentSoft : p.panelAlt,
+            borderRadius: AppRadius.lgAll,
+            border: Border.all(
+              color: isSelected ? p.accent : p.border,
+              width: isSelected ? 1.4 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: p.accent.withValues(alpha: 0.18),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: isSelected ? p.accentGradient : null,
+                  color: isSelected ? null : p.field,
+                  border: Border.all(color: isSelected ? p.accent : p.border),
+                ),
+                child: Icon(
+                  roleIcon(staff.role),
+                  size: 16,
+                  color: isSelected ? p.onAccent : p.accent,
                 ),
               ),
-              child: Icon(
-                roleIcon(staff.role),
-                size: 15,
-                color: isSelected ? const Color(0xFF1A1400) : colors.gold,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    staff.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight:
-                          isSelected ? FontWeight.bold : FontWeight.w600,
-                      color: isSelected ? colors.gold : colors.onGold,
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      staff.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: 12.5,
+                        fontWeight:
+                            isSelected ? FontWeight.w800 : FontWeight.w600,
+                        color: isSelected ? p.accent : p.text,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    roleLabel(staff.role),
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: colors.onGold.withValues(alpha: 0.6),
+                    const SizedBox(height: 2),
+                    Text(
+                      roleLabel(staff.role),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 10,
+                        color: p.muted,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            if (isSelected)
-              Icon(Icons.check_circle_rounded, color: colors.gold, size: 15),
-          ],
+              if (isSelected)
+                Icon(Icons.check_circle_rounded, color: p.accent, size: 16),
+            ],
+          ),
         ),
       ),
     );
@@ -747,22 +819,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   // ───────────────────────────────────────────────────────────────────────────
   // MOBILE SINGLE-PANE LAYOUT
   // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildMobileLayout(AppColors colors, List<UserEntity> staffList) {
+  Widget _buildMobileLayout(AuthPalette p, List<UserEntity> staffList) {
     return Center(
       child: SingleChildScrollView(
         physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsetsDirectional.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.md,
+        ),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
+          constraints: const BoxConstraints(maxWidth: 380),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Mobile Staff Selector Bar
-              _buildMobileStaffSelector(colors, staffList),
-              const SizedBox(height: 12),
-
-              // PIN Terminal Card
-              _buildPinTerminalCard(colors),
+              _buildMobileStaffSelector(p, staffList),
+              const SizedBox(height: AppSpacing.md),
+              _buildPinTerminalCard(p),
             ],
           ),
         ),
@@ -770,107 +842,116 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _buildMobileStaffSelector(
-      AppColors colors, List<UserEntity> staffList) {
-    final staff = _selectedStaff;
+  Widget _buildMobileStaffSelector(AuthPalette p, List<UserEntity> staffList) {
+    final ThemeData theme = p.theme;
+    final UserEntity? staff = _selectedStaff;
 
-    return InkWell(
-      onTap: () => _showStaffPickerBottomSheet(colors, staffList),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: colors.obsidianSurface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: colors.goldBorder.withValues(alpha: 0.6)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: AppGradients.gold,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _showStaffPickerBottomSheet(staffList),
+        borderRadius: AppRadius.xlAll,
+        child: Container(
+          padding: const EdgeInsetsDirectional.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            gradient: p.panelGradient,
+            borderRadius: AppRadius.xlAll,
+            border: Border.all(color: p.border),
+            boxShadow: p.panelShadow,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: p.accentGradient,
+                  boxShadow: p.accentGlow,
+                ),
+                child: Icon(
+                  staff != null ? roleIcon(staff.role) : Icons.person_rounded,
+                  size: 18,
+                  color: p.onAccent,
+                ),
               ),
-              child: Icon(
-                staff != null ? roleIcon(staff.role) : Icons.person_rounded,
-                size: 16,
-                color: const Color(0xFF1A1400),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    staff?.name ?? 'اضغط لاختيار الموظف',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.bold,
-                      color: colors.onGold,
-                    ),
-                  ),
-                  if (staff != null) ...[
-                    const SizedBox(height: 1),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Text(
-                      roleLabel(staff.role),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: colors.gold,
-                        fontWeight: FontWeight.w500,
+                      staff?.name ?? 'اضغط لاختيار الموظف',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: p.text,
+                      ),
+                    ),
+                    if (staff != null) ...[
+                      const SizedBox(height: 1),
+                      Text(
+                        roleLabel(staff.role),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 10,
+                          color: p.accent,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsetsDirectional.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: p.accentSoft,
+                  borderRadius: AppRadius.pillAll,
+                  border: Border.all(color: p.accent.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.swap_horiz_rounded, size: 13, color: p.accent),
+                    const SizedBox(width: 4),
+                    Text(
+                      'تبديل',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.bold,
+                        color: p.accent,
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: colors.gold.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: colors.gold.withValues(alpha: 0.4)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.swap_horiz_rounded, size: 13, color: colors.gold),
-                  const SizedBox(width: 4),
-                  Text(
-                    'تبديل',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.bold,
-                      color: colors.gold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  void _showStaffPickerBottomSheet(
-      AppColors colors, List<UserEntity> staffList) {
+  Future<void> _showStaffPickerBottomSheet(List<UserEntity> staffList) async {
+    final AuthPalette p = context.authPalette;
     String query = '';
     UserRole? roleFilter;
 
-    showModalBottomSheet<void>(
+    await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: colors.obsidianSurface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
+      backgroundColor: Colors.transparent,
+      barrierColor: p.shadow.withValues(alpha: 0.48),
       isScrollControlled: true,
-      builder: (ctx) {
+      builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             final filtered = staffList.where((u) {
@@ -884,162 +965,261 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             return Directionality(
               textDirection: TextDirection.rtl,
               child: Container(
-                height: MediaQuery.sizeOf(context).height * 0.70,
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'اختر موظف الوردية',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: colors.onGold,
-                          ),
+                height: MediaQuery.sizeOf(context).height * 0.72,
+                decoration: BoxDecoration(
+                  gradient: p.panelGradient,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(AppRadius.xxl),
+                  ),
+                  border: Border(top: BorderSide(color: p.border)),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      child: Padding(
+                        padding: const EdgeInsetsDirectional.fromSTEB(
+                          AppSpacing.lg,
+                          AppSpacing.sm,
+                          AppSpacing.lg,
+                          AppSpacing.lg,
                         ),
-                        IconButton(
-                          icon: Icon(Icons.close_rounded,
-                              size: 18,
-                              color: colors.onGold.withValues(alpha: 0.6)),
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => Navigator.of(ctx).pop(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Search field
-                    TextField(
-                      onChanged: (v) => setSheetState(() => query = v),
-                      style: TextStyle(fontSize: 12.5, color: colors.onGold),
-                      decoration: InputDecoration(
-                        hintText: 'بحث عن موظف بالاسم أو الهاتف...',
-                        hintStyle: TextStyle(
-                          fontSize: 11.5,
-                          color: colors.onGold.withValues(alpha: 0.45),
-                        ),
-                        prefixIcon: Icon(Icons.search_rounded,
-                            size: 16, color: colors.gold),
-                        isDense: true,
-                        filled: true,
-                        fillColor: colors.obsidianCard,
-                        contentPadding: const EdgeInsets.symmetric(
-                            vertical: 8, horizontal: 10),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          borderSide: BorderSide(color: colors.goldBorder),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Role filter chips
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          _buildSheetFilterChip(colors, 'الكل', null,
-                              roleFilter, (r) => setSheetState(() => roleFilter = r)),
-                          const SizedBox(width: 6),
-                          _buildSheetFilterChip(colors, 'كاشير',
-                              UserRole.cashier, roleFilter,
-                              (r) => setSheetState(() => roleFilter = r)),
-                          const SizedBox(width: 6),
-                          _buildSheetFilterChip(colors, 'مدير مخزن',
-                              UserRole.manager, roleFilter,
-                              (r) => setSheetState(() => roleFilter = r)),
-                          const SizedBox(width: 6),
-                          _buildSheetFilterChip(colors, 'مشرف عام',
-                              UserRole.moderator, roleFilter,
-                              (r) => setSheetState(() => roleFilter = r)),
-                          const SizedBox(width: 6),
-                          _buildSheetFilterChip(colors, 'سائق',
-                              UserRole.driver, roleFilter,
-                              (r) => setSheetState(() => roleFilter = r)),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Staff List
-                    Expanded(
-                      child: ListView.separated(
-                        itemCount: filtered.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 6),
-                        itemBuilder: (_, i) {
-                          final s = filtered[i];
-                          final isSelected = _selectedStaff?.id == s.id;
-
-                          return ListTile(
-                            dense: true,
-                            onTap: () {
-                              setState(() {
-                                _selectedStaff = s;
-                                _errorMessage = null;
-                                _pinController.clear();
-                              });
-                              Navigator.of(ctx).pop();
-                            },
-                            tileColor: isSelected
-                                ? colors.gold.withValues(alpha: 0.12)
-                                : colors.obsidianCard,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              side: BorderSide(
-                                color: isSelected
-                                    ? colors.gold
-                                    : colors.goldBorder
-                                        .withValues(alpha: 0.3),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(
+                              child: Container(
+                                width: 38,
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: p.borderStrong,
+                                  borderRadius: AppRadius.pillAll,
+                                ),
                               ),
                             ),
-                            leading: Container(
-                              width: 32,
-                              height: 32,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient:
-                                    isSelected ? AppGradients.gold : null,
-                                color:
-                                    isSelected ? null : colors.obsidianSurface,
-                              ),
-                              child: Icon(
-                                roleIcon(s.role),
-                                size: 16,
-                                color: isSelected
-                                    ? const Color(0xFF1A1400)
-                                    : colors.gold,
-                              ),
+                            const SizedBox(height: AppSpacing.md),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.groups_rounded,
+                                  size: 18,
+                                  color: p.accent,
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Expanded(
+                                  child: Text(
+                                    'اختر موظف الوردية',
+                                    style:
+                                        p.theme.textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      color: p.text,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'إغلاق',
+                                  icon: Icon(
+                                    Icons.close_rounded,
+                                    size: 18,
+                                    color: p.muted,
+                                  ),
+                                  onPressed: () =>
+                                      Navigator.of(sheetContext).pop(),
+                                ),
+                              ],
                             ),
-                            title: Text(
-                              s.name,
-                              style: TextStyle(
+                            const SizedBox(height: AppSpacing.sm),
+                            TextField(
+                              onChanged: (v) => setSheetState(() => query = v),
+                              cursorColor: p.accent,
+                              style: p.theme.textTheme.bodySmall?.copyWith(
                                 fontSize: 12.5,
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.w600,
-                                color: isSelected ? colors.gold : colors.onGold,
+                                color: p.text,
+                              ),
+                              decoration: _searchDecoration(
+                                p,
+                                hint: 'بحث عن موظف بالاسم أو الهاتف...',
                               ),
                             ),
-                            subtitle: Text(
-                              '${roleLabel(s.role)} • ${s.phone}',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: colors.onGold.withValues(alpha: 0.6),
+                            const SizedBox(height: AppSpacing.md),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  _AuthFilterChip(
+                                    label: 'الكل',
+                                    selected: roleFilter == null,
+                                    onTap: () =>
+                                        setSheetState(() => roleFilter = null),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  _AuthFilterChip(
+                                    label: 'كاشير',
+                                    selected: roleFilter == UserRole.cashier,
+                                    onTap: () => setSheetState(
+                                      () => roleFilter = UserRole.cashier,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  _AuthFilterChip(
+                                    label: 'مدير مخزن',
+                                    selected: roleFilter == UserRole.manager,
+                                    onTap: () => setSheetState(
+                                      () => roleFilter = UserRole.manager,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  _AuthFilterChip(
+                                    label: 'مشرف عام',
+                                    selected: roleFilter == UserRole.moderator,
+                                    onTap: () => setSheetState(
+                                      () => roleFilter = UserRole.moderator,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  _AuthFilterChip(
+                                    label: 'سائق',
+                                    selected: roleFilter == UserRole.driver,
+                                    onTap: () => setSheetState(
+                                      () => roleFilter = UserRole.driver,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            trailing: isSelected
-                                ? Icon(Icons.check_circle_rounded,
-                                    color: colors.gold, size: 16)
-                                : null,
-                          );
-                        },
+                            const SizedBox(height: AppSpacing.md),
+                            Expanded(
+                              child: filtered.isEmpty
+                                  ? _buildEmptyDirectory(p)
+                                  : ListView.separated(
+                                      itemCount: filtered.length,
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(height: 6),
+                                      itemBuilder: (_, i) {
+                                        final staff = filtered[i];
+                                        final isSelected =
+                                            _selectedStaff?.id == staff.id;
+
+                                        return Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            borderRadius: AppRadius.lgAll,
+                                            onTap: () {
+                                              setState(() {
+                                                _selectedStaff = staff;
+                                                _errorMessage = null;
+                                                _pinController.clear();
+                                              });
+                                              Navigator.of(sheetContext).pop();
+                                            },
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsetsDirectional
+                                                      .symmetric(
+                                                horizontal: AppSpacing.md,
+                                                vertical: AppSpacing.sm,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: isSelected
+                                                    ? p.accentSoft
+                                                    : p.panelAlt,
+                                                borderRadius: AppRadius.lgAll,
+                                                border: Border.all(
+                                                  color: isSelected
+                                                      ? p.accent
+                                                      : p.border,
+                                                ),
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  Container(
+                                                    width: 34,
+                                                    height: 34,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      gradient: isSelected
+                                                          ? p.accentGradient
+                                                          : null,
+                                                      color: isSelected
+                                                          ? null
+                                                          : p.field,
+                                                    ),
+                                                    child: Icon(
+                                                      roleIcon(staff.role),
+                                                      size: 16,
+                                                      color: isSelected
+                                                          ? p.onAccent
+                                                          : p.accent,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(
+                                                    width: AppSpacing.md,
+                                                  ),
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          staff.name,
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style: p
+                                                              .theme
+                                                              .textTheme
+                                                              .bodySmall
+                                                              ?.copyWith(
+                                                            fontSize: 12.5,
+                                                            fontWeight:
+                                                                isSelected
+                                                                    ? FontWeight
+                                                                        .w800
+                                                                    : FontWeight
+                                                                        .w600,
+                                                            color: isSelected
+                                                                ? p.accent
+                                                                : p.text,
+                                                          ),
+                                                        ),
+                                                        Text(
+                                                          '${roleLabel(staff.role)} • ${staff.phone}',
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                          style: p
+                                                              .theme
+                                                              .textTheme
+                                                              .labelSmall
+                                                              ?.copyWith(
+                                                            color: p.muted,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  if (isSelected)
+                                                    Icon(
+                                                      Icons
+                                                          .check_circle_rounded,
+                                                      color: p.accent,
+                                                      size: 17,
+                                                    ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
             );
@@ -1049,411 +1229,282 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _buildSheetFilterChip(
-    AppColors colors,
-    String label,
-    UserRole? role,
-    UserRole? activeRole,
-    ValueChanged<UserRole?> onSelect,
-  ) {
-    final isSelected = activeRole == role;
-    return InkWell(
-      onTap: () => onSelect(role),
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? colors.gold.withValues(alpha: 0.2)
-              : colors.obsidianCard,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(
-            color: isSelected
-                ? colors.gold
-                : colors.goldBorder.withValues(alpha: 0.4),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color:
-                isSelected ? colors.gold : colors.onGold.withValues(alpha: 0.7),
-          ),
-        ),
-      ),
-    );
-  }
-
   // ───────────────────────────────────────────────────────────────────────────
-  // PIN TERMINAL CARD & KEYPAD
+  // PIN TERMINAL CARD
   // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildPinTerminalCard(AppColors colors) {
-    final staff = _selectedStaff;
+  Widget _buildPinTerminalCard(AuthPalette p) {
+    final ThemeData theme = p.theme;
+    final UserEntity? staff = _selectedStaff;
 
-    final pinBase = PinTheme(
-      width: 46,
-      height: 48,
-      textStyle: TextStyle(
-        fontSize: 22,
-        fontWeight: FontWeight.bold,
-        color: colors.gold,
-      ),
-      decoration: BoxDecoration(
-        color: colors.obsidianCard,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.goldBorder.withValues(alpha: 0.6)),
-      ),
-    );
-
-    final pinFocused = pinBase.copyWith(
-      decoration: BoxDecoration(
-        color: colors.obsidianCard,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.gold, width: 1.8),
-        boxShadow: const [AppShadows.goldGlowSm],
-      ),
-    );
-
-    final pinError = pinBase.copyWith(
-      decoration: BoxDecoration(
-        color: colors.error.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.error, width: 1.8),
-      ),
-    );
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      decoration: BoxDecoration(
-        color: colors.obsidianSurface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: colors.goldBorder.withValues(alpha: 0.5)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
+    return AuthPanel(
+      radius: AppRadius.xxl,
+      padding: const EdgeInsetsDirectional.fromSTEB(
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.md,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Active Staff Avatar & Identity
-          if (staff != null) ...[
-            Center(
-              child: Container(
-                width: 48,
-                height: 48,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: AppGradients.gold,
-                  boxShadow: [AppShadows.goldGlowSm],
-                ),
-                child: Icon(
-                  roleIcon(staff.role),
-                  size: 24,
-                  color: const Color(0xFF1A1400),
-                ),
+          Row(
+            children: [
+              Icon(Icons.shield_outlined, size: 14, color: p.muted),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                'بوابة الدخول الآمن',
+                style: theme.textTheme.labelSmall?.copyWith(color: p.muted),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              staff.name,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: colors.onGold,
-              ),
-            ),
-            const SizedBox(height: 3),
-            Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsetsDirectional.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: 2,
+                ),
                 decoration: BoxDecoration(
-                  color: colors.gold.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(5),
+                  color: p.accentFaint,
+                  borderRadius: AppRadius.smAll,
+                  border: Border.all(color: p.accent.withValues(alpha: 0.22)),
                 ),
                 child: Text(
-                  roleLabel(staff.role),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: colors.gold,
+                  'PIN',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1,
+                    color: p.accent,
                   ),
                 ),
               ),
-            ),
-          ] else ...[
-            Center(
-              child: Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: colors.obsidianCard,
-                  border: Border.all(color: colors.goldBorder),
-                ),
-                child: Icon(Icons.lock_outline_rounded,
-                    size: 24, color: colors.gold),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'تسجيل الدخول',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.bold,
-                color: colors.onGold,
-              ),
-            ),
-          ],
-
-          const SizedBox(height: 10),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          AnimatedSwitcher(
+            duration: AppMotion.medium,
+            switchInCurve: AppMotion.enterCurve,
+            switchOutCurve: AppMotion.exitCurve,
+            child: _buildStaffIdentity(p, staff),
+          ),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             'أدخل رمز PIN لتسجيل الدخول',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 11,
-              color: colors.onGold.withValues(alpha: 0.6),
-            ),
+            style: theme.textTheme.labelSmall?.copyWith(color: p.muted),
           ),
-          const SizedBox(height: 10),
-
-          // Pinput Display (Native Keyboard Suppressed)
+          const SizedBox(height: AppSpacing.md),
           Center(
-            child: Directionality(
-              textDirection: TextDirection.ltr,
-              child: Pinput(
-                controller: _pinController,
-                focusNode: _focusNode,
-                autofocus: false,
-                useNativeKeyboard: false, // Prevents system keyboard from popping up
-                showCursor: false,
-                length: 4,
-                obscureText: true,
-                obscuringCharacter: '◆',
-                defaultPinTheme: pinBase,
-                focusedPinTheme: pinFocused,
-                errorPinTheme: pinError,
-                hapticFeedbackType: HapticFeedbackType.mediumImpact,
-                onCompleted: _handlePinLogin,
-                onChanged: (_) {
-                  if (_errorMessage != null) {
-                    setState(() => _errorMessage = null);
-                  }
-                },
-              ),
+            child: AuthPinField(
+              controller: _pinController,
+              focusNode: _focusNode,
+              isError: _errorMessage != null,
+              obscuringCharacter: '◆',
+              onCompleted: _handlePinLogin,
+              onChanged: (_) {
+                if (_errorMessage != null) {
+                  setState(() => _errorMessage = null);
+                }
+              },
             ),
           ),
-
-          // Error notification banner
-          if (_errorMessage != null) ...[
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline_rounded,
-                    size: 13, color: colors.error),
-                const SizedBox(width: 5),
-                Flexible(
-                  child: Text(
-                    _errorMessage!,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: colors.error,
+          AnimatedSize(
+            duration: AppMotion.fast,
+            curve: AppMotion.enterCurve,
+            child: _errorMessage == null
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsetsDirectional.only(
+                      top: AppSpacing.sm,
                     ),
-                    overflow: TextOverflow.ellipsis,
+                    child: AuthErrorBanner(message: _errorMessage!),
                   ),
-                ),
-              ],
-            ),
-          ],
-
-          const SizedBox(height: 12),
-
-          // Virtual Numeric Keypad
-          _buildNumericKeypad(colors),
-
-          const SizedBox(height: 6),
-
-          // Actions / Change PIN
-          Center(
-            child: TextButton.icon(
-              onPressed: _openChangePinDialog,
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-              ),
-              icon: Icon(Icons.password_rounded, size: 14, color: colors.gold),
-              label: Text(
-                'تغيير رمز PIN',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: colors.gold,
-                ),
-              ),
-            ),
           ),
-
-          if (_isAuthenticating) ...[
-            const SizedBox(height: 6),
-            Center(
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(colors.gold),
-                ),
-              ),
-            ),
-          ],
+          const SizedBox(height: AppSpacing.md),
+          AuthNumericKeypad(
+            maxWidth: 290,
+            enabled: !_isAuthenticating,
+            clearLabel: 'مسح',
+            onDigit: _pressKeypadKey,
+            onBackspace: () => _pressKeypadKey('back'),
+            onClear: () => _pressKeypadKey('C'),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AnimatedSwitcher(
+            duration: AppMotion.fast,
+            child: _isAuthenticating
+                ? Row(
+                    key: const ValueKey('authenticating'),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: p.accent,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text(
+                        'جارٍ التحقق من الرمز...',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: p.muted,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  )
+                : TextButton.icon(
+                    key: const ValueKey('change-pin'),
+                    onPressed: _openChangePinDialog,
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: Icon(
+                      Icons.password_rounded,
+                      size: 14,
+                      color: p.accent,
+                    ),
+                    label: Text(
+                      'تغيير رمز PIN',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: p.accent,
+                      ),
+                    ),
+                  ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildNumericKeypad(AppColors colors) {
-    const rows = [
-      ['1', '2', '3'],
-      ['4', '5', '6'],
-      ['7', '8', '9'],
-      ['C', '0', 'back'],
-    ];
+  Widget _buildStaffIdentity(AuthPalette p, UserEntity? staff) {
+    final ThemeData theme = p.theme;
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 260),
-      child: Column(
-        children: rows.map((row) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: row.map((k) {
-                final isAction = k == 'C' || k == 'back';
-                return _KeypadButton(
-                  label: k,
-                  isAction: isAction,
-                  colors: colors,
-                  onTap: () => _pressKeypadKey(k),
-                );
-              }).toList(),
+    if (staff == null) {
+      return Column(
+        key: const ValueKey('no-staff'),
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: p.field,
+              border: Border.all(color: p.border),
             ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-class _KeypadButton extends StatefulWidget {
-  final String label;
-  final bool isAction;
-  final AppColors colors;
-  final VoidCallback onTap;
-
-  const _KeypadButton({
-    required this.label,
-    required this.isAction,
-    required this.colors,
-    required this.onTap,
-  });
-
-  @override
-  State<_KeypadButton> createState() => _KeypadButtonState();
-}
-
-class _KeypadButtonState extends State<_KeypadButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 90),
-    );
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = widget.colors;
-
-    Widget childWidget;
-    if (widget.label == 'back') {
-      childWidget =
-          Icon(Icons.backspace_outlined, size: 17, color: colors.gold);
-    } else if (widget.label == 'C') {
-      childWidget = Text(
-        'مسح',
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: colors.error,
-        ),
-      );
-    } else {
-      childWidget = Text(
-        widget.label,
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: colors.onGold,
-        ),
+            child: Icon(Icons.lock_outline_rounded, size: 27, color: p.accent),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'تسجيل الدخول',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: p.text,
+            ),
+          ),
+        ],
       );
     }
 
-    return GestureDetector(
-      onTapDown: (_) => _ctrl.forward(),
-      onTapUp: (_) {
-        _ctrl.reverse();
-        widget.onTap();
-      },
-      onTapCancel: () => _ctrl.reverse(),
-      child: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (_, __) => Transform.scale(
-          scale: 1.0 - 0.05 * _ctrl.value,
-          child: Container(
-            width: 70,
-            height: 44,
-            decoration: BoxDecoration(
-              color: widget.isAction
-                  ? colors.obsidianSurface
-                  : (_ctrl.value > 0.5
-                      ? colors.gold.withValues(alpha: 0.15)
-                      : colors.obsidianCard),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: widget.isAction
-                    ? colors.goldBorder.withValues(alpha: 0.35)
-                    : (_ctrl.value > 0.5 ? colors.gold : colors.goldBorder),
-              ),
-              boxShadow: _ctrl.value > 0.5
-                  ? [
-                      BoxShadow(
-                        color: colors.gold.withValues(alpha: 0.25),
-                        blurRadius: 8,
-                      ),
-                    ]
-                  : null,
+    return Column(
+      key: ValueKey('staff-${staff.id}'),
+      children: [
+        Container(
+          width: 62,
+          height: 62,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: p.accentGradient,
+            border: Border.all(
+              color: p.accent.withValues(alpha: 0.5),
+              width: 2,
             ),
-            alignment: Alignment.center,
-            child: childWidget,
+            boxShadow: p.accentGlow,
+          ),
+          child: Icon(roleIcon(staff.role), size: 27, color: p.onAccent),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          staff.name,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: p.text,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsetsDirectional.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: 2,
+          ),
+          decoration: BoxDecoration(
+            color: p.accentSoft,
+            borderRadius: AppRadius.pillAll,
+            border: Border.all(color: p.accent.withValues(alpha: 0.28)),
+          ),
+          child: Text(
+            roleLabel(staff.role),
+            style: theme.textTheme.labelSmall?.copyWith(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: p.accent,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AuthFilterChip extends StatelessWidget {
+  const _AuthFilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final AuthPalette p = context.authPalette;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: AppRadius.pillAll,
+        child: AnimatedContainer(
+          duration: AppMotion.fast,
+          padding: const EdgeInsetsDirectional.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: 5,
+          ),
+          decoration: BoxDecoration(
+            color: selected ? p.accentSoft : p.panelAlt,
+            borderRadius: AppRadius.pillAll,
+            border: Border.all(
+              color: selected ? p.accent : p.border,
+              width: selected ? 1.3 : 1,
+            ),
+          ),
+          child: Text(
+            label,
+            style: p.theme.textTheme.labelSmall?.copyWith(
+              fontSize: 10.5,
+              fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+              color: selected ? p.accent : p.muted,
+            ),
           ),
         ),
       ),
