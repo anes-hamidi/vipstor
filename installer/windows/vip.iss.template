@@ -1,0 +1,50 @@
+; =============================================================================
+; VIP Smock - Inno Setup installer script (TEMPLATE)
+; Placeholders are replaced by the GitHub Actions workflow:
+;   <<APP_NAME>>   -> staff_app or customer_app
+;   <<PUBLISHER>>  -> your name / org
+;   <<EXE_NAME>>   -> executable name
+;   <<VERSION>>    -> x.y.z
+;   <<GUID>>       -> 08894500-bb91-4190-96e6-e6d583eb38f5
+;
+; Compile with: "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" vip.iss
+; =============================================================================
+
+#define MyAppName "<<APP_NAME>>"
+#define MyAppPublisher "<<PUBLISHER>>"
+#define MyAppURL "https://github.com/anes-hamidi/vipstor"
+#define MyAppExeName "<<EXE_NAME>>.exe"
+#define MyAppVersion "<<VERSION>>"
+
+[Setup]
+; IMPORTANT: Replace <<GUID>> with a real GUID (PowerShell: [guid]::NewGuid())
+AppId={<<GUID>>}
+AppName={#MyAppName}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
+Version={#MyAppVersion}
+DefaultDirName={autopf}\{#MyAppName}
+DefaultGroupName={#MyAppName}
+AllowNoIcons=yes
+OutputDir=installer\output
+OutputBaseFilename=VIP-Smock-{#MyAppVersion}-Setup
+Compression=lzma
+SolidCompression=yes
+PrivilegesRequired=admin
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"; Flags: unchecked
+
+[Files]
+; Flutter Windows build output
+Source: "apps\<<APP_NAME>>\build\windows\runner\Release\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "apps\<<APP_NAME>>\build\windows\runner\Release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

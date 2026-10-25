@@ -22,35 +22,38 @@ on:
 jobs:
   backup-and-prune:
     name: Backup Historical Data & Prune Storage
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     steps:
       - name: Validate Supabase Secrets
+        shell: pwsh
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" ]; then
-            echo "::error::SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing from repository secrets."
+          if ([string]::IsNullOrWhiteSpace($env:SUPABASE_URL) -or [string]::IsNullOrWhiteSpace($env:SUPABASE_SERVICE_ROLE_KEY)) {
+            Write-Error "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing from repository secrets."
             exit 1
-          fi
+          }
 
       - name: Calculate Cutoff Timestamps
         id: cutoffs
+        shell: pwsh
         run: |
-          ORDER_DAYS="${{ github.event.inputs.order_retention_days || '60' }}"
-          AUDIT_DAYS="${{ github.event.inputs.audit_retention_days || '30' }}"
-          TELEMETRY_DAYS="${{ github.event.inputs.telemetry_retention_days || '7' }}"
-
-          ORDER_CUTOFF=$(date -u -d "${ORDER_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')
-          AUDIT_CUTOFF=$(date -u -d "${AUDIT_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')
-          TELEMETRY_CUTOFF=$(date -u -d "${TELEMETRY_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')
-          TIMESTAMP=$(date -u '+%Y%m%d_%H%M%S')
-
-          echo "order_cutoff=${ORDER_CUTOFF}" >> $GITHUB_OUTPUT
-          echo "audit_cutoff=${AUDIT_CUTOFF}" >> $GITHUB_OUTPUT
-          echo "telemetry_cutoff=${TELEMETRY_CUTOFF}" >> $GITHUB_OUTPUT
-          echo "backup_tag=${TIMESTAMP}" >> $GITHUB_OUTPUT
-          echo "order_days=${ORDER_DAYS}" >> $GITHUB_OUTPUT
-          echo "audit_days=${AUDIT_DAYS}" >> $GITHUB_OUTPUT
-          echo "telemetry_days=${TELEMETRY_DAYS}" >> $GITHUB_OUTPUT
+          $orderDays = "${{ github.event.inputs.order_retention_days || '60' }}"
+          $auditDays = "${{ github.event.inputs.audit_retention_days || '30' }}"
+          $telemetryDays = "${{ github.event.inputs.telemetry_retention_days || '7' }}"
+          $orderCutoff = (Get-Date).AddDays(-[int]$orderDays).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $auditCutoff = (Get-Date).AddDays(-[int]$auditDays).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $telemetryCutoff = (Get-Date).AddDays(-[int]$telemetryDays).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $timestamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd_HHmmss')
+          "order_cutoff=$orderCutoff" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "audit_cutoff=$auditCutoff" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "telemetry_cutoff=$telemetryCutoff" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "backup_tag=$timestamp" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "order_days=$orderDays" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "audit_days=$auditDays" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "telemetry_days=$telemetryDays" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -58,9 +61,11 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
+        shell: pwsh
         run: pip install requests
 
       - name: Export Archivable Data to JSON
+        shell: pwsh
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -68,97 +73,85 @@ jobs:
           AUDIT_CUTOFF: ${{ steps.cutoffs.outputs.audit_cutoff }}
           TELEMETRY_CUTOFF: ${{ steps.cutoffs.outputs.telemetry_cutoff }}
         run: |
-          mkdir -p backup_data
-          python - << 'EOF'
-          import os
-          import json
-          import requests
-          from datetime import datetime, timezone
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path backup_data | Out-Null
 
-          supabase_url = os.environ['SUPABASE_URL'].rstrip('/')
-          supabase_key = os.environ['SUPABASE_KEY']
-          order_cutoff = os.environ['ORDER_CUTOFF']
-          audit_cutoff = os.environ['AUDIT_CUTOFF']
-          telemetry_cutoff = os.environ['TELEMETRY_CUTOFF']
-
-          headers = {
-              'apikey': supabase_key,
-              'Authorization': f'Bearer {supabase_key}',
-              'Accept': 'application/json'
+          $baseUrl = $env:SUPABASE_URL.TrimEnd('/')
+          $headers = @{
+            'apikey' = $env:SUPABASE_KEY
+            'Authorization' = "Bearer $env:SUPABASE_KEY"
+            'Accept' = 'application/json'
           }
 
-          def fetch_paginated(endpoint, query_params):
-              limit = 1000
-              offset = 0
-              all_rows = []
-              while True:
-                  params = query_params.copy()
-                  params['limit'] = limit
-                  params['offset'] = offset
-                  resp = requests.get(f"{supabase_url}/rest/v1/{endpoint}", headers=headers, params=params)
-                  resp.raise_for_status()
-                  data = resp.json()
-                  if not data:
-                      break
-                  all_rows.extend(data)
-                  if len(data) < limit:
-                      break
-                  offset += limit
-              return all_rows
-
-          # 1. Export Archivable Closed Orders & Nested Line Items
-          print(f"Exporting closed orders before {order_cutoff}...")
-          orders = fetch_paginated('orders', {
-              'status': 'in.(delivered,settled,cancelled)',
-              'created_at': f'lt.{order_cutoff}',
-              'select': '*,order_items(*)'
-          })
-          with open('backup_data/archived_orders.json', 'w', encoding='utf-8') as f:
-              json.dump(orders, f, ensure_ascii=False, indent=2)
-          print(f"Exported {len(orders)} orders.")
-
-          # 2. Export Archivable Audit Log entries
-          print(f"Exporting audit logs before {audit_cutoff}...")
-          audit_logs = fetch_paginated('audit_log', {
-              'created_at': f'lt.{audit_cutoff}',
-              'select': '*'
-          })
-          with open('backup_data/archived_audit_log.json', 'w', encoding='utf-8') as f:
-              json.dump(audit_logs, f, ensure_ascii=False, indent=2)
-          print(f"Exported {len(audit_logs)} audit records.")
-
-          # 3. Export Archivable Driver Location Events
-          print(f"Exporting telemetry events before {telemetry_cutoff}...")
-          telemetry = fetch_paginated('driver_location_events', {
-              'recorded_at': f'lt.{telemetry_cutoff}',
-              'select': '*'
-          })
-          with open('backup_data/archived_driver_telemetry.json', 'w', encoding='utf-8') as f:
-              json.dump(telemetry, f, ensure_ascii=False, indent=2)
-          print(f"Exported {len(telemetry)} telemetry records.")
-
-          # Write Manifest
-          manifest = {
-              'exported_at': datetime.now(timezone.utc).isoformat(),
-              'counts': {
-                  'orders': len(orders),
-                  'audit_entries': len(audit_logs),
-                  'telemetry_events': len(telemetry)
-              },
-              'cutoffs': {
-                  'order_cutoff': order_cutoff,
-                  'audit_cutoff': audit_cutoff,
-                  'telemetry_cutoff': telemetry_cutoff
-              }
+          function Fetch-Paginated {
+            param([string]$Endpoint, [hashtable]$QueryParams)
+            $limit = 1000
+            $offset = 0
+            $allRows = @()
+            while ($true) {
+              $params = @{}
+              foreach ($key in $QueryParams.Keys) { $params[$key] = $QueryParams[$key] }
+              $params['limit'] = $limit
+              $params['offset'] = $offset
+              $queryParts = @()
+              foreach ($key in $params.Keys) { $queryParts += "$key=$($params[$key])" }
+              $query = $queryParts -join '&'
+              $url = "$baseUrl/rest/v1/$Endpoint?$query"
+              $resp = Invoke-RestMethod -Method Get -Uri $url -Headers $headers -ContentType 'application/json'
+              $page = @($resp)
+              if ($page.Count -eq 0) { break }
+              $allRows += $page
+              if ($page.Count -lt $limit) { break }
+              $offset += $limit
+            }
+            return $allRows
           }
-          with open('backup_data/manifest.json', 'w', encoding='utf-8') as f:
-              json.dump(manifest, f, indent=2)
-          EOF
+
+          Write-Host "Exporting closed orders before $env:ORDER_CUTOFF..."
+          $orders = @(Fetch-Paginated -Endpoint 'orders' -QueryParams @{
+            'status' = 'in.(delivered,settled,cancelled)'
+            'created_at' = "lt.$env:ORDER_CUTOFF"
+            'select' = '*,order_items(*)'
+          })
+          $orders | ConvertTo-Json -Depth 10 | Set-Content -Path 'backup_data/archived_orders.json' -Encoding utf8
+          Write-Host "Exported $($orders.Count) orders."
+
+          Write-Host "Exporting audit logs before $env:AUDIT_CUTOFF..."
+          $auditLogs = @(Fetch-Paginated -Endpoint 'audit_log' -QueryParams @{
+            'created_at' = "lt.$env:AUDIT_CUTOFF"
+            'select' = '*'
+          })
+          $auditLogs | ConvertTo-Json -Depth 10 | Set-Content -Path 'backup_data/archived_audit_log.json' -Encoding utf8
+          Write-Host "Exported $($auditLogs.Count) audit records."
+
+          Write-Host "Exporting telemetry events before $env:TELEMETRY_CUTOFF..."
+          $telemetry = @(Fetch-Paginated -Endpoint 'driver_location_events' -QueryParams @{
+            'recorded_at' = "lt.$env:TELEMETRY_CUTOFF"
+            'select' = '*'
+          })
+          $telemetry | ConvertTo-Json -Depth 10 | Set-Content -Path 'backup_data/archived_driver_telemetry.json' -Encoding utf8
+          Write-Host "Exported $($telemetry.Count) telemetry records."
+
+          $manifest = @{
+            exported_at = (Get-Date).ToUniversalTime().ToString('o')
+            counts = @{
+              orders = $orders.Count
+              audit_entries = $auditLogs.Count
+              telemetry_events = $telemetry.Count
+            }
+            cutoffs = @{
+              order_cutoff = $env:ORDER_CUTOFF
+              audit_cutoff = $env:AUDIT_CUTOFF
+              telemetry_cutoff = $env:TELEMETRY_CUTOFF
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content -Path 'backup_data/manifest.json' -Encoding utf8
 
       - name: Compress Backup Archive
+        shell: pwsh
         run: |
-          tar -czf "vip_database_backup_${{ steps.cutoffs.outputs.backup_tag }}.tar.gz" -C backup_data .
-          ls -lh vip_database_backup_*.tar.gz
+          tar.exe -czf "vip_database_backup_${{ steps.cutoffs.outputs.backup_tag }}.tar.gz" -C backup_data .
+          Get-ChildItem vip_database_backup_*.tar.gz
 
       - name: Upload Backup Artifact to GitHub Storage
         uses: actions/upload-artifact@v4
@@ -168,6 +161,7 @@ jobs:
           retention-days: 90
 
       - name: Execute Prune RPC on Database
+        shell: pwsh
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -175,49 +169,36 @@ jobs:
           AUDIT_DAYS: ${{ steps.cutoffs.outputs.audit_days }}
           TELEMETRY_DAYS: ${{ steps.cutoffs.outputs.telemetry_days }}
         run: |
-          python - << 'EOF'
-          import os
-          import requests
-          import json
-
-          supabase_url = os.environ['SUPABASE_URL'].rstrip('/')
-          supabase_key = os.environ['SUPABASE_KEY']
-          order_days = int(os.environ['ORDER_DAYS'])
-          audit_days = int(os.environ['AUDIT_DAYS'])
-          telemetry_days = int(os.environ['TELEMETRY_DAYS'])
-
-          headers = {
-              'apikey': supabase_key,
-              'Authorization': f'Bearer {supabase_key}',
-              'Content-Type': 'application/json'
+          $ErrorActionPreference = 'Stop'
+          $baseUrl = $env:SUPABASE_URL.TrimEnd('/')
+          $headers = @{
+            'apikey' = $env:SUPABASE_KEY
+            'Authorization' = "Bearer $env:SUPABASE_KEY"
+            'Content-Type' = 'application/json'
           }
-
-          payload = {
-              'p_order_retention_days': order_days,
-              'p_audit_retention_days': audit_days,
-              'p_telemetry_retention_days': telemetry_days
+          $payload = @{
+            p_order_retention_days = [int]$env:ORDER_DAYS
+            p_audit_retention_days = [int]$env:AUDIT_DAYS
+            p_telemetry_retention_days = [int]$env:TELEMETRY_DAYS
           }
+          $jsonPayload = $payload | ConvertTo-Json
+          $result = Invoke-RestMethod -Method Post -Uri "$baseUrl/rest/v1/rpc/rpc_purge_historical_data" -Headers $headers -Body $jsonPayload
+          Write-Host "Prune RPC Response: $($result | ConvertTo-Json -Depth 10)"
 
-          resp = requests.post(
-              f"{supabase_url}/rest/v1/rpc/rpc_purge_historical_data",
-              headers=headers,
-              json=payload
-          )
-          resp.raise_for_status()
-          result = resp.json()
-          print("Prune RPC Response:", json.dumps(result, indent=2))
-
-          # Save to step summary
-          summary_file = os.environ.get('GITHUB_STEP_SUMMARY')
-          if summary_file:
-              with open(summary_file, 'a', encoding='utf-8') as f:
-                  f.write("## 🧹 Database Backup & Storage Prune Report\n\n")
-                  f.write(f"- **Status:** `{result.get('status', 'complete')}`\n")
-                  f.write(f"- **Orders Purged (> {order_days}d):** {result.get('purged_orders', 0)}\n")
-                  f.write(f"- **Order Items Purged:** {result.get('purged_order_items', 0)}\n")
-                  f.write(f"- **Audit Log Entries Purged (> {audit_days}d):** {result.get('purged_audit_entries', 0)}\n")
-                  f.write(f"- **Telemetry Events Purged (> {telemetry_days}d):** {result.get('purged_telemetry_events', 0)}\n")
-                  f.write(f"- **Failed Operations Purged (> 14d):** {result.get('purged_failed_operations', 0)}\n")
-                  f.write(f"- **Executed At:** `{result.get('executed_at')}`\n\n")
-                  f.write("✅ **Pre-purge backup archive successfully saved to GitHub Artifacts (90-day retention).**\n")
-          EOF
+          $summaryFile = $env:GITHUB_STEP_SUMMARY
+          if ($summaryFile) {
+            $lines = @(
+              "## 🧹 Database Backup & Storage Prune Report",
+              "",
+              "- **Status:** $($result.status)",
+              "- **Orders Purged (> $env:ORDER_DAYS d):** $($result.purged_orders)",
+              "- **Order Items Purged:** $($result.purged_order_items)",
+              "- **Audit Log Entries Purged (> $env:AUDIT_DAYS d):** $($result.purged_audit_entries)",
+              "- **Telemetry Events Purged (> $env:TELEMETRY_DAYS d):** $($result.purged_telemetry_events)",
+              "- **Failed Operations Purged (> 14d):** $($result.purged_failed_operations)",
+              "- **Executed At:** $($result.executed_at)",
+              "",
+              "✅ **Pre-purge backup archive successfully saved to GitHub Artifacts (90-day retention).**"
+            )
+            $lines | Out-File -FilePath $summaryFile -Append -Encoding utf8
+          }
