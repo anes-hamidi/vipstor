@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pinput/pinput.dart';
 import 'package:domain/domain.dart';
@@ -8,16 +9,15 @@ import 'package:ui_kit/ui_kit.dart';
 import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
 import 'widgets/change_pin_dialog.dart';
-import '../common/widgets/app_update_dialog.dart';
 
-/// Upgraded, optimized, and simplified Login Screen for VIP Staff App.
+/// Minimized, responsive, and tactile Login Screen for VIP Staff App.
 ///
 /// Features:
-/// - Auto-selection of last active staff member.
-/// - Adaptive layout for Desktop/Tablet (dual-pane) and Mobile (single-card + modal switcher).
-/// - Modern tactile numeric keypad with clear visual feedback.
-/// - High-contrast luxury Obsidian & VIP Gold design language.
-/// - Real-time connection status and periodic OTA app update check.
+/// - Disables native system keyboard pop-up (`useNativeKeyboard: false`).
+/// - Full on-screen tactile numeric keypad with physical keyboard shortcut support.
+/// - Adaptive responsive design for Desktop, Tablet, and Mobile.
+/// - Minimalist VIP Gold & Obsidian visual styling.
+/// - Real-time connection status and background OTA update checks.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -54,7 +54,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _restoreLastStaffUser() async {
     try {
-      final lastUser = await ref.read(staffLocalAuthStoreProvider).getLastActiveUser();
+      final lastUser =
+          await ref.read(staffLocalAuthStoreProvider).getLastActiveUser();
       if (lastUser != null && mounted && _selectedStaff == null) {
         setState(() => _selectedStaff = lastUser);
       }
@@ -87,6 +88,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     _focusNode.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _pressKeypadKey(String key) {
+    if (_isAuthenticating) return;
+
+    if (key == 'C') {
+      _pinController.clear();
+      if (_errorMessage != null) {
+        setState(() => _errorMessage = null);
+      }
+    } else if (key == 'back') {
+      if (_pinController.text.isNotEmpty) {
+        _pinController.text =
+            _pinController.text.substring(0, _pinController.text.length - 1);
+        if (_errorMessage != null) {
+          setState(() => _errorMessage = null);
+        }
+      }
+    } else {
+      if (_pinController.text.length < 4) {
+        _pinController.text = _pinController.text + key;
+        if (_errorMessage != null) {
+          setState(() => _errorMessage = null);
+        }
+        if (_pinController.text.length == 4) {
+          _handlePinLogin(_pinController.text);
+        }
+      }
+    }
   }
 
   Future<void> _handlePinLogin(String pin) async {
@@ -124,7 +154,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           _errorMessage = 'رمز PIN غير صحيح!';
           _pinController.clear();
         });
-        _focusNode.requestFocus();
       }
     } catch (e) {
       if (!mounted) return;
@@ -136,7 +165,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             .replaceFirst('Exception: ', '');
         _pinController.clear();
       });
-      _focusNode.requestFocus();
     }
   }
 
@@ -177,56 +205,120 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final colors = context.appColors;
     final staffAsync = ref.watch(liveStaffUsersProvider);
     final width = MediaQuery.sizeOf(context).width;
-    final isDesktop = width >= 860;
+    final isWide = width >= 720;
 
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Scaffold(
-        backgroundColor: colors.obsidian,
-        body: SafeArea(
-          child: Column(
-            children: [
-              _buildTopBar(colors),
-              Divider(color: colors.goldBorder.withValues(alpha: 0.4), height: 1),
-              Expanded(
-                child: staffAsync.when(
-                  data: (staffList) {
-                    final activeStaff = staffList.where((u) => u.active).toList();
+    // Hardware Keyboard shortcuts
+    final shortcuts = <ShortcutActivator, VoidCallback>{
+      const SingleActivator(LogicalKeyboardKey.backspace): () =>
+          _pressKeypadKey('back'),
+      const SingleActivator(LogicalKeyboardKey.escape): () =>
+          _pressKeypadKey('C'),
+      const SingleActivator(LogicalKeyboardKey.delete): () =>
+          _pressKeypadKey('C'),
+      const SingleActivator(LogicalKeyboardKey.digit0): () =>
+          _pressKeypadKey('0'),
+      const SingleActivator(LogicalKeyboardKey.digit1): () =>
+          _pressKeypadKey('1'),
+      const SingleActivator(LogicalKeyboardKey.digit2): () =>
+          _pressKeypadKey('2'),
+      const SingleActivator(LogicalKeyboardKey.digit3): () =>
+          _pressKeypadKey('3'),
+      const SingleActivator(LogicalKeyboardKey.digit4): () =>
+          _pressKeypadKey('4'),
+      const SingleActivator(LogicalKeyboardKey.digit5): () =>
+          _pressKeypadKey('5'),
+      const SingleActivator(LogicalKeyboardKey.digit6): () =>
+          _pressKeypadKey('6'),
+      const SingleActivator(LogicalKeyboardKey.digit7): () =>
+          _pressKeypadKey('7'),
+      const SingleActivator(LogicalKeyboardKey.digit8): () =>
+          _pressKeypadKey('8'),
+      const SingleActivator(LogicalKeyboardKey.digit9): () =>
+          _pressKeypadKey('9'),
+      const SingleActivator(LogicalKeyboardKey.numpad0): () =>
+          _pressKeypadKey('0'),
+      const SingleActivator(LogicalKeyboardKey.numpad1): () =>
+          _pressKeypadKey('1'),
+      const SingleActivator(LogicalKeyboardKey.numpad2): () =>
+          _pressKeypadKey('2'),
+      const SingleActivator(LogicalKeyboardKey.numpad3): () =>
+          _pressKeypadKey('3'),
+      const SingleActivator(LogicalKeyboardKey.numpad4): () =>
+          _pressKeypadKey('4'),
+      const SingleActivator(LogicalKeyboardKey.numpad5): () =>
+          _pressKeypadKey('5'),
+      const SingleActivator(LogicalKeyboardKey.numpad6): () =>
+          _pressKeypadKey('6'),
+      const SingleActivator(LogicalKeyboardKey.numpad7): () =>
+          _pressKeypadKey('7'),
+      const SingleActivator(LogicalKeyboardKey.numpad8): () =>
+          _pressKeypadKey('8'),
+      const SingleActivator(LogicalKeyboardKey.numpad9): () =>
+          _pressKeypadKey('9'),
+    };
 
-                    // Pre-select staff if none selected
-                    if (_selectedStaff == null && activeStaff.isNotEmpty) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted && _selectedStaff == null) {
-                          setState(() => _selectedStaff = activeStaff.first);
+    return CallbackShortcuts(
+      bindings: shortcuts,
+      child: Focus(
+        autofocus: true,
+        child: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Scaffold(
+            backgroundColor: colors.obsidian,
+            body: SafeArea(
+              child: Column(
+                children: [
+                  _buildTopBar(colors),
+                  Divider(
+                      color: colors.goldBorder.withValues(alpha: 0.35),
+                      height: 1),
+                  Expanded(
+                    child: staffAsync.when(
+                      data: (staffList) {
+                        final activeStaff =
+                            staffList.where((u) => u.active).toList();
+
+                        // Pre-select staff if none selected
+                        if (_selectedStaff == null && activeStaff.isNotEmpty) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted && _selectedStaff == null) {
+                              setState(
+                                  () => _selectedStaff = activeStaff.first);
+                            }
+                          });
                         }
-                      });
-                    }
 
-                    // Apply search & role filters
-                    final filtered = activeStaff.where((u) {
-                      final matchesSearch = _searchQuery.isEmpty ||
-                          u.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                          u.phone.contains(_searchQuery);
-                      final matchesRole = _filterRole == null || u.role == _filterRole;
-                      return matchesSearch && matchesRole;
-                    }).toList();
+                        // Apply search & role filters
+                        final filtered = activeStaff.where((u) {
+                          final matchesSearch = _searchQuery.isEmpty ||
+                              u.name
+                                  .toLowerCase()
+                                  .contains(_searchQuery.toLowerCase()) ||
+                              u.phone.contains(_searchQuery);
+                          final matchesRole =
+                              _filterRole == null || u.role == _filterRole;
+                          return matchesSearch && matchesRole;
+                        }).toList();
 
-                    return isDesktop
-                        ? _buildDesktopLayout(colors, activeStaff, filtered)
-                        : _buildMobileLayout(colors, activeStaff);
-                  },
-                  loading: () => Center(
-                    child: AppStates.loading(message: 'جاري تحميل طاقم العمل...'),
-                  ),
-                  error: (err, _) => Center(
-                    child: AppStates.error(
-                      'تعذر الاتصال بالخادم وتحميل بيانات الموظفين',
-                      onRetry: () => ref.invalidate(liveStaffUsersProvider),
+                        return isWide
+                            ? _buildDesktopLayout(colors, activeStaff, filtered)
+                            : _buildMobileLayout(colors, activeStaff);
+                      },
+                      loading: () => Center(
+                        child: AppStates.loading(
+                            message: 'جاري تحميل طاقم العمل...'),
+                      ),
+                      error: (err, _) => Center(
+                        child: AppStates.error(
+                          'تعذر الاتصال بالخادم وتحميل بيانات الموظفين',
+                          onRetry: () => ref.invalidate(liveStaffUsersProvider),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -243,25 +335,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final isOnline = ConnectivityService.instance.isOnline;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       color: colors.obsidianSurface,
       child: Row(
         children: [
           // VIP Logo Emblem
           Container(
-            padding: const EdgeInsets.all(7),
+            padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               gradient: AppGradients.gold,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(8),
               boxShadow: const [AppShadows.goldGlowSm],
             ),
             child: const Icon(
               Icons.storefront_rounded,
               color: Color(0xFF1A1400),
-              size: 20,
+              size: 18,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -270,7 +362,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Text(
                   'منظومة متجر الجملة VIP',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 13.5,
                     fontWeight: FontWeight.bold,
                     color: colors.onGold,
                   ),
@@ -278,7 +370,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Text(
                   'تسجيل دخول الموظفين برمز PIN',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 10.5,
                     color: colors.onGold.withValues(alpha: 0.6),
                   ),
                 ),
@@ -288,30 +380,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
           // Online / Offline Status
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: (isOnline ? colors.success : colors.warning).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
+              color: (isOnline ? colors.success : colors.warning)
+                  .withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                color: (isOnline ? colors.success : colors.warning).withValues(alpha: 0.35),
+                color: (isOnline ? colors.success : colors.warning)
+                    .withValues(alpha: 0.35),
               ),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  width: 7,
-                  height: 7,
+                  width: 6,
+                  height: 6,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: isOnline ? colors.success : colors.warning,
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 5),
                 Text(
                   isOnline ? 'متصل' : 'محلي (Offline)',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 10.5,
                     fontWeight: FontWeight.bold,
                     color: isOnline ? colors.success : colors.warning,
                   ),
@@ -319,25 +413,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ],
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
 
           // Clock Pill
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
               color: colors.obsidianCard,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: colors.goldBorder),
+              borderRadius: BorderRadius.circular(6),
+              border:
+                  Border.all(color: colors.goldBorder.withValues(alpha: 0.6)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.access_time_rounded, size: 13, color: colors.gold),
-                const SizedBox(width: 6),
+                Icon(Icons.access_time_rounded, size: 12, color: colors.gold),
+                const SizedBox(width: 5),
                 Text(
                   timeStr,
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 10.5,
                     fontWeight: FontWeight.bold,
                     color: colors.gold,
                   ),
@@ -360,20 +455,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   ) {
     return Row(
       children: [
-        // Staff Directory (Left Pane in RTL)
+        // Staff Directory (Right in LTR, Left in RTL)
         Expanded(
           flex: 5,
           child: Container(
             decoration: BoxDecoration(
               border: Border(
-                left: BorderSide(color: colors.goldBorder.withValues(alpha: 0.4)),
+                left:
+                    BorderSide(color: colors.goldBorder.withValues(alpha: 0.35)),
               ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -383,7 +480,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           Text(
                             'طاقم العمل والورديات',
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 15,
                               fontWeight: FontWeight.bold,
                               color: colors.onGold,
                             ),
@@ -391,46 +488,50 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           Text(
                             '${filteredStaff.length} موظف',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 11.5,
                               color: colors.gold,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
 
                       // Search input
                       TextField(
                         controller: _searchController,
                         onChanged: (v) => setState(() => _searchQuery = v),
-                        style: TextStyle(fontSize: 13, color: colors.onGold),
+                        style: TextStyle(fontSize: 12.5, color: colors.onGold),
                         decoration: InputDecoration(
                           hintText: 'ابحث عن موظف بالاسم أو الهاتف...',
                           hintStyle: TextStyle(
-                            fontSize: 12,
+                            fontSize: 11.5,
                             color: colors.onGold.withValues(alpha: 0.45),
                           ),
-                          prefixIcon: Icon(Icons.search_rounded, size: 18, color: colors.gold),
+                          prefixIcon: Icon(Icons.search_rounded,
+                              size: 17, color: colors.gold),
                           isDense: true,
                           filled: true,
                           fillColor: colors.obsidianSurface,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                          contentPadding: const EdgeInsets.symmetric(
+                              vertical: 8, horizontal: 10),
                           border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
+                            borderRadius: BorderRadius.circular(8),
                             borderSide: BorderSide(color: colors.goldBorder),
                           ),
                           enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: colors.goldBorder.withValues(alpha: 0.4)),
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(
+                                color: colors.goldBorder.withValues(alpha: 0.4)),
                           ),
                           focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(color: colors.gold, width: 1.5),
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide:
+                                BorderSide(color: colors.gold, width: 1.5),
                           ),
                           suffixIcon: _searchQuery.isNotEmpty
                               ? IconButton(
-                                  icon: const Icon(Icons.close_rounded, size: 16),
+                                  icon: const Icon(Icons.close_rounded, size: 15),
                                   onPressed: () {
                                     _searchController.clear();
                                     setState(() => _searchQuery = '');
@@ -439,7 +540,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               : null,
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
 
                       // Role filter chips
                       SingleChildScrollView(
@@ -447,21 +548,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         child: Row(
                           children: [
                             _buildFilterChip(colors, label: 'الكل', role: null),
-                            const SizedBox(width: 8),
-                            _buildFilterChip(colors, label: 'كاشير', role: UserRole.cashier),
-                            const SizedBox(width: 8),
-                            _buildFilterChip(colors, label: 'مدير مخزن', role: UserRole.manager),
-                            const SizedBox(width: 8),
-                            _buildFilterChip(colors, label: 'مشرف عام', role: UserRole.moderator),
-                            const SizedBox(width: 8),
-                            _buildFilterChip(colors, label: 'سائق', role: UserRole.driver),
+                            const SizedBox(width: 6),
+                            _buildFilterChip(colors,
+                                label: 'كاشير', role: UserRole.cashier),
+                            const SizedBox(width: 6),
+                            _buildFilterChip(colors,
+                                label: 'مدير مخزن', role: UserRole.manager),
+                            const SizedBox(width: 6),
+                            _buildFilterChip(colors,
+                                label: 'مشرف عام', role: UserRole.moderator),
+                            const SizedBox(width: 6),
+                            _buildFilterChip(colors,
+                                label: 'سائق', role: UserRole.driver),
                           ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                Divider(color: colors.goldBorder.withValues(alpha: 0.25), height: 1),
+                Divider(
+                    color: colors.goldBorder.withValues(alpha: 0.25),
+                    height: 1),
 
                 // Staff Cards Grid
                 Expanded(
@@ -470,21 +577,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           child: Text(
                             'لم يتم العثور على موظف مطابق',
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: 12.5,
                               color: colors.onGold.withValues(alpha: 0.5),
                             ),
                           ),
                         )
                       : GridView.builder(
-                          padding: const EdgeInsets.all(16),
-                          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 220,
-                            mainAxisExtent: 96,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
+                          padding: const EdgeInsets.all(14),
+                          gridDelegate:
+                              const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 210,
+                            mainAxisExtent: 82,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
                           ),
                           itemCount: filteredStaff.length,
-                          itemBuilder: (_, i) => _buildStaffCard(colors, filteredStaff[i]),
+                          itemBuilder: (_, i) =>
+                              _buildStaffCard(colors, filteredStaff[i]),
                         ),
                 ),
               ],
@@ -492,14 +601,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         ),
 
-        // PIN Terminal Pane (Right Pane in RTL)
+        // PIN Terminal Pane
         Expanded(
           flex: 4,
           child: Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 380),
+                constraints: const BoxConstraints(maxWidth: 340),
                 child: _buildPinTerminalCard(colors),
               ),
             ),
@@ -509,28 +618,34 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _buildFilterChip(AppColors colors, {required String label, required UserRole? role}) {
+  Widget _buildFilterChip(AppColors colors,
+      {required String label, required UserRole? role}) {
     final isSelected = _filterRole == role;
     return InkWell(
       onTap: () => setState(() => _filterRole = role),
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(6),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
         decoration: BoxDecoration(
-          color: isSelected ? colors.gold.withValues(alpha: 0.18) : colors.obsidianCard,
-          borderRadius: BorderRadius.circular(8),
+          color: isSelected
+              ? colors.gold.withValues(alpha: 0.18)
+              : colors.obsidianCard,
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: isSelected ? colors.gold : colors.goldBorder.withValues(alpha: 0.4),
+            color: isSelected
+                ? colors.gold
+                : colors.goldBorder.withValues(alpha: 0.4),
             width: isSelected ? 1.5 : 1.0,
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: 10.5,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-            color: isSelected ? colors.gold : colors.onGold.withValues(alpha: 0.7),
+            color:
+                isSelected ? colors.gold : colors.onGold.withValues(alpha: 0.7),
           ),
         ),
       ),
@@ -547,25 +662,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           _errorMessage = null;
           _pinController.clear();
         });
-        _focusNode.requestFocus();
       },
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.all(12),
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? colors.gold.withValues(alpha: 0.12) : colors.obsidianSurface,
-          borderRadius: BorderRadius.circular(12),
+          color: isSelected
+              ? colors.gold.withValues(alpha: 0.12)
+              : colors.obsidianSurface,
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? colors.gold : colors.goldBorder.withValues(alpha: 0.4),
-            width: isSelected ? 1.8 : 1.0,
+            color: isSelected
+                ? colors.gold
+                : colors.goldBorder.withValues(alpha: 0.4),
+            width: isSelected ? 1.6 : 1.0,
           ),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: colors.gold.withValues(alpha: 0.2),
-                    blurRadius: 12,
-                    spreadRadius: 1,
+                    color: colors.gold.withValues(alpha: 0.18),
+                    blurRadius: 10,
                   ),
                 ]
               : null,
@@ -573,23 +690,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         child: Row(
           children: [
             Container(
-              width: 38,
-              height: 38,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: isSelected ? AppGradients.gold : null,
                 color: isSelected ? null : colors.obsidianCard,
                 border: Border.all(
-                  color: isSelected ? colors.gold : colors.goldBorder,
+                  color: isSelected
+                      ? colors.gold
+                      : colors.goldBorder.withValues(alpha: 0.6),
                 ),
               ),
               child: Icon(
                 roleIcon(staff.role),
-                size: 18,
+                size: 15,
                 color: isSelected ? const Color(0xFF1A1400) : colors.gold,
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -600,16 +719,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                      fontSize: 12,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.w600,
                       color: isSelected ? colors.gold : colors.onGold,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
                   Text(
                     roleLabel(staff.role),
                     style: TextStyle(
-                      fontSize: 10.5,
+                      fontSize: 10,
                       color: colors.onGold.withValues(alpha: 0.6),
                     ),
                   ),
@@ -617,7 +737,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ),
             ),
             if (isSelected)
-              Icon(Icons.check_circle_rounded, color: colors.gold, size: 16),
+              Icon(Icons.check_circle_rounded, color: colors.gold, size: 15),
           ],
         ),
       ),
@@ -630,15 +750,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget _buildMobileLayout(AppColors colors, List<UserEntity> staffList) {
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        physics: const ClampingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: const BoxConstraints(maxWidth: 360),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               // Mobile Staff Selector Bar
               _buildMobileStaffSelector(colors, staffList),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
               // PIN Terminal Card
               _buildPinTerminalCard(colors),
@@ -649,42 +770,36 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _buildMobileStaffSelector(AppColors colors, List<UserEntity> staffList) {
+  Widget _buildMobileStaffSelector(
+      AppColors colors, List<UserEntity> staffList) {
     final staff = _selectedStaff;
 
     return InkWell(
       onTap: () => _showStaffPickerBottomSheet(colors, staffList),
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: colors.obsidianSurface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colors.goldBorder),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.goldBorder.withValues(alpha: 0.6)),
         ),
         child: Row(
           children: [
             Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
+              width: 32,
+              height: 32,
+              decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: AppGradients.gold,
               ),
               child: Icon(
                 staff != null ? roleIcon(staff.role) : Icons.person_rounded,
-                size: 18,
+                size: 16,
                 color: const Color(0xFF1A1400),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -695,17 +810,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 13.5,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.bold,
                       color: colors.onGold,
                     ),
                   ),
                   if (staff != null) ...[
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       roleLabel(staff.role),
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: 10,
                         color: colors.gold,
                         fontWeight: FontWeight.w500,
                       ),
@@ -715,21 +830,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               ),
             ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               decoration: BoxDecoration(
                 color: colors.gold.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(6),
                 border: Border.all(color: colors.gold.withValues(alpha: 0.4)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.swap_horiz_rounded, size: 14, color: colors.gold),
+                  Icon(Icons.swap_horiz_rounded, size: 13, color: colors.gold),
                   const SizedBox(width: 4),
                   Text(
                     'تبديل',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.bold,
                       color: colors.gold,
                     ),
@@ -743,7 +858,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  void _showStaffPickerBottomSheet(AppColors colors, List<UserEntity> staffList) {
+  void _showStaffPickerBottomSheet(
+      AppColors colors, List<UserEntity> staffList) {
     String query = '';
     UserRole? roleFilter;
 
@@ -751,7 +867,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       context: context,
       backgroundColor: colors.obsidianSurface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       isScrollControlled: true,
       builder: (ctx) {
@@ -768,8 +884,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             return Directionality(
               textDirection: TextDirection.rtl,
               child: Container(
-                height: MediaQuery.sizeOf(context).height * 0.72,
-                padding: const EdgeInsets.all(20),
+                height: MediaQuery.sizeOf(context).height * 0.70,
+                padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -779,118 +895,145 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         Text(
                           'اختر موظف الوردية',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 15,
                             fontWeight: FontWeight.bold,
                             color: colors.onGold,
                           ),
                         ),
                         IconButton(
-                          icon: Icon(Icons.close_rounded, color: colors.onGold.withValues(alpha: 0.6)),
+                          icon: Icon(Icons.close_rounded,
+                              size: 18,
+                              color: colors.onGold.withValues(alpha: 0.6)),
+                          visualDensity: VisualDensity.compact,
                           onPressed: () => Navigator.of(ctx).pop(),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
 
                     // Search field
                     TextField(
                       onChanged: (v) => setSheetState(() => query = v),
-                      style: TextStyle(fontSize: 13, color: colors.onGold),
+                      style: TextStyle(fontSize: 12.5, color: colors.onGold),
                       decoration: InputDecoration(
                         hintText: 'بحث عن موظف بالاسم أو الهاتف...',
                         hintStyle: TextStyle(
-                          fontSize: 12,
+                          fontSize: 11.5,
                           color: colors.onGold.withValues(alpha: 0.45),
                         ),
-                        prefixIcon: Icon(Icons.search_rounded, size: 18, color: colors.gold),
+                        prefixIcon: Icon(Icons.search_rounded,
+                            size: 16, color: colors.gold),
                         isDense: true,
                         filled: true,
                         fillColor: colors.obsidianCard,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 8, horizontal: 10),
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(color: colors.goldBorder),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
 
                     // Role filter chips
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
                         children: [
-                          _buildSheetFilterChip(colors, 'الكل', null, roleFilter, (r) => setSheetState(() => roleFilter = r)),
-                          const SizedBox(width: 8),
-                          _buildSheetFilterChip(colors, 'كاشير', UserRole.cashier, roleFilter, (r) => setSheetState(() => roleFilter = r)),
-                          const SizedBox(width: 8),
-                          _buildSheetFilterChip(colors, 'مدير مخزن', UserRole.manager, roleFilter, (r) => setSheetState(() => roleFilter = r)),
-                          const SizedBox(width: 8),
-                          _buildSheetFilterChip(colors, 'مشرف عام', UserRole.moderator, roleFilter, (r) => setSheetState(() => roleFilter = r)),
-                          const SizedBox(width: 8),
-                          _buildSheetFilterChip(colors, 'سائق', UserRole.driver, roleFilter, (r) => setSheetState(() => roleFilter = r)),
+                          _buildSheetFilterChip(colors, 'الكل', null,
+                              roleFilter, (r) => setSheetState(() => roleFilter = r)),
+                          const SizedBox(width: 6),
+                          _buildSheetFilterChip(colors, 'كاشير',
+                              UserRole.cashier, roleFilter,
+                              (r) => setSheetState(() => roleFilter = r)),
+                          const SizedBox(width: 6),
+                          _buildSheetFilterChip(colors, 'مدير مخزن',
+                              UserRole.manager, roleFilter,
+                              (r) => setSheetState(() => roleFilter = r)),
+                          const SizedBox(width: 6),
+                          _buildSheetFilterChip(colors, 'مشرف عام',
+                              UserRole.moderator, roleFilter,
+                              (r) => setSheetState(() => roleFilter = r)),
+                          const SizedBox(width: 6),
+                          _buildSheetFilterChip(colors, 'سائق',
+                              UserRole.driver, roleFilter,
+                              (r) => setSheetState(() => roleFilter = r)),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
 
                     // Staff List
                     Expanded(
                       child: ListView.separated(
                         itemCount: filtered.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 6),
                         itemBuilder: (_, i) {
                           final s = filtered[i];
                           final isSelected = _selectedStaff?.id == s.id;
 
                           return ListTile(
+                            dense: true,
                             onTap: () {
                               setState(() {
                                 _selectedStaff = s;
                                 _errorMessage = null;
                                 _pinController.clear();
                               });
-                              _focusNode.requestFocus();
                               Navigator.of(ctx).pop();
                             },
-                            tileColor: isSelected ? colors.gold.withValues(alpha: 0.12) : colors.obsidianCard,
+                            tileColor: isSelected
+                                ? colors.gold.withValues(alpha: 0.12)
+                                : colors.obsidianCard,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(10),
                               side: BorderSide(
-                                color: isSelected ? colors.gold : colors.goldBorder.withValues(alpha: 0.3),
+                                color: isSelected
+                                    ? colors.gold
+                                    : colors.goldBorder
+                                        .withValues(alpha: 0.3),
                               ),
                             ),
                             leading: Container(
-                              width: 36,
-                              height: 36,
+                              width: 32,
+                              height: 32,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                gradient: isSelected ? AppGradients.gold : null,
-                                color: isSelected ? null : colors.obsidianSurface,
+                                gradient:
+                                    isSelected ? AppGradients.gold : null,
+                                color:
+                                    isSelected ? null : colors.obsidianSurface,
                               ),
                               child: Icon(
                                 roleIcon(s.role),
-                                size: 18,
-                                color: isSelected ? const Color(0xFF1A1400) : colors.gold,
+                                size: 16,
+                                color: isSelected
+                                    ? const Color(0xFF1A1400)
+                                    : colors.gold,
                               ),
                             ),
                             title: Text(
                               s.name,
                               style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                fontSize: 12.5,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.w600,
                                 color: isSelected ? colors.gold : colors.onGold,
                               ),
                             ),
                             subtitle: Text(
                               '${roleLabel(s.role)} • ${s.phone}',
                               style: TextStyle(
-                                fontSize: 11,
+                                fontSize: 10.5,
                                 color: colors.onGold.withValues(alpha: 0.6),
                               ),
                             ),
                             trailing: isSelected
-                                ? Icon(Icons.check_circle_rounded, color: colors.gold, size: 18)
+                                ? Icon(Icons.check_circle_rounded,
+                                    color: colors.gold, size: 16)
                                 : null,
                           );
                         },
@@ -916,22 +1059,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final isSelected = activeRole == role;
     return InkWell(
       onTap: () => onSelect(role),
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
         decoration: BoxDecoration(
-          color: isSelected ? colors.gold.withValues(alpha: 0.2) : colors.obsidianCard,
-          borderRadius: BorderRadius.circular(8),
+          color: isSelected
+              ? colors.gold.withValues(alpha: 0.2)
+              : colors.obsidianCard,
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: isSelected ? colors.gold : colors.goldBorder.withValues(alpha: 0.4),
+            color: isSelected
+                ? colors.gold
+                : colors.goldBorder.withValues(alpha: 0.4),
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 11,
+            fontSize: 10.5,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? colors.gold : colors.onGold.withValues(alpha: 0.7),
+            color:
+                isSelected ? colors.gold : colors.onGold.withValues(alpha: 0.7),
           ),
         ),
       ),
@@ -945,25 +1093,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final staff = _selectedStaff;
 
     final pinBase = PinTheme(
-      width: 52,
-      height: 56,
+      width: 46,
+      height: 48,
       textStyle: TextStyle(
-        fontSize: 26,
+        fontSize: 22,
         fontWeight: FontWeight.bold,
         color: colors.gold,
       ),
       decoration: BoxDecoration(
         color: colors.obsidianCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.goldBorder),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.goldBorder.withValues(alpha: 0.6)),
       ),
     );
 
     final pinFocused = pinBase.copyWith(
       decoration: BoxDecoration(
         color: colors.obsidianCard,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.gold, width: 2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.gold, width: 1.8),
         boxShadow: const [AppShadows.goldGlowSm],
       ),
     );
@@ -971,22 +1119,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final pinError = pinBase.copyWith(
       decoration: BoxDecoration(
         color: colors.error.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.error, width: 2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.error, width: 1.8),
       ),
     );
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       decoration: BoxDecoration(
         color: colors.obsidianSurface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colors.goldBorder),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.goldBorder.withValues(alpha: 0.5)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.5),
-            blurRadius: 28,
-            offset: const Offset(0, 10),
+            color: Colors.black.withValues(alpha: 0.4),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -998,42 +1146,42 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           if (staff != null) ...[
             Center(
               child: Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
+                width: 48,
+                height: 48,
+                decoration: const BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: AppGradients.gold,
-                  boxShadow: const [AppShadows.goldGlow],
+                  boxShadow: [AppShadows.goldGlowSm],
                 ),
                 child: Icon(
                   roleIcon(staff.role),
-                  size: 30,
+                  size: 24,
                   color: const Color(0xFF1A1400),
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               staff.name,
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 17,
+                fontSize: 15,
                 fontWeight: FontWeight.bold,
                 color: colors.onGold,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: colors.gold.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(5),
                 ),
                 child: Text(
                   roleLabel(staff.role),
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: FontWeight.bold,
                     color: colors.gold,
                   ),
@@ -1043,47 +1191,50 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ] else ...[
             Center(
               child: Container(
-                width: 64,
-                height: 64,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: colors.obsidianCard,
                   border: Border.all(color: colors.goldBorder),
                 ),
-                child: Icon(Icons.lock_outline_rounded, size: 28, color: colors.gold),
+                child: Icon(Icons.lock_outline_rounded,
+                    size: 24, color: colors.gold),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Text(
               'تسجيل الدخول',
               textAlign: TextAlign.center,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.bold,
                 color: colors.onGold,
               ),
             ),
           ],
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           Text(
             'أدخل رمز PIN لتسجيل الدخول',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 11,
               color: colors.onGold.withValues(alpha: 0.6),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
 
-          // Pinput Display
+          // Pinput Display (Native Keyboard Suppressed)
           Center(
             child: Directionality(
               textDirection: TextDirection.ltr,
               child: Pinput(
                 controller: _pinController,
                 focusNode: _focusNode,
-                autofocus: true,
+                autofocus: false,
+                useNativeKeyboard: false, // Prevents system keyboard from popping up
+                showCursor: false,
                 length: 4,
                 obscureText: true,
                 obscuringCharacter: '◆',
@@ -1103,40 +1254,47 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
           // Error notification banner
           if (_errorMessage != null) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.error_outline_rounded, size: 14, color: colors.error),
-                const SizedBox(width: 6),
-                Text(
-                  _errorMessage!,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: colors.error,
+                Icon(Icons.error_outline_rounded,
+                    size: 13, color: colors.error),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: colors.error,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
             ),
           ],
 
-          const SizedBox(height: 20),
+          const SizedBox(height: 12),
 
           // Virtual Numeric Keypad
           _buildNumericKeypad(colors),
 
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
 
           // Actions / Change PIN
           Center(
             child: TextButton.icon(
               onPressed: _openChangePinDialog,
-              icon: Icon(Icons.password_rounded, size: 15, color: colors.gold),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+              ),
+              icon: Icon(Icons.password_rounded, size: 14, color: colors.gold),
               label: Text(
                 'تغيير رمز PIN',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: FontWeight.bold,
                   color: colors.gold,
                 ),
@@ -1145,13 +1303,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
 
           if (_isAuthenticating) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Center(
               child: SizedBox(
-                width: 22,
-                height: 22,
+                width: 18,
+                height: 18,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
+                  strokeWidth: 2,
                   valueColor: AlwaysStoppedAnimation<Color>(colors.gold),
                 ),
               ),
@@ -1163,27 +1321,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Widget _buildNumericKeypad(AppColors colors) {
-    void pressKey(String key) {
-      if (_isAuthenticating) return;
-
-      if (key == 'C') {
-        _pinController.clear();
-        setState(() => _errorMessage = null);
-      } else if (key == 'back') {
-        if (_pinController.text.isNotEmpty) {
-          _pinController.text =
-              _pinController.text.substring(0, _pinController.text.length - 1);
-        }
-      } else {
-        if (_pinController.text.length < 4) {
-          _pinController.text = _pinController.text + key;
-          if (_pinController.text.length == 4) {
-            _handlePinLogin(_pinController.text);
-          }
-        }
-      }
-    }
-
     const rows = [
       ['1', '2', '3'],
       ['4', '5', '6'],
@@ -1192,11 +1329,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     ];
 
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 300),
+      constraints: const BoxConstraints(maxWidth: 260),
       child: Column(
         children: rows.map((row) {
           return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: 6),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: row.map((k) {
@@ -1205,7 +1342,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   label: k,
                   isAction: isAction,
                   colors: colors,
-                  onTap: () => pressKey(k),
+                  onTap: () => _pressKeypadKey(k),
                 );
               }).toList(),
             ),
@@ -1258,12 +1395,13 @@ class _KeypadButtonState extends State<_KeypadButton>
 
     Widget childWidget;
     if (widget.label == 'back') {
-      childWidget = Icon(Icons.backspace_outlined, size: 19, color: colors.gold);
+      childWidget =
+          Icon(Icons.backspace_outlined, size: 17, color: colors.gold);
     } else if (widget.label == 'C') {
       childWidget = Text(
         'مسح',
         style: TextStyle(
-          fontSize: 13,
+          fontSize: 12,
           fontWeight: FontWeight.bold,
           color: colors.error,
         ),
@@ -1272,7 +1410,7 @@ class _KeypadButtonState extends State<_KeypadButton>
       childWidget = Text(
         widget.label,
         style: TextStyle(
-          fontSize: 21,
+          fontSize: 18,
           fontWeight: FontWeight.bold,
           color: colors.onGold,
         ),
@@ -1291,13 +1429,15 @@ class _KeypadButtonState extends State<_KeypadButton>
         builder: (_, __) => Transform.scale(
           scale: 1.0 - 0.05 * _ctrl.value,
           child: Container(
-            width: 76,
-            height: 52,
+            width: 70,
+            height: 44,
             decoration: BoxDecoration(
               color: widget.isAction
                   ? colors.obsidianSurface
-                  : (_ctrl.value > 0.5 ? colors.gold.withValues(alpha: 0.15) : colors.obsidianCard),
-              borderRadius: BorderRadius.circular(12),
+                  : (_ctrl.value > 0.5
+                      ? colors.gold.withValues(alpha: 0.15)
+                      : colors.obsidianCard),
+              borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: widget.isAction
                     ? colors.goldBorder.withValues(alpha: 0.35)

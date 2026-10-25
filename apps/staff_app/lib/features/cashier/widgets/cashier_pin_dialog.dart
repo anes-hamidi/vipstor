@@ -417,7 +417,9 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
                       child: Pinput(
                         controller: _pinController,
                         focusNode: _focusNode,
-                        autofocus: true,
+                        autofocus: false,
+                        useNativeKeyboard: false,
+                        showCursor: false,
                         length: 4,
                         obscureText: true,
                         obscuringCharacter: '●',
