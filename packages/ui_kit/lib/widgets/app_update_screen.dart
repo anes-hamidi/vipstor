@@ -2,6 +2,83 @@ import 'package:flutter/material.dart';
 import 'package:domain/domain.dart';
 import '../tokens/app_colors.dart';
 
+/// Semantic colors resolver ensuring crisp, WCAG-compliant contrast
+/// on both dark (obsidian/gold) and light (cream/ivory/gold) surfaces.
+class _UpdateScreenColors {
+  final Color scaffoldBg;
+  final Color cardBg;
+  final Color innerCardBg;
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color textMuted;
+  final Color gold;
+  final Color goldText;
+  final Color onGold;
+  final Color borderColor;
+  final Color dividerColor;
+  final Color closeIconColor;
+  final bool isDark;
+
+  const _UpdateScreenColors({
+    required this.scaffoldBg,
+    required this.cardBg,
+    required this.innerCardBg,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.textMuted,
+    required this.gold,
+    required this.goldText,
+    required this.onGold,
+    required this.borderColor,
+    required this.dividerColor,
+    required this.closeIconColor,
+    required this.isDark,
+  });
+
+  factory _UpdateScreenColors.from(BuildContext context, bool isMandatory) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final colors = context.appColors;
+
+    final gold = colors.gold;
+    final onGold = colors.onGold; // Deep dark text on gold button
+
+    if (isDark) {
+      return _UpdateScreenColors(
+        scaffoldBg: colors.obsidian, // Deep obsidian black
+        cardBg: const Color(0xFF161410), // Elevated obsidian surface
+        innerCardBg: const Color(0xFF221F18), // Distinct card surface
+        textPrimary: const Color(0xFFFAF7F0), // Bright, crisp ivory text
+        textSecondary: const Color(0xFFD6D0C2), // Highly readable secondary text
+        textMuted: const Color(0xFFA39D8E), // Subtle caption text
+        gold: gold,
+        goldText: const Color(0xFFF3D278), // Luminous gold text for dark surfaces
+        onGold: onGold,
+        borderColor: isMandatory ? gold.withValues(alpha: 0.85) : const Color(0x38D4AF37),
+        dividerColor: const Color(0x30D4AF37),
+        closeIconColor: const Color(0xFFFAF7F0).withValues(alpha: 0.7),
+        isDark: true,
+      );
+    } else {
+      return _UpdateScreenColors(
+        scaffoldBg: const Color(0xFFF7F4EB), // Warm light luxury background
+        cardBg: Colors.white, // Crisp white modal surface
+        innerCardBg: const Color(0xFFF9F7F1), // Warm cream card
+        textPrimary: const Color(0xFF1C1A14), // Deep, high-contrast text
+        textSecondary: const Color(0xFF4A4438), // Readable dark charcoal text
+        textMuted: const Color(0xFF7A7364), // Subtle caption text
+        gold: gold,
+        goldText: const Color(0xFF9A7319), // Burnished dark gold for light surfaces
+        onGold: onGold,
+        borderColor: isMandatory ? gold.withValues(alpha: 0.85) : const Color(0x30C59B27),
+        dividerColor: const Color(0x28C59B27),
+        closeIconColor: const Color(0xFF1C1A14).withValues(alpha: 0.7),
+        isDark: false,
+      );
+    }
+  }
+}
+
 /// A shared, responsive screen for OTA application updates.
 ///
 /// Adapts its layout seamlessly for **Mobile**, **Tablet**, and **Desktop** screens.
@@ -48,6 +125,7 @@ class AppUpdateScreen extends StatefulWidget {
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
+        barrierColor: Colors.black.withValues(alpha: 0.65),
         builder: (ctx) => PopScope(
           canPop: false,
           child: Dialog(
@@ -157,15 +235,16 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
   Widget build(BuildContext context) {
     final colors = context.appColors;
     final isMandatory = _isMandatory;
+    final ui = _UpdateScreenColors.from(context, isMandatory);
     final width = MediaQuery.sizeOf(context).width;
 
     final Widget content;
     if (width >= 1024) {
-      content = _buildDesktopLayout(context, colors, isMandatory);
+      content = _buildDesktopLayout(context, ui, colors, isMandatory);
     } else if (width >= 600) {
-      content = _buildTabletLayout(context, colors, isMandatory);
+      content = _buildTabletLayout(context, ui, colors, isMandatory);
     } else {
-      content = _buildMobileLayout(context, colors, isMandatory);
+      content = _buildMobileLayout(context, ui, colors, isMandatory);
     }
 
     if (!widget.isFullScreen) {
@@ -178,7 +257,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: colors.obsidian,
+        backgroundColor: ui.scaffoldBg,
         body: Stack(
           children: [
             // Ambient luxury background glow
@@ -190,7 +269,9 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                 height: 380,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: (isMandatory ? colors.warning : colors.gold).withValues(alpha: 0.08),
+                  color: (isMandatory ? colors.warning : ui.gold).withValues(
+                    alpha: ui.isDark ? 0.08 : 0.04,
+                  ),
                 ),
               ),
             ),
@@ -202,7 +283,9 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                 height: 440,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: colors.gold.withValues(alpha: 0.05),
+                  color: ui.gold.withValues(
+                    alpha: ui.isDark ? 0.05 : 0.03,
+                  ),
                 ),
               ),
             ),
@@ -216,26 +299,31 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
   // ───────────────────────────────────────────────────────────────────────────
   // DESKTOP LAYOUT (>= 1024px)
   // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildDesktopLayout(BuildContext context, AppColors colors, bool isMandatory) {
+  Widget _buildDesktopLayout(
+    BuildContext context,
+    _UpdateScreenColors ui,
+    AppColors colors,
+    bool isMandatory,
+  ) {
     return Container(
       constraints: const BoxConstraints(maxWidth: 1040, maxHeight: 680),
       margin: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: colors.obsidianSurface,
+        color: ui.cardBg,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: isMandatory ? colors.gold.withValues(alpha: 0.75) : colors.goldBorder,
+          color: ui.borderColor,
           width: isMandatory ? 1.5 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.65),
+            color: Colors.black.withValues(alpha: ui.isDark ? 0.65 : 0.12),
             blurRadius: 40,
             offset: const Offset(0, 16),
           ),
           if (isMandatory)
             BoxShadow(
-              color: colors.gold.withValues(alpha: 0.18),
+              color: ui.gold.withValues(alpha: 0.18),
               blurRadius: 50,
               spreadRadius: 2,
             ),
@@ -256,7 +344,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                   children: [
                     Row(
                       children: [
-                        _buildEmblem(colors, isMandatory, size: 54),
+                        _buildEmblem(ui, isMandatory, size: 54),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
@@ -267,7 +355,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  color: colors.onGold.withValues(alpha: 0.6),
+                                  color: ui.textMuted,
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -276,7 +364,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                                 style: TextStyle(
                                   fontSize: 22,
                                   fontWeight: FontWeight.bold,
-                                  color: colors.onGold,
+                                  color: ui.textPrimary,
                                 ),
                               ),
                             ],
@@ -285,7 +373,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    _buildUrgencyChip(colors, isMandatory),
+                    _buildUrgencyChip(ui, isMandatory),
                     const SizedBox(height: 20),
                     Text(
                       isMandatory
@@ -294,31 +382,31 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                       style: TextStyle(
                         fontSize: 13,
                         height: 1.6,
-                        color: colors.onGold.withValues(alpha: 0.75),
+                        color: ui.textSecondary,
                       ),
                     ),
                     const Spacer(),
-                    _buildVersionComparison(colors),
+                    _buildVersionComparison(ui),
                     const SizedBox(height: 16),
-                    _buildMetadataRow(colors),
+                    _buildMetadataRow(ui),
                     const Spacer(),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: colors.obsidianCard,
+                        color: ui.innerCardBg,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: colors.goldBorder.withValues(alpha: 0.4)),
+                        border: Border.all(color: ui.dividerColor),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.verified_user_rounded, color: colors.gold, size: 18),
+                          Icon(Icons.verified_user_rounded, color: ui.gold, size: 18),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               'نسخة رسمية وموثوقة من مستودع المنظومة المعتمد',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: colors.onGold.withValues(alpha: 0.65),
+                                color: ui.textMuted,
                               ),
                             ),
                           ),
@@ -330,7 +418,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
               ),
 
               const SizedBox(width: 32),
-              VerticalDivider(color: colors.goldBorder.withValues(alpha: 0.4), width: 1),
+              VerticalDivider(color: ui.dividerColor, width: 1),
               const SizedBox(width: 32),
 
               // Column 2: What's New, Progress, and Action Controls
@@ -344,24 +432,24 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
-                        color: colors.onGold,
+                        color: ui.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 12),
                     Expanded(
-                      child: _buildReleaseNotes(colors),
+                      child: _buildReleaseNotes(ui),
                     ),
                     const SizedBox(height: 20),
 
                     if (_isDownloading)
-                      _buildDownloadProgress(colors)
+                      _buildDownloadProgress(ui, colors)
                     else if (_errorMessage != null)
-                      _buildErrorBanner(colors)
+                      _buildErrorBanner(ui, colors)
                     else if (_installCompleted)
-                      _buildInstallCompletedBanner(colors),
+                      _buildInstallCompletedBanner(ui, colors),
 
                     const SizedBox(height: 20),
-                    _buildActionButtons(colors, isMandatory),
+                    _buildActionButtons(ui, isMandatory),
                   ],
                 ),
               ),
@@ -375,26 +463,31 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
   // ───────────────────────────────────────────────────────────────────────────
   // TABLET LAYOUT (600px - 1023px)
   // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildTabletLayout(BuildContext context, AppColors colors, bool isMandatory) {
+  Widget _buildTabletLayout(
+    BuildContext context,
+    _UpdateScreenColors ui,
+    AppColors colors,
+    bool isMandatory,
+  ) {
     return Container(
       constraints: const BoxConstraints(maxWidth: 720),
       margin: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
       decoration: BoxDecoration(
-        color: colors.obsidianSurface,
+        color: ui.cardBg,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: isMandatory ? colors.gold.withValues(alpha: 0.75) : colors.goldBorder,
+          color: ui.borderColor,
           width: isMandatory ? 1.5 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.6),
+            color: Colors.black.withValues(alpha: ui.isDark ? 0.6 : 0.1),
             blurRadius: 36,
             offset: const Offset(0, 14),
           ),
           if (isMandatory)
             BoxShadow(
-              color: colors.gold.withValues(alpha: 0.15),
+              color: ui.gold.withValues(alpha: 0.15),
               blurRadius: 40,
               spreadRadius: 2,
             ),
@@ -410,7 +503,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
               // Header
               Row(
                 children: [
-                  _buildEmblem(colors, isMandatory, size: 48),
+                  _buildEmblem(ui, isMandatory, size: 48),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
@@ -421,7 +514,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                           style: TextStyle(
                             fontSize: 19,
                             fontWeight: FontWeight.bold,
-                            color: colors.onGold,
+                            color: ui.textPrimary,
                           ),
                         ),
                         const SizedBox(height: 3),
@@ -429,7 +522,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                           widget.appName ?? 'منظومة الجملة VIP',
                           style: TextStyle(
                             fontSize: 12,
-                            color: colors.onGold.withValues(alpha: 0.6),
+                            color: ui.textMuted,
                           ),
                         ),
                       ],
@@ -437,18 +530,18 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                   ),
                   if (!isMandatory && !_isDownloading && widget.onLater != null)
                     IconButton(
-                      icon: Icon(Icons.close_rounded, color: colors.onGold.withValues(alpha: 0.5)),
+                      icon: Icon(Icons.close_rounded, color: ui.closeIconColor),
                       onPressed: widget.onLater,
                       tooltip: 'إغلاق',
                     ),
                 ],
               ),
               const SizedBox(height: 14),
-              _buildUrgencyChip(colors, isMandatory),
+              _buildUrgencyChip(ui, isMandatory),
               const SizedBox(height: 18),
-              _buildVersionComparison(colors),
+              _buildVersionComparison(ui),
               const SizedBox(height: 14),
-              _buildMetadataRow(colors),
+              _buildMetadataRow(ui),
               const SizedBox(height: 20),
 
               // Release notes
@@ -457,22 +550,22 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.bold,
-                  color: colors.onGold,
+                  color: ui.textPrimary,
                 ),
               ),
               const SizedBox(height: 10),
-              _buildReleaseNotes(colors, maxHeight: 180),
+              _buildReleaseNotes(ui, maxHeight: 180),
               const SizedBox(height: 20),
 
               if (_isDownloading)
-                _buildDownloadProgress(colors)
+                _buildDownloadProgress(ui, colors)
               else if (_errorMessage != null)
-                _buildErrorBanner(colors)
+                _buildErrorBanner(ui, colors)
               else if (_installCompleted)
-                _buildInstallCompletedBanner(colors),
+                _buildInstallCompletedBanner(ui, colors),
 
               const SizedBox(height: 20),
-              _buildActionButtons(colors, isMandatory),
+              _buildActionButtons(ui, isMandatory),
             ],
           ),
         ),
@@ -483,19 +576,33 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
   // ───────────────────────────────────────────────────────────────────────────
   // MOBILE LAYOUT (< 600px)
   // ───────────────────────────────────────────────────────────────────────────
-  Widget _buildMobileLayout(BuildContext context, AppColors colors, bool isMandatory) {
+  Widget _buildMobileLayout(
+    BuildContext context,
+    _UpdateScreenColors ui,
+    AppColors colors,
+    bool isMandatory,
+  ) {
     return Container(
       constraints: const BoxConstraints(maxWidth: 520),
       margin: widget.isFullScreen ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       decoration: BoxDecoration(
-        color: colors.obsidianSurface,
+        color: ui.cardBg,
         borderRadius: BorderRadius.circular(widget.isFullScreen ? 0 : 20),
         border: widget.isFullScreen
             ? null
             : Border.all(
-                color: isMandatory ? colors.gold.withValues(alpha: 0.75) : colors.goldBorder,
+                color: ui.borderColor,
                 width: isMandatory ? 1.5 : 1.0,
               ),
+        boxShadow: widget.isFullScreen
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: ui.isDark ? 0.6 : 0.12),
+                  blurRadius: 30,
+                  offset: const Offset(0, 10),
+                ),
+              ],
       ),
       child: SafeArea(
         child: Column(
@@ -505,7 +612,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
               child: Row(
                 children: [
-                  _buildEmblem(colors, isMandatory, size: 40),
+                  _buildEmblem(ui, isMandatory, size: 40),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -516,14 +623,14 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: colors.onGold,
+                            color: ui.textPrimary,
                           ),
                         ),
                         Text(
                           widget.appName ?? 'منظومة الجملة VIP',
                           style: TextStyle(
                             fontSize: 11,
-                            color: colors.onGold.withValues(alpha: 0.6),
+                            color: ui.textMuted,
                           ),
                         ),
                       ],
@@ -531,14 +638,14 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                   ),
                   if (!isMandatory && !_isDownloading && widget.onLater != null)
                     IconButton(
-                      icon: Icon(Icons.close_rounded, color: colors.onGold.withValues(alpha: 0.6)),
+                      icon: Icon(Icons.close_rounded, color: ui.closeIconColor),
                       onPressed: widget.onLater,
                       tooltip: 'إغلاق',
                     ),
                 ],
               ),
             ),
-            Divider(color: colors.goldBorder.withValues(alpha: 0.3), height: 1),
+            Divider(color: ui.dividerColor, height: 1),
 
             // Scrollable Content
             Expanded(
@@ -547,11 +654,11 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildUrgencyChip(colors, isMandatory),
+                    _buildUrgencyChip(ui, isMandatory),
                     const SizedBox(height: 16),
-                    _buildVersionComparison(colors),
+                    _buildVersionComparison(ui),
                     const SizedBox(height: 12),
-                    _buildMetadataRow(colors),
+                    _buildMetadataRow(ui),
                     const SizedBox(height: 18),
 
                     Text(
@@ -559,19 +666,19 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: colors.onGold,
+                        color: ui.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 10),
-                    _buildReleaseNotes(colors, maxHeight: 220),
+                    _buildReleaseNotes(ui, maxHeight: 220),
                     const SizedBox(height: 20),
 
                     if (_isDownloading)
-                      _buildDownloadProgress(colors)
+                      _buildDownloadProgress(ui, colors)
                     else if (_errorMessage != null)
-                      _buildErrorBanner(colors)
+                      _buildErrorBanner(ui, colors)
                     else if (_installCompleted)
-                      _buildInstallCompletedBanner(colors),
+                      _buildInstallCompletedBanner(ui, colors),
                   ],
                 ),
               ),
@@ -581,12 +688,12 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: colors.obsidianCard,
+                color: ui.innerCardBg,
                 border: Border(
-                  top: BorderSide(color: colors.goldBorder.withValues(alpha: 0.4)),
+                  top: BorderSide(color: ui.dividerColor),
                 ),
               ),
-              child: _buildActionButtons(colors, isMandatory, isVertical: !isMandatory),
+              child: _buildActionButtons(ui, isMandatory, isVertical: !isMandatory),
             ),
           ],
         ),
@@ -598,21 +705,21 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
   // REUSABLE COMPONENTS
   // ───────────────────────────────────────────────────────────────────────────
 
-  Widget _buildEmblem(AppColors colors, bool isMandatory, {double size = 48}) {
+  Widget _buildEmblem(_UpdateScreenColors ui, bool isMandatory, {double size = 48}) {
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: isMandatory ? colors.gold.withValues(alpha: 0.16) : colors.obsidianCard,
+        color: isMandatory ? ui.gold.withValues(alpha: 0.16) : ui.innerCardBg,
         borderRadius: BorderRadius.circular(size * 0.28),
         border: Border.all(
-          color: isMandatory ? colors.gold.withValues(alpha: 0.6) : colors.goldBorder,
+          color: isMandatory ? ui.gold.withValues(alpha: 0.6) : ui.dividerColor,
           width: 1.5,
         ),
         boxShadow: isMandatory
             ? [
                 BoxShadow(
-                  color: colors.gold.withValues(alpha: 0.25),
+                  color: ui.gold.withValues(alpha: 0.25),
                   blurRadius: 16,
                   spreadRadius: 1,
                 ),
@@ -622,16 +729,16 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
       child: Center(
         child: Icon(
           isMandatory ? Icons.system_security_update_warning_rounded : Icons.system_update_rounded,
-          color: isMandatory ? colors.gold : colors.onObsidian,
+          color: isMandatory ? ui.gold : (ui.isDark ? ui.textPrimary : ui.gold),
           size: size * 0.52,
         ),
       ),
     );
   }
 
-  Widget _buildUrgencyChip(AppColors colors, bool isMandatory) {
-    final bg = isMandatory ? colors.gold.withValues(alpha: 0.12) : colors.obsidianCard;
-    final border = isMandatory ? colors.gold.withValues(alpha: 0.45) : colors.goldBorder;
+  Widget _buildUrgencyChip(_UpdateScreenColors ui, bool isMandatory) {
+    final bg = isMandatory ? ui.gold.withValues(alpha: 0.14) : ui.innerCardBg;
+    final border = isMandatory ? ui.gold.withValues(alpha: 0.55) : ui.dividerColor;
     final text = isMandatory ? 'تحديث أمني إلزامي لمتابعة العمل' : 'تحديث اختياري مستحسن للجميع';
     final icon = isMandatory ? Icons.gpp_maybe_rounded : Icons.auto_awesome_rounded;
 
@@ -645,7 +752,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: colors.gold),
+          Icon(icon, size: 16, color: ui.goldText),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
@@ -653,7 +760,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: colors.gold,
+                color: ui.goldText,
               ),
             ),
           ),
@@ -662,13 +769,13 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
     );
   }
 
-  Widget _buildVersionComparison(AppColors colors) {
+  Widget _buildVersionComparison(_UpdateScreenColors ui) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: colors.obsidianCard,
+        color: ui.innerCardBg,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.goldBorder),
+        border: Border.all(color: ui.dividerColor),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -681,7 +788,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                   'الإصدار الحالي المثبت',
                   style: TextStyle(
                     fontSize: 11,
-                    color: colors.onGold.withValues(alpha: 0.55),
+                    color: ui.textMuted,
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -690,7 +797,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: colors.onGold.withValues(alpha: 0.8),
+                    color: ui.textPrimary,
                   ),
                 ),
               ],
@@ -701,12 +808,12 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
             child: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: colors.gold.withValues(alpha: 0.15),
+                color: ui.gold.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 Icons.arrow_forward_rounded,
-                color: colors.gold,
+                color: ui.gold,
                 size: 18,
               ),
             ),
@@ -719,7 +826,8 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                   'الإصدار الجديد المتاح',
                   style: TextStyle(
                     fontSize: 11,
-                    color: colors.gold.withValues(alpha: 0.85),
+                    fontWeight: FontWeight.w600,
+                    color: ui.goldText,
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -728,7 +836,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: colors.gold,
+                    color: ui.goldText,
                   ),
                 ),
               ],
@@ -739,7 +847,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
     );
   }
 
-  Widget _buildMetadataRow(AppColors colors) {
+  Widget _buildMetadataRow(_UpdateScreenColors ui) {
     final platformName = _platformName(widget.release.platform);
     final size = widget.release.formattedFileSize;
 
@@ -748,29 +856,38 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
       runSpacing: 8,
       children: [
         if (size.isNotEmpty)
-          _buildPill(colors, icon: Icons.download_done_rounded, label: 'الحجم: $size'),
-        _buildPill(colors, icon: Icons.devices_rounded, label: 'المنصة: $platformName'),
+          _buildPill(ui, icon: Icons.download_done_rounded, label: 'الحجم: $size'),
+        _buildPill(ui, icon: Icons.devices_rounded, label: 'المنصة: $platformName'),
         if (widget.release.isMandatory)
-          _buildPill(colors, icon: Icons.lock_outline_rounded, label: 'إلزامي للتشغيل', isGold: true),
+          _buildPill(ui, icon: Icons.lock_outline_rounded, label: 'إلزامي للتشغيل', isGold: true),
       ],
     );
   }
 
-  Widget _buildPill(AppColors colors, {required IconData icon, required String label, bool isGold = false}) {
+  Widget _buildPill(
+    _UpdateScreenColors ui, {
+    required IconData icon,
+    required String label,
+    bool isGold = false,
+  }) {
     return Container(
       constraints: const BoxConstraints(maxWidth: 260),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: isGold ? colors.gold.withValues(alpha: 0.15) : colors.obsidianCard,
+        color: isGold ? ui.gold.withValues(alpha: 0.15) : ui.innerCardBg,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isGold ? colors.gold.withValues(alpha: 0.4) : colors.goldBorder.withValues(alpha: 0.5),
+          color: isGold ? ui.gold.withValues(alpha: 0.45) : ui.dividerColor,
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: isGold ? colors.gold : colors.onGold.withValues(alpha: 0.7)),
+          Icon(
+            icon,
+            size: 14,
+            color: isGold ? ui.goldText : ui.textMuted,
+          ),
           const SizedBox(width: 6),
           Flexible(
             child: Text(
@@ -778,8 +895,8 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
-                fontWeight: isGold ? FontWeight.bold : FontWeight.normal,
-                color: isGold ? colors.gold : colors.onGold.withValues(alpha: 0.85),
+                fontWeight: isGold ? FontWeight.bold : FontWeight.w500,
+                color: isGold ? ui.goldText : ui.textSecondary,
               ),
             ),
           ),
@@ -788,7 +905,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
     );
   }
 
-  Widget _buildReleaseNotes(AppColors colors, {double? maxHeight}) {
+  Widget _buildReleaseNotes(_UpdateScreenColors ui, {double? maxHeight}) {
     final notes = widget.release.releaseNotes?.trim();
     final hasNotes = notes != null && notes.isNotEmpty;
 
@@ -796,9 +913,9 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
       constraints: BoxConstraints(maxHeight: maxHeight ?? double.infinity),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: colors.obsidianCard.withValues(alpha: 0.6),
+        color: ui.innerCardBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.goldBorder.withValues(alpha: 0.5)),
+        border: Border.all(color: ui.dividerColor),
       ),
       child: SingleChildScrollView(
         child: Text(
@@ -808,22 +925,22 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
           style: TextStyle(
             fontSize: 12.5,
             height: 1.7,
-            color: colors.onGold.withValues(alpha: 0.88),
+            color: ui.textPrimary,
           ),
         ),
       ),
     );
   }
 
-  Widget _buildDownloadProgress(AppColors colors) {
+  Widget _buildDownloadProgress(_UpdateScreenColors ui, AppColors colors) {
     final pct = (_downloadProgress * 100).toInt();
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: colors.obsidianCard,
+        color: ui.innerCardBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.gold.withValues(alpha: 0.5)),
+        border: Border.all(color: ui.gold.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -839,7 +956,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                       height: 16,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(colors.gold),
+                        valueColor: AlwaysStoppedAnimation<Color>(ui.gold),
                       ),
                     ),
                     const SizedBox(width: 10),
@@ -850,7 +967,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
-                          color: colors.onGold,
+                          color: ui.textPrimary,
                         ),
                       ),
                     ),
@@ -863,7 +980,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.bold,
-                  color: colors.gold,
+                  color: ui.goldText,
                 ),
               ),
             ],
@@ -874,8 +991,8 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
             child: LinearProgressIndicator(
               value: _downloadProgress > 0 ? _downloadProgress : null,
               minHeight: 8,
-              backgroundColor: colors.obsidianSurface,
-              valueColor: AlwaysStoppedAnimation<Color>(colors.gold),
+              backgroundColor: ui.isDark ? const Color(0xFF100F0C) : const Color(0xFFE8E2D2),
+              valueColor: AlwaysStoppedAnimation<Color>(ui.gold),
             ),
           ),
           const SizedBox(height: 8),
@@ -884,7 +1001,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 11,
-              color: colors.onGold.withValues(alpha: 0.55),
+              color: ui.textMuted,
             ),
           ),
         ],
@@ -892,7 +1009,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
     );
   }
 
-  Widget _buildErrorBanner(AppColors colors) {
+  Widget _buildErrorBanner(_UpdateScreenColors ui, AppColors colors) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -915,7 +1032,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
     );
   }
 
-  Widget _buildInstallCompletedBanner(AppColors colors) {
+  Widget _buildInstallCompletedBanner(_UpdateScreenColors ui, AppColors colors) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -939,7 +1056,7 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
   }
 
   Widget _buildActionButtons(
-    AppColors colors,
+    _UpdateScreenColors ui,
     bool isMandatory, {
     bool isVertical = false,
   }) {
@@ -951,8 +1068,8 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
         ? OutlinedButton(
             onPressed: widget.onLater,
             style: OutlinedButton.styleFrom(
-              foregroundColor: colors.onGold.withValues(alpha: 0.75),
-              side: BorderSide(color: colors.goldBorder),
+              foregroundColor: ui.textSecondary,
+              side: BorderSide(color: ui.dividerColor),
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -973,8 +1090,8 @@ class _AppUpdateScreenState extends State<AppUpdateScreen> {
         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
       ),
       style: ElevatedButton.styleFrom(
-        backgroundColor: colors.gold,
-        foregroundColor: colors.onGold,
+        backgroundColor: ui.gold,
+        foregroundColor: ui.onGold,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
         shape: RoundedRectangleBorder(
