@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:core/core.dart';
@@ -197,6 +198,8 @@ class _PurchaseReceivingScreenState
           // Store actual retail price so the repository sets selling_price correctly.
           'selling_price': product.getPriceForQuantity(PriceTier.retail, 1),
           'qty': 1,
+          'old_on_hand': product.onHandQty,
+          'old_weighted_cost': product.weightedAverageCostCentimes,
         });
       }
     });
@@ -283,7 +286,7 @@ class _PurchaseReceivingScreenState
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Scaffold(
+    final mainScaffold = Scaffold(
       backgroundColor:
           isDark ? const Color(0xFF0E0C0A) : const Color(0xFFF8F5EE),
       appBar: _buildAppBar(authUser, theme, isDark),
@@ -300,6 +303,44 @@ class _PurchaseReceivingScreenState
           ),
           _buildCatalogTab(),
         ],
+      ),
+    );
+
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true): () {
+          if (_tabController.index == 2) {
+            _productSearchController.selection = TextSelection(
+              baseOffset: 0,
+              extentOffset: _productSearchController.text.length,
+            );
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () {
+          if (_tabController.index == 2) {
+            _productSearchController.selection = TextSelection(
+              baseOffset: 0,
+              extentOffset: _productSearchController.text.length,
+            );
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
+          setState(() {
+            _invoiceNoController.text =
+                'FAC-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch % 10000}';
+            _invoiceItems.clear();
+          });
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          setState(() {
+            _productSearch = '';
+            _productSearchController.clear();
+          });
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: mainScaffold,
       ),
     );
   }
@@ -710,6 +751,8 @@ class _PurchaseReceivingScreenState
                 }),
                 onEditCost: (newCost) => setState(
                     () => _invoiceItems[idx]['cost_centimes'] = newCost),
+                onSetQty: (newQty) => setState(
+                    () => _invoiceItems[idx]['qty'] = newQty > 0 ? newQty : 1),
               ),
             ),
 
@@ -1170,18 +1213,20 @@ class _PurchaseReceivingScreenState
 
 // ─── Sub-widgets ──────────────────────────────────────────────────────────────
 
-/// Single invoice line with inline qty stepper and editable cost.
+/// Single invoice line with inline qty stepper, quick keypad, and editable cost.
 class _InvoiceLineItem extends StatefulWidget {
   final Map<String, dynamic> item;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
   final ValueChanged<int> onEditCost;
+  final ValueChanged<int>? onSetQty;
 
   const _InvoiceLineItem({
     required this.item,
     required this.onIncrement,
     required this.onDecrement,
     required this.onEditCost,
+    this.onSetQty,
   });
 
   @override
@@ -1203,6 +1248,90 @@ class _InvoiceLineItemState extends State<_InvoiceLineItem> {
   void dispose() {
     _costCtrl.dispose();
     super.dispose();
+  }
+
+  void _showQuickKeypad(BuildContext context) {
+    if (widget.onSetQty == null) return;
+    int currentQty = (widget.item['qty'] as num).toInt();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + AppSpacing.lg,
+                left: AppSpacing.lg,
+                right: AppSpacing.lg,
+                top: AppSpacing.lg,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'تعديل كمية الاستلام: ${widget.item['product_name']}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      borderRadius: AppRadius.smAll,
+                      border: Border.all(color: const Color(0xFFD4AF37)),
+                    ),
+                    child: Text(
+                      '$currentQty',
+                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFFD4AF37)),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final delta in [1, 5, 10, 20, 50, 100])
+                        ActionChip(
+                          label: Text('+$delta'),
+                          onPressed: () {
+                            setModalState(() => currentQty += delta);
+                            widget.onSetQty!(currentQty);
+                          },
+                        ),
+                      ActionChip(
+                        label: const Text('إعادة للواحد (1)'),
+                        onPressed: () {
+                          setModalState(() => currentQty = 1);
+                          widget.onSetQty!(1);
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  GoldButton(
+                    label: 'تأكيد الكمية ($currentQty)',
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -1304,30 +1433,55 @@ class _InvoiceLineItemState extends State<_InvoiceLineItem> {
                       ],
                     ),
                   ),
+                const SizedBox(height: 2),
+                Builder(
+                  builder: (_) {
+                    final oldOnHand = widget.item['old_on_hand'] as int? ?? 0;
+                    final oldAvgCost = widget.item['old_weighted_cost'] as int? ?? cost;
+                    final totalQty = oldOnHand + qty;
+                    final newAvg = totalQty > 0 ? (((oldOnHand * oldAvgCost) + (qty * cost)) / totalQty).round() : cost;
+                    return Text(
+                      'المتوسط المرجح بالدفتر: ${DzdFormatter.formatCentimes(newAvg)}',
+                      style: const TextStyle(fontSize: 10, color: Color(0xFFD4AF37), fontWeight: FontWeight.w600),
+                    );
+                  },
+                ),
               ],
             ),
           ),
 
-          // Qty stepper
+          // Qty stepper with min 48x48 tap targets (Tablet Operational Hub requirement)
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: const Icon(Icons.remove_circle_outline, size: 20),
+                icon: const Icon(Icons.remove_circle_outline, size: 22),
                 onPressed: widget.onDecrement,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                tooltip: 'إنقاص الكمية',
               ),
-              Text(
-                '${widget.item['qty']}',
-                style:
-                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              InkWell(
+                onTap: widget.onSetQty != null ? () => _showQuickKeypad(context) : null,
+                borderRadius: AppRadius.xsAll,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 44, minHeight: 36),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    borderRadius: AppRadius.xsAll,
+                    border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    '${widget.item['qty']}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                ),
               ),
               IconButton(
-                icon: const Icon(Icons.add_circle_outline, size: 20),
+                icon: const Icon(Icons.add_circle_outline, size: 22),
                 onPressed: widget.onIncrement,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                tooltip: 'زيادة الكمية',
               ),
             ],
           ),

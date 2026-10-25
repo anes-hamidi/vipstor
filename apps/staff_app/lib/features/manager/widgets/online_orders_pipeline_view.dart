@@ -6,6 +6,7 @@ import 'package:domain/domain.dart';
 import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
 import '../services/pdf_invoice_service.dart';
+import 'order_state_inspector.dart';
 
 export '../../../providers/staff_providers.dart' show managerOnlineOrdersProvider, unverifiedOrdersCountProvider;
 
@@ -37,6 +38,15 @@ class _OnlineOrdersPipelineViewState
   late TabController _tabCtrl;
   bool _isActionLoading = false;
 
+  // Search, sorting, selection & master-detail state
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  String _searchFilter = '';
+  final Set<String> _selectedOrderIds = {};
+  OrderEntity? _selectedOrder;
+  bool _sortAscending = false;
+  String _sortColumn = 'date';
+
   @override
   void initState() {
     super.initState();
@@ -46,6 +56,8 @@ class _OnlineOrdersPipelineViewState
 
   @override
   void dispose() {
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     _tabCtrl.removeListener(_onInnerTabChanged);
     _tabCtrl.dispose();
     super.dispose();
@@ -61,6 +73,231 @@ class _OnlineOrdersPipelineViewState
         .read(managerOnlineOrderHistoryProvider.notifier)
         .refresh();
     ref.invalidate(liveProductsProvider);
+  }
+
+  // Batch actions
+  Future<void> _handleBatchConfirm(List<OrderEntity> orders) async {
+    final auth = ref.read(authStateProvider);
+    if (auth == null) return;
+    final submitted = orders.where((o) => _selectedOrderIds.contains(o.id) && 
+        (o.status == OrderStatus.submitted || o.status == OrderStatus.requiresManagerReview)).toList();
+    if (submitted.isEmpty) return;
+    
+    setState(() => _isActionLoading = true);
+    final repo = ref.read(orderRepositoryProvider);
+    int successCount = 0;
+    try {
+      for (final order in submitted) {
+        await repo.confirmOrder(orderId: order.id, cashierId: auth.id);
+        successCount++;
+      }
+      _selectedOrderIds.clear();
+      _refreshOrders();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم تأكيد وحجز المخزون لـ ($successCount) طلبية بنجاح!'),
+            backgroundColor: context.appColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('فشل التأكيد الجماعي: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isActionLoading = false);
+    }
+  }
+
+  Future<void> _handleBatchPrepare(List<OrderEntity> orders) async {
+    final auth = ref.read(authStateProvider);
+    final confirmed = orders.where((o) => _selectedOrderIds.contains(o.id) && 
+        (o.status == OrderStatus.confirmed || o.status == OrderStatus.preparing)).toList();
+    if (confirmed.isEmpty) return;
+    
+    setState(() => _isActionLoading = true);
+    final repo = ref.read(orderRepositoryProvider);
+    int successCount = 0;
+    try {
+      for (final order in confirmed) {
+        await repo.updateOrderPreparation(orderId: order.id, preparedBy: auth?.name ?? 'مدير المخزون');
+        successCount++;
+      }
+      _selectedOrderIds.clear();
+      _refreshOrders();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تم تجهيز ($successCount) طلبية بنجاح!'),
+            backgroundColor: context.appColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('فشل التجهيز المجمع: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isActionLoading = false);
+    }
+  }
+
+  Future<void> _handleBatchPrint(List<OrderEntity> orders) async {
+    final selected = orders.where((o) => _selectedOrderIds.contains(o.id)).toList();
+    for (final order in selected) {
+      await PdfInvoiceService.printDeliverySlip(order);
+    }
+  }
+
+  void _showOrderInspectionSheet(OrderEntity order, List<ProductEntity> products, List<Map<String, dynamic>> staff) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (_, scrollController) => Container(
+          decoration: BoxDecoration(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+          ),
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: ListView(
+            controller: scrollController,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'طلب #${order.orderNumber ?? order.id.substring(0, 8)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  ),
+                  DzdPriceTag.lg(centimes: order.totalAmountCentimes, gold: true),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              OrderStateStepper(status: order.status),
+              const SizedBox(height: AppSpacing.md),
+              CustomerLedgerSyncCard(order: order),
+              const SizedBox(height: AppSpacing.md),
+              OrderStockAllocationCard(order: order, products: products),
+              const SizedBox(height: AppSpacing.lg),
+              _buildInspectorActions(order, products, staff),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInspectorActions(OrderEntity order, List<ProductEntity> products, List<Map<String, dynamic>> staff) {
+    final theme = Theme.of(context);
+    switch (order.status) {
+      case OrderStatus.submitted:
+      case OrderStatus.requiresManagerReview:
+        return Row(
+          children: [
+            Expanded(
+              child: GoldButton.icon(
+                icon: Icons.verified_rounded,
+                label: 'تدقيق وتأكيد وحجز المخزون',
+                onPressed: () => _showValidationDialog(order, products),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: theme.colorScheme.error),
+              icon: const Icon(Icons.cancel_outlined, size: 16),
+              label: const Text('رفض'),
+              onPressed: () => _showValidationDialog(order, products),
+            ),
+          ],
+        );
+      case OrderStatus.confirmed:
+        return Row(
+          children: [
+            Expanded(
+              child: GoldButton.icon(
+                icon: Icons.inventory_2_outlined,
+                label: 'بدء تجهيز وتغليف السلع',
+                onPressed: () => _showPreparationDialog(order),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            IconButton(
+              icon: const Icon(Icons.print_outlined),
+              tooltip: 'طباعة وصل التجهيز',
+              onPressed: () => PdfInvoiceService.printDeliverySlip(order),
+            ),
+          ],
+        );
+      case OrderStatus.preparing:
+        return Row(
+          children: [
+            Expanded(
+              child: GoldButton.icon(
+                icon: Icons.done_all_rounded,
+                label: 'إكمال التجهيز وجاهز للإرسال',
+                onPressed: () => _showPreparationDialog(order),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            IconButton(
+              icon: const Icon(Icons.print_outlined),
+              tooltip: 'طباعة وصل التجهيز',
+              onPressed: () => PdfInvoiceService.printDeliverySlip(order),
+            ),
+          ],
+        );
+      case OrderStatus.ready:
+      case OrderStatus.assigned:
+      case OrderStatus.accepted:
+      case OrderStatus.outForDelivery:
+        return Row(
+          children: [
+            Expanded(
+              child: GoldButton.icon(
+                icon: Icons.local_shipping_outlined,
+                label: order.driverName != null ? 'تغيير السائق (${order.driverName})' : 'تعيين سائق التوصيل',
+                onPressed: () => _showAssignDriverDialog(order, staff),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.print_outlined, size: 16),
+              label: const Text('طباعة الوصل'),
+              onPressed: () => PdfInvoiceService.printDeliverySlip(order),
+            ),
+          ],
+        );
+      case OrderStatus.delivered:
+      case OrderStatus.settled:
+      case OrderStatus.cancelled:
+      case OrderStatus.refused:
+        return OutlinedButton.icon(
+          icon: const Icon(Icons.print_outlined, size: 16),
+          label: const Text('طباعة وصل التسليم'),
+          onPressed: () => PdfInvoiceService.printDeliverySlip(order),
+        );
+    }
   }
 
   // ─── Stage Counts ─────────────────────────────────────────────────────────
@@ -646,7 +883,7 @@ class _OnlineOrdersPipelineViewState
             o.status == OrderStatus.outForDelivery)
         .toList();
 
-    return Column(
+    final mainContent = Column(
       children: [
         // ── Pipeline Tab Bar ─────────────────────────────────────────
         _PipelineTabBar(
@@ -674,6 +911,8 @@ class _OnlineOrdersPipelineViewState
               _buildLiveStage(
                 liveAsync: liveAsync,
                 orders: submitted,
+                products: products,
+                staff: staff,
                 emptyIcon: Icons.inbox_outlined,
                 emptyTitle: 'لا طلبيات واردة جديدة',
                 emptyDesc: 'ستظهر هنا طلبيات الزبائن الجديدة.',
@@ -688,6 +927,8 @@ class _OnlineOrdersPipelineViewState
               _buildLiveStage(
                 liveAsync: liveAsync,
                 orders: confirming,
+                products: products,
+                staff: staff,
                 emptyIcon: Icons.inventory_2_outlined,
                 emptyTitle: 'لا طلبيات قيد التحضير',
                 emptyDesc: 'الطلبيات المؤكدة تنتظر التجهيز هنا.',
@@ -701,6 +942,8 @@ class _OnlineOrdersPipelineViewState
               _buildLiveStage(
                 liveAsync: liveAsync,
                 orders: ready,
+                products: products,
+                staff: staff,
                 emptyIcon: Icons.local_shipping_outlined,
                 emptyTitle: 'لا طلبيات جاهزة للإرسال',
                 emptyDesc: 'الطلبيات الجاهزة للتوصيل ستظهر هنا.',
@@ -744,17 +987,43 @@ class _OnlineOrdersPipelineViewState
                 ),
               ),
               // Stage 4: Date-filtered history
-              _buildHistoryTab(historyState),
+              _buildHistoryTab(historyState, products, staff),
             ],
           ),
         ),
       ],
+    );
+
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true): () {
+          _searchFocusNode.requestFocus();
+        },
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () {
+          _searchFocusNode.requestFocus();
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          setState(() {
+            _selectedOrderIds.clear();
+            _selectedOrder = null;
+          });
+        },
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
+          _refreshOrders();
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: mainContent,
+      ),
     );
   }
 
   Widget _buildLiveStage({
     required AsyncValue<List<OrderEntity>> liveAsync,
     required List<OrderEntity> orders,
+    required List<ProductEntity> products,
+    required List<Map<String, dynamic>> staff,
     required IconData emptyIcon,
     required String emptyTitle,
     required String emptyDesc,
@@ -773,6 +1042,8 @@ class _OnlineOrdersPipelineViewState
     }
     return _buildOrderList(
       orders: orders,
+      products: products,
+      staff: staff,
       emptyIcon: emptyIcon,
       emptyTitle: emptyTitle,
       emptyDesc: emptyDesc,
@@ -780,7 +1051,11 @@ class _OnlineOrdersPipelineViewState
     );
   }
 
-  Widget _buildHistoryTab(ManagerOrderHistoryState state) {
+  Widget _buildHistoryTab(
+    ManagerOrderHistoryState state,
+    List<ProductEntity> products,
+    List<Map<String, dynamic>> staff,
+  ) {
     return Column(
       children: [
         _buildHistoryFilterCard(state),
@@ -805,39 +1080,26 @@ class _OnlineOrdersPipelineViewState
                           description:
                               'غيّر فترة التاريخ لعرض طلبيات أخرى.',
                         )
-                      : RefreshIndicator(
-                          onRefresh: () => ref
-                              .read(managerOnlineOrderHistoryProvider.notifier)
-                              .refresh(),
-                          child: ListView.separated(
-                            physics:
-                                const AlwaysScrollableScrollPhysics(),
-                            padding: const EdgeInsetsDirectional.all(
-                                AppSpacing.lg),
-                            itemCount: state.orders.length +
-                                (state.hasMore ? 1 : 0),
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: AppSpacing.md),
-                            itemBuilder: (context, i) {
-                              if (i == state.orders.length) {
-                                return _buildHistoryLoadMore(state);
-                              }
-                              final order = state.orders[i];
-                              return _OrderCard(
-                                order: order,
-                                actionBuilder: (o) =>
-                                    OutlinedButton.icon(
+                      : Column(
+                          children: [
+                            Expanded(
+                              child: _buildOrderList(
+                                orders: state.orders,
+                                products: products,
+                                staff: staff,
+                                emptyIcon: Icons.history_rounded,
+                                emptyTitle: 'لا توجد طلبيات في هذه الفترة',
+                                emptyDesc: 'غيّر فترة التاريخ لعرض طلبيات أخرى.',
+                                actionBuilder: (o) => OutlinedButton.icon(
                                   onPressed: () =>
-                                      PdfInvoiceService.printDeliverySlip(
-                                          o),
-                                  icon: const Icon(
-                                      Icons.print_outlined,
-                                      size: 16),
+                                      PdfInvoiceService.printDeliverySlip(o),
+                                  icon: const Icon(Icons.print_outlined, size: 16),
                                   label: const Text('طباعة الوصل'),
                                 ),
-                              );
-                            },
-                          ),
+                              ),
+                            ),
+                            if (state.hasMore) _buildHistoryLoadMore(state),
+                          ],
                         ),
         ),
       ],
@@ -981,30 +1243,615 @@ class _OnlineOrdersPipelineViewState
     return '${date.year}-$month-$day';
   }
 
-  // ─── Order List ───────────────────────────────────────────────────────────
+  String _formatDate(DateTime dt) {
+    final local = dt.toLocal();
+    return '${local.day}/${local.month} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+  }
+
+  StatusBadgeType _statusBadgeType(OrderStatus status) {
+    switch (status) {
+      case OrderStatus.submitted:
+        return StatusBadgeType.pending;
+      case OrderStatus.confirmed:
+        return StatusBadgeType.processing;
+      case OrderStatus.preparing:
+        return StatusBadgeType.preparing;
+      case OrderStatus.ready:
+      case OrderStatus.assigned:
+      case OrderStatus.accepted:
+      case OrderStatus.outForDelivery:
+        return StatusBadgeType.ready;
+      case OrderStatus.delivered:
+        return StatusBadgeType.delivered;
+      case OrderStatus.settled:
+        return StatusBadgeType.completed;
+      case OrderStatus.refused:
+      case OrderStatus.cancelled:
+        return StatusBadgeType.cancelled;
+      case OrderStatus.requiresManagerReview:
+        return StatusBadgeType.draft;
+      // ignore: unreachable_switch_default
+      default:
+        return StatusBadgeType.draft;
+    }
+  }
+
+  // ─── Order List & Responsive Layouts ─────────────────────────────────────────
 
   Widget _buildOrderList({
     required List<OrderEntity> orders,
+    required List<ProductEntity> products,
+    required List<Map<String, dynamic>> staff,
     required IconData emptyIcon,
     required String emptyTitle,
     required String emptyDesc,
     required Widget Function(OrderEntity) actionBuilder,
   }) {
-    if (orders.isEmpty) {
-      return AppStates.empty(
-          icon: emptyIcon, title: emptyTitle, description: emptyDesc);
+    var filtered = orders.where((o) {
+      if (_searchFilter.isEmpty) return true;
+      final q = _searchFilter.toLowerCase();
+      final numStr = o.orderNumber?.toString() ?? o.id;
+      final customer = (o.customerName ?? o.customerSnapshot?['customer_name'] ?? '').toLowerCase();
+      final phone = (o.customerPhone ?? o.customerSnapshot?['phone'] ?? '');
+      return numStr.contains(q) || customer.contains(q) || phone.contains(q);
+    }).toList();
+
+    filtered.sort((a, b) {
+      int cmp = 0;
+      if (_sortColumn == 'date') {
+        cmp = b.createdAt.compareTo(a.createdAt);
+      } else if (_sortColumn == 'amount') {
+        cmp = b.totalAmountCentimes.compareTo(a.totalAmountCentimes);
+      } else if (_sortColumn == 'customer') {
+        final nameA = a.customerName ?? '';
+        final nameB = b.customerName ?? '';
+        cmp = nameA.compareTo(nameB);
+      } else if (_sortColumn == 'number') {
+        final numA = a.orderNumber ?? 0;
+        final numB = b.orderNumber ?? 0;
+        cmp = numB.compareTo(numA);
+      }
+      return _sortAscending ? -cmp : cmp;
+    });
+
+    if (filtered.isEmpty) {
+      if (_searchFilter.isNotEmpty) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.search_off_rounded, size: 48, color: Colors.grey),
+              const SizedBox(height: AppSpacing.sm),
+              Text('لا توجد نتائج تطابق: "$_searchFilter"'),
+              TextButton(
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() => _searchFilter = '');
+                },
+                child: const Text('مسح البحث'),
+              ),
+            ],
+          ),
+        );
+      }
+      return AppStates.empty(icon: emptyIcon, title: emptyTitle, description: emptyDesc);
     }
+
+    final screenWidth = MediaQuery.sizeOf(context).width;
+
+    if (screenWidth >= 1024) {
+      return _buildDesktopMasterDetailView(
+        orders: filtered,
+        products: products,
+        staff: staff,
+        actionBuilder: actionBuilder,
+      );
+    } else if (screenWidth >= 600) {
+      return _buildTabletCardGrid(
+        orders: filtered,
+        products: products,
+        staff: staff,
+        actionBuilder: actionBuilder,
+      );
+    } else {
+      return _buildMobileOrderList(
+        orders: filtered,
+        products: products,
+        staff: staff,
+        actionBuilder: actionBuilder,
+      );
+    }
+  }
+
+  Widget _buildDesktopMasterDetailView({
+    required List<OrderEntity> orders,
+    required List<ProductEntity> products,
+    required List<Map<String, dynamic>> staff,
+    required Widget Function(OrderEntity) actionBuilder,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final selected = _selectedOrder != null && orders.any((o) => o.id == _selectedOrder!.id)
+        ? orders.firstWhere((o) => o.id == _selectedOrder!.id)
+        : orders.first;
+
+    final allSelected = orders.isNotEmpty && orders.every((o) => _selectedOrderIds.contains(o.id));
+
+    return Column(
+      children: [
+        // Desktop Top Search & Controls Bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+          color: isDark ? const Color(0xFF141210) : const Color(0xFFFAF7F0),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 38,
+                  child: TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocusNode,
+                    decoration: InputDecoration(
+                      hintText: 'بحث سريع (رقم الطلب، اسم الزبون، الهاتف)...',
+                      prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                      suffixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            margin: const EdgeInsetsDirectional.only(end: 6),
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.white12 : Colors.black12,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('Ctrl+F', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                          ),
+                          if (_searchFilter.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.clear_rounded, size: 16),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _searchFilter = '');
+                              },
+                            ),
+                        ],
+                      ),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    onChanged: (v) => setState(() => _searchFilter = v.trim()),
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('تحديث'),
+                onPressed: _refreshOrders,
+              ),
+            ],
+          ),
+        ),
+
+        // Batch Action Bar when checkboxes selected
+        OrderBatchActionBar(
+          selectedCount: _selectedOrderIds.length,
+          onClearSelection: () => setState(() => _selectedOrderIds.clear()),
+          onBatchConfirm: () => _handleBatchConfirm(orders),
+          onBatchPrepare: () => _handleBatchPrepare(orders),
+          onBatchPrint: () => _handleBatchPrint(orders),
+          isLoading: _isActionLoading,
+        ),
+
+        // Master-Detail Split Row
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Left side: Advanced Data Grid (Master)
+              Expanded(
+                flex: 3,
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: const Color(0xFFD4AF37).withValues(alpha: 0.20),
+                      ),
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      // Sticky Table Header
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF191714) : const Color(0xFFF5EEDB),
+                          border: Border(
+                            bottom: BorderSide(
+                              color: const Color(0xFFD4AF37).withValues(alpha: 0.25),
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Checkbox(
+                              value: allSelected,
+                              activeColor: const Color(0xFFD4AF37),
+                              onChanged: (val) {
+                                setState(() {
+                                  if (val == true) {
+                                    _selectedOrderIds.addAll(orders.map((o) => o.id));
+                                  } else {
+                                    _selectedOrderIds.clear();
+                                  }
+                                });
+                              },
+                            ),
+                            _sortableHeader('الطلب', 'number', flex: 2),
+                            _sortableHeader('الزبون', 'customer', flex: 3),
+                            _sortableHeader('المبلغ', 'amount', flex: 2),
+                            const Expanded(
+                              flex: 2,
+                              child: Text(
+                                'حالة المخزون',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            const SizedBox(width: 80, child: Text('الإجراء', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                          ],
+                        ),
+                      ),
+                      // Scrollable Table Body
+                      Expanded(
+                        child: RefreshIndicator(
+                          onRefresh: () async => _refreshOrders(),
+                          child: ListView.separated(
+                            itemCount: orders.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (context, i) {
+                              final o = orders[i];
+                              final isRowSelected = o.id == selected.id;
+                              final isChecked = _selectedOrderIds.contains(o.id);
+
+                              return InkWell(
+                                onTap: () => setState(() => _selectedOrder = o),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: isRowSelected
+                                        ? const Color(0xFFD4AF37).withValues(alpha: isDark ? 0.15 : 0.10)
+                                        : Colors.transparent,
+                                    border: isRowSelected
+                                        ? const Border(
+                                            right: BorderSide(color: Color(0xFFD4AF37), width: 3),
+                                          )
+                                        : null,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Checkbox(
+                                        value: isChecked,
+                                        activeColor: const Color(0xFFD4AF37),
+                                        onChanged: (val) {
+                                          setState(() {
+                                            if (val == true) {
+                                              _selectedOrderIds.add(o.id);
+                                            } else {
+                                              _selectedOrderIds.remove(o.id);
+                                            }
+                                          });
+                                        },
+                                      ),
+                                      Expanded(
+                                        flex: 2,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '#${o.orderNumber ?? o.id.substring(0, 8)}',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                            ),
+                                            Text(
+                                              _formatDate(o.createdAt),
+                                              style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 3,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              o.customerName ?? o.customerSnapshot?['customer_name'] ?? 'زبون',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            if (o.customerPhone != null || o.customerSnapshot?['phone'] != null)
+                                              Text(
+                                                o.customerPhone ?? o.customerSnapshot?['phone'] ?? '',
+                                                style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                      Expanded(
+                                        flex: 2,
+                                        child: DzdPriceTag(centimes: o.totalAmountCentimes, gold: true),
+                                      ),
+                                      Expanded(
+                                        flex: 2,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            StatusBadge(type: _statusBadgeType(o.status)),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              _stockReservationLabel(o.status),
+                                              style: TextStyle(fontSize: 10, color: _stockReservationColor(o.status)),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      SizedBox(
+                                        width: 80,
+                                        child: actionBuilder(o),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Right side: Master Order Inspector & Action Console (Detail)
+              Expanded(
+                flex: 2,
+                child: Container(
+                  color: isDark ? const Color(0xFF141210) : const Color(0xFFFFFDF8),
+                  child: ListView(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.receipt_long_rounded, color: Color(0xFFD4AF37)),
+                              const SizedBox(width: AppSpacing.xs),
+                              Text(
+                                'طلب #${selected.orderNumber ?? selected.id.substring(0, 8)}',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ],
+                          ),
+                          DzdPriceTag.lg(centimes: selected.totalAmountCentimes, gold: true),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      OrderStateStepper(status: selected.status),
+                      const SizedBox(height: AppSpacing.md),
+                      CustomerLedgerSyncCard(order: selected),
+                      const SizedBox(height: AppSpacing.md),
+                      OrderStockAllocationCard(order: selected, products: products),
+                      const SizedBox(height: AppSpacing.md),
+                      _buildInspectorActions(selected, products, staff),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTabletCardGrid({
+    required List<OrderEntity> orders,
+    required List<ProductEntity> products,
+    required List<Map<String, dynamic>> staff,
+    required Widget Function(OrderEntity) actionBuilder,
+  }) {
     return RefreshIndicator(
       onRefresh: () async => _refreshOrders(),
       child: ListView.separated(
-        padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
+        padding: const EdgeInsets.all(AppSpacing.md),
         itemCount: orders.length,
-        separatorBuilder: (_, __) =>
-            const SizedBox(height: AppSpacing.md),
-        itemBuilder: (context, i) =>
-            _OrderCard(order: orders[i], actionBuilder: actionBuilder),
+        separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
+        itemBuilder: (context, i) {
+          final order = orders[i];
+          return Dismissible(
+            key: Key('order-${order.id}'),
+            direction: DismissDirection.horizontal,
+            background: Container(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              alignment: AlignmentDirectional.centerStart,
+              color: Colors.green.withValues(alpha: 0.8),
+              child: const Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, color: Colors.white, size: 28),
+                  SizedBox(width: AppSpacing.sm),
+                  Text('تأكيد / تجهيز الطلب', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+            secondaryBackground: Container(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+              alignment: AlignmentDirectional.centerEnd,
+              color: Colors.red.withValues(alpha: 0.8),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text('مراجعة / إلغاء', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  SizedBox(width: AppSpacing.sm),
+                  Icon(Icons.cancel_outlined, color: Colors.white, size: 28),
+                ],
+              ),
+            ),
+            confirmDismiss: (dir) async {
+              if (dir == DismissDirection.startToEnd) {
+                if (order.status == OrderStatus.submitted || order.status == OrderStatus.requiresManagerReview) {
+                  _showValidationDialog(order, products);
+                } else if (order.status == OrderStatus.confirmed) {
+                  _showPreparationDialog(order);
+                } else if (order.status == OrderStatus.ready) {
+                  _showAssignDriverDialog(order, staff);
+                }
+              } else {
+                _showValidationDialog(order, products);
+              }
+              return false;
+            },
+            child: InkWell(
+              onTap: () => _showOrderInspectionSheet(order, products, staff),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              child: _OrderCard(
+                order: order,
+                actionBuilder: actionBuilder,
+                products: products,
+                onTap: () => _showOrderInspectionSheet(order, products, staff),
+              ),
+            ),
+          );
+        },
       ),
     );
+  }
+
+  Widget _buildMobileOrderList({
+    required List<OrderEntity> orders,
+    required List<ProductEntity> products,
+    required List<Map<String, dynamic>> staff,
+    required Widget Function(OrderEntity) actionBuilder,
+  }) {
+    return Column(
+      children: [
+        // Offline resilience indicator
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 4),
+          color: Colors.green.withValues(alpha: 0.12),
+          child: const Row(
+            children: [
+              Icon(Icons.cloud_done_rounded, size: 14, color: Colors.green),
+              SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'المزامنة دون اتصال نشطة: يتم حفظ العمليات محلياً ومزامنتها فور توفر الشبكة.',
+                  style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () async => _refreshOrders(),
+            child: ListView.separated(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              itemCount: orders.length,
+              separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
+              itemBuilder: (context, i) {
+                final order = orders[i];
+                return _OrderCard(
+                  order: order,
+                  actionBuilder: actionBuilder,
+                  products: products,
+                  onTap: () => _showOrderInspectionSheet(order, products, staff),
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sortableHeader(String title, String colKey, {required int flex}) {
+    final isCurrent = _sortColumn == colKey;
+    return Expanded(
+      flex: flex,
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            if (_sortColumn == colKey) {
+              _sortAscending = !_sortAscending;
+            } else {
+              _sortColumn = colKey;
+              _sortAscending = true;
+            }
+          });
+        },
+        child: Row(
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: isCurrent ? const Color(0xFFD4AF37) : null,
+              ),
+            ),
+            if (isCurrent)
+              Icon(
+                _sortAscending ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                size: 12,
+                color: const Color(0xFFD4AF37),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _stockReservationLabel(OrderStatus status) {
+    switch (status) {
+      case OrderStatus.confirmed:
+      case OrderStatus.preparing:
+      case OrderStatus.ready:
+        return 'محجوز مؤقتاً';
+      case OrderStatus.assigned:
+      case OrderStatus.accepted:
+      case OrderStatus.outForDelivery:
+      case OrderStatus.delivered:
+      case OrderStatus.settled:
+        return 'مخصوم نهائياً';
+      case OrderStatus.submitted:
+      case OrderStatus.requiresManagerReview:
+        return 'بانتظار التأكيد';
+      case OrderStatus.cancelled:
+      case OrderStatus.refused:
+        return 'محرر من الحجز';
+    }
+  }
+
+  Color _stockReservationColor(OrderStatus status) {
+    switch (status) {
+      case OrderStatus.confirmed:
+      case OrderStatus.preparing:
+      case OrderStatus.ready:
+        return Colors.blueAccent;
+      case OrderStatus.assigned:
+      case OrderStatus.accepted:
+      case OrderStatus.outForDelivery:
+      case OrderStatus.delivered:
+      case OrderStatus.settled:
+        return Colors.green;
+      case OrderStatus.submitted:
+      case OrderStatus.requiresManagerReview:
+        return Colors.amber.shade800;
+      case OrderStatus.cancelled:
+      case OrderStatus.refused:
+        return Colors.red;
+    }
   }
 
   // ─── Shared dialog helpers ────────────────────────────────────────────────
@@ -1343,131 +2190,230 @@ class _PipelineTabBar extends StatelessWidget {
   }
 }
 
-class _OrderCard extends StatelessWidget {
+class _OrderCard extends StatefulWidget {
   final OrderEntity order;
   final Widget Function(OrderEntity) actionBuilder;
+  final List<ProductEntity>? products;
+  final VoidCallback? onTap;
 
-  const _OrderCard({required this.order, required this.actionBuilder});
+  const _OrderCard({
+    required this.order,
+    required this.actionBuilder,
+    this.products,
+    this.onTap,
+  });
+
+  @override
+  State<_OrderCard> createState() => _OrderCardState();
+}
+
+class _OrderCardState extends State<_OrderCard> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final order = widget.order;
 
     return LuxuryCard(
-      child: Padding(
-        padding: const EdgeInsetsDirectional.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header: order number + total
-            Row(
-              children: [
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: AppGradients.gold,
-                    borderRadius: AppRadius.xsAll,
-                    boxShadow: [AppShadows.goldGlowSm],
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: Padding(
+          padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header: order number + state badge + total
+              Row(
+                children: [
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: AppGradients.gold,
+                      borderRadius: AppRadius.xsAll,
+                      boxShadow: [AppShadows.goldGlowSm],
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.all(4),
+                      child: Icon(Icons.receipt_long_rounded,
+                          size: 14, color: Color(0xFF1A1400)),
+                    ),
                   ),
-                  child: Padding(
-                    padding: EdgeInsets.all(4),
-                    child: Icon(Icons.receipt_long_rounded,
-                        size: 14, color: Color(0xFF1A1400)),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'طلب #${order.orderNumber ?? order.id.substring(0, 8)}',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
                   ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    'طلب #${order.orderNumber ?? order.id.substring(0, 8)}',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 15),
-                  ),
-                ),
-                DzdPriceTag.lg(
-                    centimes: order.totalAmountCentimes, gold: true),
-              ],
-            ),
-            const GoldDivider(
-                margin: EdgeInsets.symmetric(vertical: AppSpacing.sm)),
+                  DzdPriceTag.lg(
+                      centimes: order.totalAmountCentimes, gold: true),
+                ],
+              ),
+              const SizedBox(height: 6),
+              // State Machine Stepper (compact inline)
+              OrderStateStepper(status: order.status, compact: true),
+              const GoldDivider(
+                  margin: EdgeInsets.symmetric(vertical: AppSpacing.sm)),
 
-            // Customer info + meta
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.person_outline,
-                              size: 13, color: Colors.grey),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              order.customerName ??
-                                  order.customerSnapshot?[
-                                      'customer_name'] ??
-                                  order.customerSnapshot?[
-                                      'store_name'] ??
-                                  'زبون',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13),
-                              overflow: TextOverflow.ellipsis,
+              // Customer info + meta
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.person_outline,
+                                size: 13, color: Colors.grey),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                order.customerName ??
+                                    order.customerSnapshot?[
+                                        'customer_name'] ??
+                                    order.customerSnapshot?[
+                                        'store_name'] ??
+                                    'زبون',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
+                          ],
+                        ),
+                        if (order.customerPhone != null ||
+                            order.customerSnapshot?['phone'] != null)
+                          _miniRow(
+                            Icons.phone_outlined,
+                            order.customerPhone ??
+                                order.customerSnapshot?['phone'],
                           ),
-                        ],
+                        if (order.customerSnapshot?['address'] != null ||
+                            order.customerSnapshot?['address_text'] !=
+                                null)
+                          _miniRow(
+                            Icons.location_on_outlined,
+                            order.customerSnapshot?['address'] ??
+                                order.customerSnapshot?['address_text'],
+                          ),
+                        if (order.driverName != null)
+                          _miniRow(
+                            Icons.local_shipping_rounded,
+                            'السائق: ${order.driverName}',
+                            color: isDark
+                                ? const Color(0xFFF3D278)
+                                : const Color(0xFFC59B27),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      StatusBadge(type: _statusBadgeType(order.status)),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text('${order.items.length} أصناف',
+                          style: theme.textTheme.bodySmall),
+                      Text(
+                        _formatDate(order.createdAt),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant),
                       ),
-                      if (order.customerPhone != null ||
-                          order.customerSnapshot?['phone'] != null)
-                        _miniRow(
-                          Icons.phone_outlined,
-                          order.customerPhone ??
-                              order.customerSnapshot?['phone'],
+                    ],
+                  ),
+                ],
+              ),
+
+              // Progressive Disclosure Toggle (Items & Stock Accordion)
+              const SizedBox(height: AppSpacing.sm),
+              InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                        size: 18,
+                        color: const Color(0xFFD4AF37),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _expanded ? 'إخفاء تفاصيل السلع' : 'عرض تفاصيل السلع وحجز المخزون (${order.items.length})',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? const Color(0xFFF3D278) : const Color(0xFF916A08),
                         ),
-                      if (order.customerSnapshot?['address'] != null ||
-                          order.customerSnapshot?['address_text'] !=
-                              null)
-                        _miniRow(
-                          Icons.location_on_outlined,
-                          order.customerSnapshot?['address'] ??
-                              order.customerSnapshot?['address_text'],
-                        ),
-                      if (order.driverName != null)
-                        _miniRow(
-                          Icons.local_shipping_rounded,
-                          'السائق: ${order.driverName}',
-                          color: isDark
-                              ? const Color(0xFFF3D278)
-                              : const Color(0xFFC59B27),
-                        ),
+                      ),
                     ],
                   ),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    StatusBadge(type: _statusBadgeType(order.status)),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text('${order.items.length} أصناف',
-                        style: theme.textTheme.bodySmall),
-                    Text(
-                      _formatDate(order.createdAt),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant),
+              ),
+
+              if (_expanded) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF141210) : const Color(0xFFFBF8F0),
+                    borderRadius: AppRadius.smAll,
+                    border: Border.all(
+                      color: const Color(0xFFD4AF37).withValues(alpha: 0.2),
                     ),
-                  ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ...order.items.map((it) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '• ${it.productName} (×${it.quantity})',
+                                  style: const TextStyle(fontSize: 11),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              DzdPriceTag(centimes: it.lineTotalCentimes),
+                            ],
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 4),
+                      Text(
+                        'قاعدة التخصيص: مؤكدة = حجز مؤقت بالمخزون | شحن = خصم نهائي',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: actionBuilder(order),
-            ),
-          ],
+
+              const SizedBox(height: AppSpacing.md),
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 48),
+                child: Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: widget.actionBuilder(order),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

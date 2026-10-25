@@ -138,6 +138,33 @@ class ManagerCommandCenterView extends ConsumerWidget {
           ),
           AppSpacing.gapLg,
 
+          // ── Desktop Shortcuts Ribbon ────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF191714) : const Color(0xFFF9F6EE),
+              borderRadius: AppRadius.smAll,
+              border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.2)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.keyboard_outlined, size: 16, color: Color(0xFFD4AF37)),
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  'اختصارات لوحة المفاتيح:',
+                  style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                _shortcutBadge('Ctrl + F', 'بحث شامل'),
+                const SizedBox(width: AppSpacing.xs),
+                _shortcutBadge('Ctrl + N', 'فاتورة جديدة'),
+                const SizedBox(width: AppSpacing.xs),
+                _shortcutBadge('Esc', 'إلغاء وإغلاق'),
+              ],
+            ),
+          ),
+          AppSpacing.gapLg,
+
           // ── 2. Live KPI Pulse Metrics ──────────────────────────────────────
           LayoutBuilder(
             builder: (context, constraints) {
@@ -643,4 +670,29 @@ class _ActionLauncherTile extends StatelessWidget {
       ),
     );
   }
+}
+
+Widget _shortcutBadge(String keyCombo, String label) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color: const Color(0xFFD4AF37).withValues(alpha: 0.15),
+      borderRadius: BorderRadius.circular(4),
+      border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.3)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          keyCombo,
+          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFD4AF37)),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 10),
+        ),
+      ],
+    ),
+  );
 }

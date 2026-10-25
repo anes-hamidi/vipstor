@@ -23,6 +23,7 @@ class StockTransferDialog extends ConsumerStatefulWidget {
 class _StockTransferDialogState extends ConsumerState<StockTransferDialog> {
   InventoryLocationEntity _sourceLocation = InventoryLocationEntity.mainWarehouse;
   InventoryLocationEntity _targetLocation = InventoryLocationEntity.retailFloor;
+  TransferStatus _selectedStatus = TransferStatus.inTransit;
 
   String? _selectedProductId;
   final _qtyController = TextEditingController(text: '1');
@@ -106,7 +107,7 @@ class _StockTransferDialogState extends ConsumerState<StockTransferDialog> {
         sourceLocationName: _sourceLocation.nameAr,
         targetLocationId: _targetLocation.id,
         targetLocationName: _targetLocation.nameAr,
-        status: TransferStatus.pending,
+        status: _selectedStatus,
         requestedByUserId: authUser?.id ?? 'manager',
         requestedByName: authUser?.name ?? 'مدير المخزون',
         createdAt: DateTime.now(),
@@ -248,6 +249,39 @@ class _StockTransferDialogState extends ConsumerState<StockTransferDialog> {
                     ),
                   ),
                 ],
+              ),
+              // In-Transit status banner & toggle
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF9C27B0).withValues(alpha: 0.10),
+                  borderRadius: AppRadius.smAll,
+                  border: Border.all(
+                    color: const Color(0xFF9C27B0).withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.local_shipping_outlined, color: Color(0xFF9C27B0), size: 18),
+                    const SizedBox(width: AppSpacing.xs),
+                    Expanded(
+                      child: Text(
+                        _selectedStatus == TransferStatus.inTransit
+                            ? 'الحالة: في الطريق (In-Transit) — تُخصم البضائع فوراً من المصدر وتُحفظ كـ "في الطريق" لمنع الفقدان الوهمي حتى تأكيد الاستلام.'
+                            : 'الحالة: مسودة قيد الانتظار (Pending) — لا تؤثر على الأرصدة حتى يتم اعتماد النقل.',
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    ChoiceChip(
+                      label: const Text('في الطريق (In-Transit)', style: TextStyle(fontSize: 10)),
+                      selected: _selectedStatus == TransferStatus.inTransit,
+                      onSelected: (val) {
+                        if (val) setState(() => _selectedStatus = TransferStatus.inTransit);
+                      },
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: AppSpacing.md),
 

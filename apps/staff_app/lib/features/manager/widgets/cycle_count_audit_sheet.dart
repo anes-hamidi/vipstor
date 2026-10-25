@@ -24,6 +24,7 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
   final _searchController = TextEditingController();
   String _search = '';
   bool _onlyDiscrepancies = false;
+  String _abcFilter = 'all'; // 'all', 'A', 'B', 'C'
   bool _isReconciling = false;
   final _reconciliationNotesCtrl = TextEditingController();
 
@@ -33,6 +34,17 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
     _searchController.dispose();
     _reconciliationNotesCtrl.dispose();
     super.dispose();
+  }
+
+  String _getAbcClass(CycleCountItemEntity item) {
+    final value = item.systemStock * item.unitCostCentimes;
+    if (item.unitCostCentimes >= 500000 || value >= 5000000) {
+      return 'A'; // High-value items: weekly audit
+    } else if (item.unitCostCentimes >= 100000 || value >= 1000000) {
+      return 'B'; // Medium items: bi-weekly audit
+    } else {
+      return 'C'; // Bulk/low-cost: monthly audit
+    }
   }
 
   Future<void> _startNewAudit() async {
@@ -201,6 +213,7 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
   Widget _buildActiveAuditView(CycleCountAuditEntity audit, ThemeData theme, bool isDark) {
     final filteredItems = audit.items.where((it) {
       if (_onlyDiscrepancies && !it.hasDiscrepancy) return false;
+      if (_abcFilter != 'all' && _getAbcClass(it) != _abcFilter) return false;
       if (_search.isNotEmpty) {
         final q = _search.toLowerCase();
         return it.productName.toLowerCase().contains(q) ||
@@ -259,7 +272,63 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
         ),
         const Divider(height: 1),
 
-        // Controls bar: Search + Filter only discrepancies
+        // ABC Analysis & Filter Bar
+        Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                FilterChip(
+                  selected: _abcFilter == 'all',
+                  label: const Text('جميع الأصناف'),
+                  onSelected: (_) => setState(() => _abcFilter = 'all'),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                FilterChip(
+                  selected: _abcFilter == 'A',
+                  avatar: const CircleAvatar(
+                    backgroundColor: Color(0xFFD4AF37),
+                    radius: 8,
+                    child: Text('A', style: TextStyle(fontSize: 9, color: Colors.black, fontWeight: FontWeight.bold)),
+                  ),
+                  label: const Text('فئة A (عالية القيمة - أسبوعي)'),
+                  onSelected: (_) => setState(() => _abcFilter = 'A'),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                FilterChip(
+                  selected: _abcFilter == 'B',
+                  avatar: const CircleAvatar(
+                    backgroundColor: Colors.blueAccent,
+                    radius: 8,
+                    child: Text('B', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                  label: const Text('فئة B (متوسطة - نصف شهري)'),
+                  onSelected: (_) => setState(() => _abcFilter = 'B'),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                FilterChip(
+                  selected: _abcFilter == 'C',
+                  avatar: const CircleAvatar(
+                    backgroundColor: Colors.grey,
+                    radius: 8,
+                    child: Text('C', style: TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                  label: const Text('فئة C (حجمية وعادية - شهري)'),
+                  onSelected: (_) => setState(() => _abcFilter = 'C'),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                FilterChip(
+                  selected: _onlyDiscrepancies,
+                  label: Text('الفروقات فقط (${audit.discrepantItemsCount})'),
+                  onSelected: (val) => setState(() => _onlyDiscrepancies = val),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // Controls bar: Search
         Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Row(
@@ -295,12 +364,6 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
                   onChanged: (v) => setState(() => _search = v.trim()),
                 ),
               ),
-              const SizedBox(width: AppSpacing.md),
-              FilterChip(
-                selected: _onlyDiscrepancies,
-                label: Text('الفروقات فقط (${audit.discrepantItemsCount})'),
-                onSelected: (val) => setState(() => _onlyDiscrepancies = val),
-              ),
             ],
           ),
         ),
@@ -317,6 +380,7 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
                     final item = filteredItems[i];
                     return _AuditItemRow(
                       item: item,
+                      abcClass: _getAbcClass(item),
                       isReadOnly: audit.status != AuditStatus.inProgress,
                       onCountChanged: (newCount) {
                         ref.read(inventoryRepositoryProvider).recordPhysicalCount(
@@ -324,7 +388,6 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
                               productId: item.productId,
                               physicalCount: newCount,
                             );
-                        // Update in-memory audit state
                         final updatedItems = audit.items.map((it) {
                           if (it.productId == item.productId) {
                             return it.copyWith(physicalCount: newCount);
@@ -375,11 +438,13 @@ class _CycleCountAuditSheetState extends ConsumerState<CycleCountAuditSheet> {
 
 class _AuditItemRow extends StatelessWidget {
   final CycleCountItemEntity item;
+  final String? abcClass;
   final bool isReadOnly;
   final ValueChanged<int> onCountChanged;
 
   const _AuditItemRow({
     required this.item,
+    this.abcClass,
     required this.isReadOnly,
     required this.onCountChanged,
   });
@@ -393,6 +458,23 @@ class _AuditItemRow extends StatelessWidget {
     final varianceColor = variance == 0
         ? Colors.grey
         : (variance > 0 ? Colors.green : Colors.red);
+
+    Color abcBg;
+    String abcLabel;
+    switch (abcClass) {
+      case 'A':
+        abcBg = const Color(0xFFD4AF37);
+        abcLabel = 'فئة A • جرد أسبوعي';
+        break;
+      case 'B':
+        abcBg = Colors.blueAccent;
+        abcLabel = 'فئة B • نصف شهري';
+        break;
+      default:
+        abcBg = Colors.grey;
+        abcLabel = 'فئة C • شهري';
+        break;
+    }
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -412,10 +494,35 @@ class _AuditItemRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  item.productName,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  children: [
+                    if (abcClass != null) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        margin: const EdgeInsetsDirectional.only(end: 6),
+                        decoration: BoxDecoration(
+                          color: abcBg.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: abcBg, width: 0.8),
+                        ),
+                        child: Text(
+                          abcLabel,
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? const Color(0xFFF3D278) : abcBg,
+                          ),
+                        ),
+                      ),
+                    ],
+                    Expanded(
+                      child: Text(
+                        item.productName,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(
