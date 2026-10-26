@@ -114,7 +114,7 @@ jobs:
   # ===========================================================================
   plan:
     name: Plan release
-    runs-on: self-hosted
+    runs-on: windows-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       version: ${{ steps.plan.outputs.version }}
@@ -169,7 +169,7 @@ jobs:
   release:
     name: ${{ matrix.app }} / ${{ matrix.platform }}
     needs: plan
-    runs-on: self-hosted
+    runs-on: windows-latest
     timeout-minutes: 75
     strategy:
       fail-fast: false
