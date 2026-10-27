@@ -27,7 +27,6 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
   double? _lat;
   double? _lng;
   bool _locating = false;
-  bool _lookingUp = false;
   bool _saving = false;
 
   @override
@@ -114,40 +113,6 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
       _toast('تعذر تحديد الموقع، أدخل العنوان يدوياً');
     } finally {
       if (mounted) setState(() => _locating = false);
-    }
-  }
-
-  Future<void> _lookup() async {
-    if (_lookingUp) return;
-    if (!CustomerProfileInfo.isValidPhone(_phone.text)) {
-      _toast('أدخل رقم هاتف صحيحاً أولاً');
-      return;
-    }
-    setState(() => _lookingUp = true);
-    try {
-      final found = await ref
-          .read(customerProfileProvider.notifier)
-          .lookupCustomerByPhone(_phone.text);
-      if (!mounted) return;
-      if (found) {
-        final p = ref.read(customerProfileProvider);
-        _name.text    = p.name;
-        _wilaya.text  = p.wilaya;
-        _commune.text = p.commune;
-        _address.text = p.addressText;
-        setState(() {
-          _lat = p.latitude;
-          _lng = p.longitude;
-        });
-        _toast('تم استرجاع بيانات حسابك بنجاح');
-      } else {
-        _toast('لا يوجد حساب بهذا الرقم، أكمل البيانات لإنشاء حساب جديد');
-      }
-    } catch (e) {
-      final msg = e.toString().replaceFirst('Exception: ', '');
-      _toast(msg.isNotEmpty ? msg : 'تعذر البحث الآن، تحقق من الاتصال');
-    } finally {
-      if (mounted) setState(() => _lookingUp = false);
     }
   }
 
@@ -263,28 +228,15 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
                 const SizedBox(height: AppSpacing.sm),
                 TextFormField(
                   controller: _phone,
+                  readOnly: true,
                   keyboardType: TextInputType.phone,
                   textInputAction: TextInputAction.next,
                   validator: _validatePhone,
-                  decoration: InputDecoration(
-                    labelText: 'رقم الهاتف *',
+                  decoration: const InputDecoration(
+                    labelText: 'رقم الهاتف المؤكد *',
                     helperText:
-                        'لديك حساب سابق؟ اضغط بحث لاسترجاع بياناتك',
-                    prefixIcon: const Icon(Icons.phone_rounded),
-                    suffixIcon: _lookingUp
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator
-                                    .adaptive(strokeWidth: 2)),
-                          )
-                        : IconButton(
-                            tooltip: 'بحث عن حساب مسجل',
-                            icon: const Icon(Icons.search_rounded),
-                            onPressed: _lookup,
-                          ),
+                        'رقم الهاتف مؤكد عبر رمز SMS ولا يمكن تغييره من هنا.',
+                    prefixIcon: Icon(Icons.phone_rounded),
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -370,14 +322,14 @@ class _OnboardingHero extends StatelessWidget {
           // Gold icon
           const DecoratedBox(
             decoration: BoxDecoration(
-              gradient: AppGradients.gold,
+              gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               shape: BoxShape.circle,
-              boxShadow: [AppShadows.goldGlow],
+              boxShadow: [BoxShadow(color: Color(0x501DAB61), blurRadius: 14, offset: Offset(0,5))],
             ),
             child: Padding(
               padding: EdgeInsets.all(AppSpacing.lg),
               child: Icon(Icons.storefront_rounded,
-                  size: 36, color: Color(0xFF1A1400)),
+                  size: 36, color: Colors.white),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -440,22 +392,22 @@ class _GpsCard extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              gradient: hasLocation ? AppGradients.gold : null,
+              gradient: hasLocation ? const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight) : null,
               color: hasLocation
                   ? null
                   : (isDark
                       ? const Color(0xFF2A2518)
                       : const Color(0xFFF3E8C8)),
               borderRadius: AppRadius.smAll,
-              boxShadow: hasLocation ? [AppShadows.goldGlowSm] : null,
+              boxShadow: hasLocation ? [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))] : null,
             ),
             child: Icon(
               hasLocation ? Icons.location_on_rounded : Icons.my_location_rounded,
               size: 20,
               color: hasLocation
-                  ? const Color(0xFF1A1400)
+                  ? Colors.white
                   : (isDark
-                      ? const Color(0xFFF3D278)
+                      ? const Color(0xFF72DFA0)
                       : const Color(0xFFC59B27)),
             ),
           ),
@@ -471,7 +423,7 @@ class _GpsCard extends StatelessWidget {
                     fontSize: 13,
                     color: hasLocation
                         ? (isDark
-                            ? const Color(0xFFF3D278)
+                            ? const Color(0xFF72DFA0)
                             : const Color(0xFFC59B27))
                         : null,
                   ),

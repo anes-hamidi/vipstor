@@ -26,14 +26,14 @@ class WalletScreen extends ConsumerWidget {
           children: [
             DecoratedBox(
               decoration: BoxDecoration(
-                gradient: AppGradients.gold,
+                gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: AppRadius.smAll,
-                boxShadow: [AppShadows.goldGlowSm],
+                boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
               ),
               child: Padding(
                 padding: EdgeInsets.all(5),
                 child: Icon(Icons.account_balance_wallet_rounded,
-                    size: 16, color: Color(0xFF1A1400)),
+                    size: 16, color: Colors.white),
               ),
             ),
             SizedBox(width: AppSpacing.sm),
@@ -88,9 +88,9 @@ class _WalletBody extends ConsumerWidget {
     final hasAccount = profile.hasAccount;
 
     return RefreshIndicator(
-      color: const Color(0xFFD4AF37),
+      color: const Color(0xFF1DAB61),
       backgroundColor:
-          isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+          isDark ? const Color(0xFF131B16) : const Color(0xFFEEF5F0),
       onRefresh: onRefresh,
       child: ContentConstrainedBox.dashboard(
         child: ListView(
@@ -139,7 +139,7 @@ class _WalletBody extends ConsumerWidget {
                             horizontal: 7, vertical: 1.5),
                         decoration: BoxDecoration(
                           color:
-                              const Color(0xFFD4AF37).withValues(alpha: 0.14),
+                              const Color(0xFF1DAB61).withValues(alpha: 0.14),
                           borderRadius: AppRadius.pillAll,
                         ),
                         child: Text(
@@ -148,8 +148,8 @@ class _WalletBody extends ConsumerWidget {
                             fontSize: 9,
                             fontWeight: FontWeight.bold,
                             color: isDark
-                                ? const Color(0xFFF3D278)
-                                : const Color(0xFF9A7319),
+                                ? const Color(0xFF72DFA0)
+                                : const Color(0xFF0A6B3A),
                           ),
                         ),
                       ),
@@ -230,7 +230,7 @@ class _WalletHero extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: AppGradients.obsidianHero,
         borderRadius: AppRadius.xlAll,
-        border: Border.all(color: const Color(0x40D4AF37)),
+        border: Border.all(color: const Color(0x401DAB61)),
         boxShadow: AppShadows.cardElevatedDark,
       ),
       child: Column(
@@ -284,7 +284,7 @@ class _WalletHero extends StatelessWidget {
             style: const TextStyle(fontSize: 30),
           ),
           const SizedBox(height: AppSpacing.md),
-          const GoldDivider(height: 0.7),
+          Container(height: 0.7, margin: const EdgeInsets.symmetric(vertical: 8), decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0x001DAB61), Color(0xFF1DAB61), Color(0x001DAB61)]))),
           const SizedBox(height: AppSpacing.md),
           Row(
             children: [
@@ -299,7 +299,7 @@ class _WalletHero extends StatelessWidget {
               Container(
                 width: 1,
                 height: 28,
-                color: const Color(0x30D4AF37),
+                color: const Color(0x301DAB61),
               ),
               Expanded(
                 child: _HeroMetric(
@@ -422,7 +422,7 @@ class _CreditSummary extends StatelessWidget {
             title: 'إجمالي الدين',
             value: DzdFormatter.formatCentimes(snapshot.currentDebtCentimes),
             icon: Icons.account_balance_wallet_outlined,
-            accentColor: overLimit ? colors.cancelled : const Color(0xFFD4AF37),
+            accentColor: overLimit ? colors.cancelled : const Color(0xFF1DAB61),
             subtitle: overLimit ? 'تجاوز السقف المسموح' : 'على الحساب',
           ),
         ),
@@ -471,12 +471,12 @@ class _UnpaidOrderCard extends StatelessWidget {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFD4AF37)
+                  color: const Color(0xFF1DAB61)
                       .withValues(alpha: isDark ? 0.16 : 0.10),
                   borderRadius: AppRadius.smAll,
                 ),
                 child: const Icon(Icons.receipt_long_outlined,
-                    size: 16, color: Color(0xFFD4AF37)),
+                    size: 16, color: const Color(0xFF1DAB61)),
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
@@ -639,7 +639,7 @@ class _WalletNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final gold = isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319);
+    final accent = isDark ? const Color(0xFF72DFA0) : const Color(0xFF0A6B3A);
     final local = fetchedAt?.toLocal();
     final stamp = local == null
         ? ''
@@ -648,10 +648,10 @@ class _WalletNotice extends StatelessWidget {
       padding: const EdgeInsetsDirectional.symmetric(
           horizontal: AppSpacing.md, vertical: AppSpacing.sm),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2A2212) : const Color(0xFFFFF7DE),
+        color: isDark ? const Color(0xFF0D1F18) : const Color(0xFFE8F7EF),
         borderRadius: AppRadius.mdAll,
         border: Border.all(
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.35),
+          color: const Color(0xFF1DAB61).withValues(alpha: 0.35),
         ),
       ),
       child: Row(
@@ -659,7 +659,7 @@ class _WalletNotice extends StatelessWidget {
           Icon(
             offline ? Icons.wifi_off_rounded : Icons.cloud_off_rounded,
             size: 16,
-            color: gold,
+            color: accent,
           ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
@@ -704,16 +704,16 @@ class _EmptySection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = context.appColors;
-    final color = success ? colors.success : const Color(0xFFD4AF37);
+    final color = success ? colors.success : const Color(0xFF1DAB61);
     return Container(
       padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: theme.brightness == Brightness.dark
-            ? const Color(0xFF171512)
-            : const Color(0xFFFFFDF8),
+            ? const Color(0xFF131B16)
+            : const Color(0xFFEEF5F0),
         borderRadius: AppRadius.lgAll,
         border: Border.all(
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.18),
+          color: const Color(0xFF1DAB61).withValues(alpha: 0.18),
         ),
       ),
       child: Row(
@@ -768,14 +768,14 @@ class _NoAccountCard extends StatelessWidget {
         children: [
           const DecoratedBox(
             decoration: BoxDecoration(
-              gradient: AppGradients.gold,
+              gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               shape: BoxShape.circle,
-              boxShadow: [AppShadows.goldGlow],
+              boxShadow: [BoxShadow(color: Color(0x501DAB61), blurRadius: 14, offset: Offset(0,5))],
             ),
             child: Padding(
               padding: EdgeInsets.all(AppSpacing.md),
               child: Icon(Icons.account_balance_wallet_rounded,
-                  size: 30, color: Color(0xFF1A1400)),
+                  size: 30, color: Colors.white),
             ),
           ),
           const SizedBox(height: AppSpacing.md),
@@ -818,17 +818,17 @@ class _PaymentHint extends StatelessWidget {
     return Container(
       padding: const EdgeInsetsDirectional.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1A1814) : const Color(0xFFFBF4DC),
+        color: isDark ? const Color(0xFF131B16) : const Color(0xFFDFF7EC),
         borderRadius: AppRadius.mdAll,
         border: Border.all(
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.22),
+          color: const Color(0xFF1DAB61).withValues(alpha: 0.22),
         ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(Icons.info_outline_rounded,
-              size: 16, color: Color(0xFFD4AF37)),
+              size: 16, color: const Color(0xFF1DAB61)),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(

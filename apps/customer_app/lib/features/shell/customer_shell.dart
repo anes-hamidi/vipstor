@@ -23,6 +23,9 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
   int _index = 0;
   bool _checkedUpdate = false;
 
+  // ── Algomend brand color ────────────────────────────────────────────────
+  static const _algomendGreen = Color(0xFF1DAB61);
+
   static const _destinations = [
     (
       icon: Icons.storefront_outlined,
@@ -87,7 +90,6 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    final brand = context.roleTheme.roleBrandColor;
     final cartCount = ref.watch(
       customerCartProvider.select(
         (items) => items.fold<int>(0, (sum, item) => sum + item.quantity),
@@ -110,7 +112,7 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
           color: scheme.surfaceContainerLow,
           border: Border(
             top: BorderSide(
-              color: brand.withValues(alpha: isDark ? 0.26 : 0.18),
+              color: _algomendGreen.withValues(alpha: isDark ? 0.30 : 0.20),
             ),
           ),
           boxShadow: isDark ? AppShadows.navDark : AppShadows.navLight,
@@ -129,6 +131,7 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
                     label: dest.label,
                     selected: selected,
                     badge: i == 0 && cartCount > 0 ? cartCount : null,
+                    brandColor: _algomendGreen,
                     onTap: () => setState(() => _index = i),
                   ),
                 );
@@ -146,12 +149,14 @@ class _ShellNavItem extends StatelessWidget {
   final String label;
   final bool selected;
   final int? badge;
+  final Color brandColor;
   final VoidCallback onTap;
 
   const _ShellNavItem({
     required this.icon,
     required this.label,
     required this.selected,
+    required this.brandColor,
     required this.onTap,
     this.badge,
   });
@@ -160,7 +165,6 @@ class _ShellNavItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final brand = context.roleTheme.roleBrandColor;
 
     return Semantics(
       selected: selected,
@@ -168,7 +172,7 @@ class _ShellNavItem extends StatelessWidget {
       label: label,
       child: InkWell(
         onTap: onTap,
-        splashColor: brand.withValues(alpha: 0.14),
+        splashColor: brandColor.withValues(alpha: 0.14),
         highlightColor: Colors.transparent,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -177,12 +181,12 @@ class _ShellNavItem extends StatelessWidget {
               duration: const Duration(milliseconds: 220),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
               decoration: BoxDecoration(
-                color: selected ? brand : null,
+                color: selected ? brandColor : null,
                 borderRadius: AppRadius.pillAll,
                 boxShadow: selected
                     ? [
                         BoxShadow(
-                          color: brand.withValues(alpha: 0.35),
+                          color: brandColor.withValues(alpha: 0.35),
                           blurRadius: 10,
                           offset: const Offset(0, 3),
                         ),
@@ -196,7 +200,7 @@ class _ShellNavItem extends StatelessWidget {
                     icon,
                     size: 21,
                     color: selected
-                        ? scheme.onPrimary
+                        ? Colors.white
                         : scheme.onSurfaceVariant.withValues(alpha: 0.72),
                   ),
                   if (badge != null)
@@ -237,7 +241,7 @@ class _ShellNavItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-                color: selected ? brand : scheme.onSurfaceVariant,
+                color: selected ? brandColor : scheme.onSurfaceVariant,
               ),
             ),
           ],

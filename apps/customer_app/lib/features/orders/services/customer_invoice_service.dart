@@ -82,7 +82,7 @@ class CustomerInvoiceService {
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
                           pw.Text(
-                            'مؤسسة VIP للتجارة والتوزيع بالجملة',
+                            'مؤسسة Algomend Digital Systems',
                             style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 13, color: PdfColors.blue900),
                           ),
                           pw.Text(
@@ -214,7 +214,7 @@ class CustomerInvoiceService {
                 pw.SizedBox(height: 4),
                 pw.Center(
                   child: pw.Text(
-                    'تطبيق VIP للطلبات بالجملة - شكراً لثقتكم بنا',
+                    'تطبيق Algomend - شكراً لثقتكم بنا',
                     style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
                   ),
                 ),

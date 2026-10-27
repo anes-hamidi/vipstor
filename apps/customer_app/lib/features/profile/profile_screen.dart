@@ -93,14 +93,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           'متجر الجملة VIP — تجربة طلب راقية وسريعة.\nجميع الحقوق محفوظة.',
       applicationIcon: const DecoratedBox(
         decoration: BoxDecoration(
-          gradient: AppGradients.gold,
+          gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
           borderRadius: AppRadius.mdAll,
-          boxShadow: [AppShadows.goldGlowSm],
+          boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
         ),
         child: Padding(
           padding: EdgeInsets.all(10),
           child: Icon(Icons.diamond_rounded,
-              size: 26, color: Color(0xFF1A1400)),
+              size: 26, color: Colors.white),
         ),
       ),
       children: [
@@ -136,6 +136,30 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
+  Future<void> _signOut() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('تسجيل الخروج'),
+        content: const Text(
+          'سيتم إنهاء جلسة Supabase على هذا الجهاز. ستحتاج إلى رمز SMS جديد للدخول.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('تسجيل الخروج'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await ref.read(customerAuthStateProvider.notifier).signOut();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -155,14 +179,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           children: [
             DecoratedBox(
               decoration: BoxDecoration(
-                gradient: AppGradients.gold,
+                gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: AppRadius.smAll,
-                boxShadow: [AppShadows.goldGlowSm],
+                boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
               ),
               child: Padding(
                 padding: EdgeInsets.all(5),
                 child: Icon(Icons.person_rounded,
-                    size: 16, color: Color(0xFF1A1400)),
+                    size: 16, color: Colors.white),
               ),
             ),
             SizedBox(width: AppSpacing.sm),
@@ -178,9 +202,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ],
       ),
       body: RefreshIndicator(
-        color: const Color(0xFFD4AF37),
+        color: const Color(0xFF1DAB61),
         backgroundColor:
-            isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+            isDark ? const Color(0xFF131B16) : const Color(0xFFEEF5F0),
         onRefresh: _refreshAll,
         child: ContentConstrainedBox.dashboard(
           child: ListView(
@@ -294,13 +318,20 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 subtitle: 'VIP Wholesale · تطبيق الزبائن',
                 onTap: _showAbout,
               ),
+              const SizedBox(height: AppSpacing.sm),
+              _ActionTile(
+                icon: Icons.logout_rounded,
+                title: 'تسجيل الخروج',
+                subtitle: 'إنهاء جلسة هذا الجهاز',
+                destructive: true,
+                onTap: _signOut,
+              ),
               if (widget.onExit != null) ...[
                 const SizedBox(height: AppSpacing.sm),
                 _ActionTile(
-                  icon: Icons.logout_rounded,
+                  icon: Icons.exit_to_app_rounded,
                   title: 'الخروج من المتجر',
                   subtitle: 'العودة إلى التطبيق الرئيسي',
-                  destructive: true,
                   onTap: widget.onExit!,
                 ),
               ],
@@ -349,7 +380,7 @@ class _ProfileHero extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: AppGradients.obsidianHero,
         borderRadius: AppRadius.xlAll,
-        border: Border.all(color: const Color(0x40D4AF37)),
+        border: Border.all(color: const Color(0x401DAB61)),
         boxShadow: AppShadows.cardElevatedDark,
       ),
       child: Column(
@@ -360,13 +391,13 @@ class _ProfileHero extends StatelessWidget {
                 width: 58,
                 height: 58,
                 decoration: BoxDecoration(
-                  gradient: AppGradients.gold,
+                  gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                   shape: BoxShape.circle,
                   border: Border.all(
                     color: const Color(0x66FFFFFF),
                     width: 1.5,
                   ),
-                  boxShadow: const [AppShadows.goldGlow],
+                  boxShadow: const [BoxShadow(color: Color(0x501DAB61), blurRadius: 14, offset: Offset(0,5))],
                 ),
                 alignment: Alignment.center,
                 child: Text(
@@ -374,7 +405,7 @@ class _ProfileHero extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF1A1400),
+                    color: Colors.white,
                   ),
                 ),
               ),
@@ -441,7 +472,7 @@ class _ProfileHero extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   visualDensity: VisualDensity.compact,
                   side: const BorderSide(
-                      color: Color(0x66D4AF37), width: 1),
+                      color: Color(0x661DAB61), width: 1),
                   shape: const RoundedRectangleBorder(
                       borderRadius: AppRadius.mdAll),
                   padding:
@@ -453,14 +484,14 @@ class _ProfileHero extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFFF3D278),
+                    color: Color(0xFF72DFA0),
                   ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          const GoldDivider(height: 0.7),
+          Container(height: 0.7, margin: const EdgeInsets.symmetric(vertical: 8), decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0x001DAB61), Color(0xFF1DAB61), Color(0x001DAB61)]))),
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
@@ -612,7 +643,7 @@ class _StatTile extends StatelessWidget {
     final theme = Theme.of(context);
     final dark = Theme.of(context).brightness == Brightness.dark;
     final color = accent
-        ? (dark ? const Color(0xFFF3D278) : const Color(0xFFC59B27))
+        ? (dark ? const Color(0xFF72DFA0) : const Color(0xFFC59B27))
         : theme.colorScheme.onSurface;
 
     return Material(
@@ -625,10 +656,10 @@ class _StatTile extends StatelessWidget {
               horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
           decoration: BoxDecoration(
             color:
-                dark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+                dark ? const Color(0xFF131B16) : const Color(0xFFEEF5F0),
             borderRadius: AppRadius.mdAll,
             border: Border.all(
-              color: const Color(0xFFD4AF37)
+              color: const Color(0xFF1DAB61)
                   .withValues(alpha: dark ? 0.24 : 0.16),
             ),
           ),
@@ -687,12 +718,12 @@ class _WalletMiniCard extends StatelessWidget {
                 width: 34,
                 height: 34,
                 decoration: const BoxDecoration(
-                  gradient: AppGradients.gold,
+                  gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                   borderRadius: AppRadius.smAll,
-                  boxShadow: [AppShadows.goldGlowSm],
+                  boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
                 ),
                 child: const Icon(Icons.account_balance_wallet_rounded,
-                    size: 17, color: Color(0xFF1A1400)),
+                    size: 17, color: Colors.white),
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
@@ -752,7 +783,7 @@ class _WalletMiniCard extends StatelessWidget {
                     child: Container(
                       height: 5,
                       decoration: const BoxDecoration(
-                        gradient: AppGradients.goldLuminous,
+                        gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                       ),
                     ),
                   ),
@@ -778,8 +809,8 @@ class _WalletMiniCard extends StatelessWidget {
                     fontSize: 9,
                     fontWeight: FontWeight.bold,
                     color: isDark
-                        ? const Color(0xFFF3D278)
-                        : const Color(0xFF9A7319),
+                        ? const Color(0xFF72DFA0)
+                        : const Color(0xFF0A6B3A),
                   ),
                 ),
               ],
@@ -807,7 +838,7 @@ class _AddressCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(Icons.location_on_outlined,
-              size: 18, color: Color(0xFFD4AF37)),
+              size: 18, color: Color(0xFF1DAB61)),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
@@ -887,8 +918,8 @@ class _ActionTile extends StatelessWidget {
     final color = destructive
         ? colors.cancelled
         : accent
-            ? (isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27))
-            : (isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319));
+            ? (isDark ? const Color(0xFF72DFA0) : const Color(0xFFC59B27))
+            : (isDark ? const Color(0xFF72DFA0) : const Color(0xFF0A6B3A));
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.xs),
@@ -903,10 +934,10 @@ class _ActionTile extends StatelessWidget {
                 horizontal: AppSpacing.md, vertical: AppSpacing.sm),
             decoration: BoxDecoration(
               color:
-                  isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+                  isDark ? const Color(0xFF131B16) : const Color(0xFFEEF5F0),
               borderRadius: AppRadius.mdAll,
               border: Border.all(
-                color: const Color(0xFFD4AF37)
+                color: const Color(0xFF1DAB61)
                     .withValues(alpha: isDark ? 0.20 : 0.14),
               ),
             ),
@@ -977,16 +1008,16 @@ class _Footer extends StatelessWidget {
         Icon(
           Icons.diamond_outlined,
           size: 18,
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.50),
+          color: const Color(0xFF1DAB61).withValues(alpha: 0.50),
         ),
         const SizedBox(height: 4),
         Text(
-          'VIP WHOLESALE',
+          'ALGOMEND',
           style: TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.bold,
             letterSpacing: 2,
-            color: const Color(0xFFD4AF37).withValues(alpha: 0.65),
+            color: const Color(0xFF1DAB61).withValues(alpha: 0.65),
           ),
         ),
         Text(

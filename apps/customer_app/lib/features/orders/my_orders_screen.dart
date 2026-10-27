@@ -38,14 +38,14 @@ class _MyOrdersScreenState extends ConsumerState<MyOrdersScreen> {
           children: [
             DecoratedBox(
               decoration: BoxDecoration(
-                gradient: AppGradients.gold,
+                gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: AppRadius.smAll,
-                boxShadow: [AppShadows.goldGlowSm],
+                boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
               ),
               child: Padding(
                 padding: EdgeInsets.all(5),
                 child: Icon(Icons.receipt_long_rounded,
-                    size: 16, color: Color(0xFF1A1400)),
+                    size: 16, color: Colors.white),
               ),
             ),
             SizedBox(width: AppSpacing.sm),
@@ -121,9 +121,9 @@ class _OrdersBody extends ConsumerWidget {
 
     if (snapshot.orders.isEmpty) {
       return RefreshIndicator(
-        color: const Color(0xFFD4AF37),
+        color: const Color(0xFF1DAB61),
         backgroundColor:
-            isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+            isDark ? const Color(0xFF131B16) : const Color(0xFFEEF5F0),
         onRefresh: onRefresh,
         child: LayoutBuilder(
           builder: (context, constraints) => SingleChildScrollView(
@@ -143,9 +143,9 @@ class _OrdersBody extends ConsumerWidget {
     }
 
     return RefreshIndicator(
-      color: const Color(0xFFD4AF37),
+      color: const Color(0xFF1DAB61),
       backgroundColor:
-          isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+          isDark ? const Color(0xFF131B16) : const Color(0xFFEEF5F0),
       onRefresh: onRefresh,
       child: ContentConstrainedBox.dashboard(
         child: ListView(
@@ -284,20 +284,20 @@ class _FilterChip extends StatelessWidget {
             padding: const EdgeInsetsDirectional.symmetric(
                 horizontal: AppSpacing.md, vertical: 6),
             decoration: BoxDecoration(
-              gradient: selected ? AppGradients.gold : null,
+              gradient: selected ? const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight) : null,
               color: selected
                   ? null
                   : (isDark
-                      ? const Color(0xFF1A1814)
-                      : const Color(0xFFFFFDF8)),
+                      ? const Color(0xFF131B16)
+                      : const Color(0xFFEEF5F0)),
               borderRadius: AppRadius.pillAll,
               border: Border.all(
                 color: selected
                     ? Colors.transparent
-                    : const Color(0xFFD4AF37)
+                    : const Color(0xFF1DAB61)
                         .withValues(alpha: isDark ? 0.22 : 0.16),
               ),
-              boxShadow: selected ? const [AppShadows.goldGlowSm] : null,
+              boxShadow: selected ? const [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))] : null,
             ),
             child: Row(
               children: [
@@ -308,7 +308,7 @@ class _FilterChip extends StatelessWidget {
                     fontWeight:
                         selected ? FontWeight.bold : FontWeight.w600,
                     color: selected
-                        ? const Color(0xFF1A1400)
+                        ? Colors.white
                         : theme.colorScheme.onSurface,
                   ),
                 ),
@@ -319,7 +319,7 @@ class _FilterChip extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: selected
                         ? const Color(0x33000000)
-                        : const Color(0xFFD4AF37).withValues(alpha: 0.14),
+                        : const Color(0xFF1DAB61).withValues(alpha: 0.14),
                     borderRadius: AppRadius.pillAll,
                   ),
                   child: Text(
@@ -328,10 +328,10 @@ class _FilterChip extends StatelessWidget {
                       fontSize: 9,
                       fontWeight: FontWeight.bold,
                       color: selected
-                          ? const Color(0xFF1A1400)
+                          ? Colors.white
                           : (isDark
-                              ? const Color(0xFFF3D278)
-                              : const Color(0xFF9A7319)),
+                              ? const Color(0xFF72DFA0)
+                              : const Color(0xFF0A6B3A)),
                     ),
                   ),
                 ),
@@ -378,16 +378,16 @@ class _OrdersNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final gold = isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319);
+    final gold = isDark ? const Color(0xFF72DFA0) : const Color(0xFF0A6B3A);
 
     return Container(
       padding: const EdgeInsetsDirectional.symmetric(
           horizontal: AppSpacing.md, vertical: AppSpacing.sm),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2A2212) : const Color(0xFFFFF7DE),
+        color: isDark ? const Color(0xFF0D1F18) : const Color(0xFFE8F7EF),
         borderRadius: AppRadius.mdAll,
         border: Border.all(
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.35),
+          color: const Color(0xFF1DAB61).withValues(alpha: 0.35),
         ),
       ),
       child: Row(
@@ -496,8 +496,8 @@ class _OrderCard extends ConsumerWidget {
                   Icon(Icons.cloud_upload_outlined,
                       size: 13,
                       color: isDark
-                          ? const Color(0xFFF3D278)
-                          : const Color(0xFF9A7319)),
+                          ? const Color(0xFF72DFA0)
+                          : const Color(0xFF0A6B3A)),
                 ],
                 const Spacer(),
                 Text(
@@ -533,7 +533,7 @@ class _OrderCard extends ConsumerWidget {
                     fontSize: 10.5,
                     fontWeight: FontWeight.bold,
                     color: isDark
-                        ? const Color(0xFFF3D278)
+                        ? const Color(0xFF72DFA0)
                         : const Color(0xFFC59B27),
                   ),
                 ),
@@ -541,7 +541,7 @@ class _OrderCard extends ConsumerWidget {
                 Icon(Icons.arrow_forward_ios_rounded,
                     size: 9,
                     color: isDark
-                        ? const Color(0xFFF3D278)
+                        ? const Color(0xFF72DFA0)
                         : const Color(0xFFC59B27)),
               ],
             ),
@@ -570,16 +570,16 @@ class _ReorderButton extends ConsumerWidget {
             padding:
                 const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: const Color(0xFFD4AF37).withValues(alpha: 0.12),
+              color: const Color(0xFF1DAB61).withValues(alpha: 0.12),
               borderRadius: AppRadius.pillAll,
               border: Border.all(
-                color: const Color(0xFFD4AF37).withValues(alpha: 0.40),
+                color: const Color(0xFF1DAB61).withValues(alpha: 0.40),
               ),
             ),
             child: const Row(
               children: [
                 Icon(Icons.replay_rounded,
-                    size: 11, color: Color(0xFFD4AF37)),
+                    size: 11, color: Color(0xFF1DAB61)),
                 SizedBox(width: 3),
                 Text(
                   'أعد الطلب',
@@ -636,7 +636,7 @@ void _reorder(BuildContext context, WidgetRef ref, OrderEntity order) {
         ),
         action: SnackBarAction(
           label: 'عرض السلة',
-          textColor: const Color(0xFFF3D278),
+          textColor: const Color(0xFF72DFA0),
           onPressed: () => Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => const CartScreen()),
           ),
@@ -661,7 +661,7 @@ class _MiniTimeline extends StatelessWidget {
     final cancelled = order.isCancelled;
     final step = order.timelineStep;
     const labels = ['أُرسل', 'تأكيد', 'تجهيز', 'توصيل', 'تسليم'];
-    final activeColor = cancelled ? colors.cancelled : const Color(0xFFD4AF37);
+    final activeColor = cancelled ? colors.cancelled : const Color(0xFF1DAB61);
     final inactiveColor =
         isDark ? const Color(0xFF3D3620) : const Color(0xFFE4D9B0);
 
@@ -803,10 +803,10 @@ class _OrderDetailSheet extends ConsumerWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF191714) : const Color(0xFFFFFDF8),
+        color: isDark ? const Color(0xFF191714) : const Color(0xFFEEF5F0),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border.all(
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.35),
+          color: const Color(0xFF1DAB61).withValues(alpha: 0.35),
         ),
         boxShadow: AppShadows.dialogLuxury,
       ),
@@ -873,7 +873,7 @@ class _OrderDetailSheet extends ConsumerWidget {
             _PendingNotice(offline: !online),
           ],
           const SizedBox(height: AppSpacing.md),
-          const GoldDivider(),
+          Container(height: 0.7, margin: const EdgeInsets.symmetric(vertical: 8), decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0x001DAB61), Color(0xFF1DAB61), Color(0x001DAB61)]))),
           const SizedBox(height: AppSpacing.md),
           const SectionHeader(title: 'تتبع حالة الطلب'),
           const SizedBox(height: AppSpacing.sm),
@@ -900,7 +900,7 @@ class _OrderDetailSheet extends ConsumerWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.md),
-          const GoldDivider(),
+          Container(height: 0.7, margin: const EdgeInsets.symmetric(vertical: 8), decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0x001DAB61), Color(0xFF1DAB61), Color(0x001DAB61)]))),
           const SizedBox(height: AppSpacing.md),
           SectionHeader(title: 'السلع المطلوبة (${displayOrder.items.length})'),
           const SizedBox(height: AppSpacing.sm),
@@ -917,12 +917,12 @@ class _OrderDetailSheet extends ConsumerWidget {
                       height: 32,
                       decoration: BoxDecoration(
                         gradient:
-                            isDark ? null : AppGradients.goldSubtleLight,
+                            isDark ? null : const LinearGradient(colors: [Color(0x1A1DAB61), Color(0x1A034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                         color: isDark ? const Color(0xFF2A2518) : null,
                         borderRadius: AppRadius.smAll,
                         border: Border.all(
                           color:
-                              const Color(0xFFD4AF37).withValues(alpha: 0.20),
+                              const Color(0xFF1DAB61).withValues(alpha: 0.20),
                         ),
                       ),
                       child: Center(
@@ -932,8 +932,8 @@ class _OrderDetailSheet extends ConsumerWidget {
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
                             color: isDark
-                                ? const Color(0xFFF3D278)
-                                : const Color(0xFF9A7319),
+                                ? const Color(0xFF72DFA0)
+                                : const Color(0xFF0A6B3A),
                           ),
                         ),
                       ),
@@ -990,7 +990,7 @@ class _OrderDetailSheet extends ConsumerWidget {
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(
-                        color: Color(0x66D4AF37), width: 1),
+                        color: Color(0x661DAB61), width: 1),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: const RoundedRectangleBorder(
                         borderRadius: AppRadius.mdAll),
@@ -998,7 +998,7 @@ class _OrderDetailSheet extends ConsumerWidget {
                   onPressed: () =>
                       CustomerInvoiceService.printCustomerOrderInvoice(order),
                   icon: const Icon(Icons.picture_as_pdf_outlined,
-                      size: 16, color: Color(0xFFD4AF37)),
+                      size: 16, color: Color(0xFF1DAB61)),
                   label: const Text(
                     'تنزيل الفاتورة',
                     style: TextStyle(
@@ -1159,20 +1159,20 @@ class _GoldTimeline extends StatelessWidget {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    gradient: isDone ? AppGradients.gold : null,
+                    gradient: isDone ? const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight) : null,
                     color: isDone
                         ? null
                         : (isDark
                             ? const Color(0xFF2A2518)
                             : const Color(0xFFEDE3B8)),
                     borderRadius: AppRadius.smAll,
-                    boxShadow: isDone ? const [AppShadows.goldGlowSm] : null,
+                    boxShadow: isDone ? const [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))] : null,
                   ),
                   child: Icon(
                     isDone ? Icons.check_rounded : step.icon,
                     size: 14,
                     color: isDone
-                        ? const Color(0xFF1A1400)
+                        ? Colors.white
                         : theme.colorScheme.onSurfaceVariant,
                   ),
                 ),
@@ -1182,7 +1182,7 @@ class _GoldTimeline extends StatelessWidget {
                     height: 34,
                     decoration: BoxDecoration(
                       gradient: idx < currentStep
-                          ? AppGradients.goldLuminous
+                          ? const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight)
                           : null,
                       color: idx < currentStep
                           ? null
@@ -1211,8 +1211,8 @@ class _GoldTimeline extends StatelessWidget {
                             fontSize: 12.5,
                             color: isDone
                                 ? (isDark
-                                    ? const Color(0xFFF3D278)
-                                    : const Color(0xFF9A7319))
+                                    ? const Color(0xFF72DFA0)
+                                    : const Color(0xFF0A6B3A))
                                 : theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
@@ -1295,12 +1295,12 @@ class _DriverCard extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: const BoxDecoration(
-              gradient: AppGradients.gold,
+              gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               shape: BoxShape.circle,
-              boxShadow: [AppShadows.goldGlowSm],
+              boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
             ),
             child: const Icon(Icons.local_shipping_rounded,
-                size: 20, color: Color(0xFF1A1400)),
+                size: 20, color: Colors.white),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -1376,7 +1376,7 @@ class _TotalsCard extends StatelessWidget {
           ],
           if (order.dueAmountCentimes > 0) ...[
             const SizedBox(height: AppSpacing.sm),
-            const GoldDivider(),
+            Container(height: 0.7, margin: const EdgeInsets.symmetric(vertical: 8), decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0x001DAB61), Color(0xFF1DAB61), Color(0x001DAB61)]))),
             const SizedBox(height: AppSpacing.sm),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1445,7 +1445,7 @@ class _AddressCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(Icons.location_on_outlined,
-              size: 17, color: Color(0xFFD4AF37)),
+              size: 17, color: Color(0xFF1DAB61)),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(

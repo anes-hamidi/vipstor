@@ -1,5 +1,5 @@
 name: customer_app
-description: Customer mobile & web application for wholesale orders
+description: Algomend — Digital Systems & Enterprise Solutions customer portal
 version: 1.0.0
 publish_to: none
 
@@ -34,7 +34,6 @@ dependencies:
   shared_preferences: ^2.5.6
   cached_network_image: ^3.3.1
   flutter_cache_manager: ^3.4.1
-  crypto: ^3.0.3
   uuid: ^4.4.0
   package_info_plus: ^10.0.0
   open_filex: ^4.5.0

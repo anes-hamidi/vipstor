@@ -156,14 +156,14 @@ class CartScreen extends ConsumerWidget {
           children: [
             const DecoratedBox(
               decoration: BoxDecoration(
-                gradient: AppGradients.gold,
+                gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: AppRadius.smAll,
-                boxShadow: [AppShadows.goldGlowSm],
+                boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
               ),
               child: Padding(
                 padding: EdgeInsets.all(5),
                 child: Icon(Icons.shopping_bag_rounded,
-                    size: 16, color: Color(0xFF1A1400)),
+                    size: 16, color: Colors.white),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
@@ -193,11 +193,11 @@ class CartScreen extends ConsumerWidget {
                     AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.sm),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? const Color(0xFF1A1814)
-                      : const Color(0xFFFFFDF8),
+                      ? const Color(0xFF131B16)
+                      : const Color(0xFFEEF5F0),
                   border: Border(
                     top: BorderSide(
-                      color: const Color(0xFFD4AF37)
+                      color: const Color(0xFF1DAB61)
                           .withValues(alpha: isDark ? 0.24 : 0.16),
                     ),
                   ),
@@ -314,9 +314,9 @@ class CartScreen extends ConsumerWidget {
                 onAction: () => Navigator.pop(context),
               )
             : RefreshIndicator(
-                color: const Color(0xFFD4AF37),
+                color: const Color(0xFF1DAB61),
                 backgroundColor:
-                    isDark ? const Color(0xFF1A1814) : const Color(0xFFFFFDF8),
+                    isDark ? const Color(0xFF131B16) : const Color(0xFFEEF5F0),
                 onRefresh: () => ref
                     .read(customerCatalogProvider.notifier)
                     .refresh(silent: true),
@@ -430,7 +430,7 @@ class _CartLine extends ConsumerWidget {
     final colors = context.appColors;
     final accent = unavailable
         ? theme.colorScheme.error
-        : (overStock ? colors.warning : const Color(0xFFD4AF37));
+        : (overStock ? colors.warning : const Color(0xFF1DAB61));
 
     return LuxuryCard(
       selected: overStock,
@@ -503,8 +503,8 @@ class _CartLine extends ConsumerWidget {
                       color: item.quantity <= 1
                           ? theme.colorScheme.error
                           : (isDark
-                              ? const Color(0xFFF3D278)
-                              : const Color(0xFF9A7319)),
+                              ? const Color(0xFF72DFA0)
+                              : const Color(0xFF0A6B3A)),
                       onTap: () => notifier.updateQuantity(
                           product.id, item.quantity - 1),
                     ),
@@ -521,7 +521,7 @@ class _CartLine extends ConsumerWidget {
                     ),
                     _QtyButton(
                       icon: Icons.add_rounded,
-                      color: const Color(0xFFD4AF37),
+                      color: const Color(0xFF1DAB61),
                       onTap: product.availableQty > item.quantity
                           ? () => notifier.updateQuantity(
                               product.id, item.quantity + 1)
@@ -570,10 +570,10 @@ class _QtyButton extends StatelessWidget {
           width: 28,
           height: 28,
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF221E14) : const Color(0xFFFBF4DC),
+            color: isDark ? const Color(0xFF221E14) : const Color(0xFFDFF7EC),
             borderRadius: AppRadius.smAll,
             border: Border.all(
-              color: const Color(0xFFD4AF37).withValues(alpha: 0.38),
+              color: const Color(0xFF1DAB61).withValues(alpha: 0.38),
               width: 0.8,
             ),
           ),
@@ -617,7 +617,7 @@ class _CartThumb extends StatelessWidget {
         child: Icon(
           Icons.inventory_2_outlined,
           size: 22,
-          color: const Color(0xFFD4AF37).withValues(alpha: 0.42),
+          color: const Color(0xFF1DAB61).withValues(alpha: 0.42),
         ),
       ),
     );
@@ -646,7 +646,7 @@ class _DeliveryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = theme.colorScheme;
-    final gold = isDark ? const Color(0xFFF3D278) : const Color(0xFFC59B27);
+    final gold = isDark ? const Color(0xFF72DFA0) : const Color(0xFFC59B27);
     final colors = context.appColors;
 
     return LuxuryCard(
@@ -661,10 +661,10 @@ class _DeliveryCard extends StatelessWidget {
             width: 32,
             height: 32,
             decoration: BoxDecoration(
-              gradient: needsProfile ? null : AppGradients.gold,
+              gradient: needsProfile ? null : const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               color: needsProfile ? cs.tertiaryContainer : null,
               borderRadius: AppRadius.smAll,
-              boxShadow: needsProfile ? null : const [AppShadows.goldGlowSm],
+              boxShadow: needsProfile ? null : const [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
             ),
             child: Icon(
               needsProfile
@@ -673,7 +673,7 @@ class _DeliveryCard extends StatelessWidget {
               size: 16,
               color: needsProfile
                   ? cs.onTertiaryContainer
-                  : const Color(0xFF1A1400),
+                  : Colors.white,
             ),
           ),
           const SizedBox(width: AppSpacing.sm),

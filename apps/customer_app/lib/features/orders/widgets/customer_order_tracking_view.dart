@@ -217,14 +217,14 @@ class _CustomerOrderTrackingViewState
             decoration: BoxDecoration(
               color: isDark
                   ? const Color(0xFF14120F)
-                  : const Color(0xFFFBF4DC),
+                  : const Color(0xFFDFF7EC),
               border: Border(
                 top: BorderSide(
-                  color: const Color(0xFFD4AF37)
+                  color: const Color(0xFF1DAB61)
                       .withValues(alpha: isDark ? 0.18 : 0.12),
                 ),
                 bottom: BorderSide(
-                  color: const Color(0xFFD4AF37)
+                  color: const Color(0xFF1DAB61)
                       .withValues(alpha: isDark ? 0.18 : 0.12),
                 ),
               ),
@@ -292,7 +292,7 @@ class _CustomerOrderTrackingViewState
                             Polyline(
                               points: [driverPoint, destPoint],
                               strokeWidth: 3.5,
-                              color: const Color(0xFFD4AF37),
+                              color: const Color(0xFF1DAB61),
                               strokeCap: StrokeCap.round,
                             ),
                           ],
@@ -326,13 +326,13 @@ class _CustomerOrderTrackingViewState
                               height: 44,
                               child: const DecoratedBox(
                                 decoration: BoxDecoration(
-                                  gradient: AppGradients.gold,
+                                  gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                                   shape: BoxShape.circle,
-                                  boxShadow: [AppShadows.goldGlow],
+                                  boxShadow: [BoxShadow(color: Color(0x501DAB61), blurRadius: 14, offset: Offset(0,5))],
                                 ),
                                 child: Icon(
                                   Icons.local_shipping_rounded,
-                                  color: Color(0xFF1A1400),
+                                  color: Colors.white,
                                   size: 21,
                                 ),
                               ),
@@ -379,7 +379,7 @@ class _CustomerOrderTrackingViewState
                         child: const Row(
                           children: [
                             Icon(Icons.gps_off_rounded,
-                                size: 10, color: Color(0xFFF3D278)),
+                                size: 10, color: Color(0xFF72DFA0)),
                             SizedBox(width: 3),
                             Text(
                               'بانتظار موقع السائق',
@@ -399,14 +399,14 @@ class _CustomerOrderTrackingViewState
               decoration: BoxDecoration(
                 color: isDark
                     ? const Color(0xFF14120F)
-                    : const Color(0xFFFBF4DC),
+                    : const Color(0xFFDFF7EC),
               ),
               child: Column(
                 children: [
                   Icon(
                     Icons.location_searching_rounded,
                     size: 26,
-                    color: const Color(0xFFD4AF37)
+                    color: const Color(0xFF1DAB61)
                         .withValues(alpha: 0.55),
                   ),
                   const SizedBox(height: AppSpacing.xs),
@@ -538,7 +538,7 @@ class _TrackingStat extends StatelessWidget {
     final color = stale
         ? colors.warning
         : highlight
-            ? (isDark ? const Color(0xFFF3D278) : const Color(0xFF9A7319))
+            ? (isDark ? const Color(0xFF72DFA0) : const Color(0xFF0A6B3A))
             : theme.colorScheme.onSurface;
 
     return Column(
@@ -590,7 +590,7 @@ class _StatDivider extends StatelessWidget {
       width: 1,
       height: 26,
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-      color: const Color(0xFFD4AF37)
+      color: const Color(0xFF1DAB61)
           .withValues(alpha: isDark ? 0.22 : 0.18),
     );
   }
@@ -613,9 +613,9 @@ class _MapButton extends StatelessWidget {
       message: tooltip,
       child: DecoratedBox(
         decoration: const BoxDecoration(
-          gradient: AppGradients.gold,
+          gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
           borderRadius: AppRadius.mdAll,
-          boxShadow: [AppShadows.goldGlowSm],
+          boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
         ),
         child: Material(
           color: Colors.transparent,
@@ -625,7 +625,7 @@ class _MapButton extends StatelessWidget {
             onTap: onTap,
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.sm),
-              child: Icon(icon, size: 17, color: const Color(0xFF1A1400)),
+              child: Icon(icon, size: 17, color: Colors.white),
             ),
           ),
         ),

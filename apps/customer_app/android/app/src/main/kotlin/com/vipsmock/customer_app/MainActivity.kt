@@ -1,4 +1,4 @@
-package com.vipsmock.customer_app
+package com.algomend.customer
 
 import io.flutter.embedding.android.FlutterActivity
 
