@@ -93,7 +93,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           'متجر الجملة VIP — تجربة طلب راقية وسريعة.\nجميع الحقوق محفوظة.',
       applicationIcon: const DecoratedBox(
         decoration: BoxDecoration(
-          gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+          gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
           borderRadius: AppRadius.mdAll,
           boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
         ),
@@ -179,7 +179,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           children: [
             DecoratedBox(
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: AppRadius.smAll,
                 boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
               ),

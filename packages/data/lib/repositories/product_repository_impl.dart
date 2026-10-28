@@ -102,8 +102,7 @@ class ProductRepositoryImpl implements IProductRepository {
   @override
   Future<void> saveProduct(ProductEntity product,
       {int initialOpeningStock = 0, String? userId}) async {
-    final effectiveUserId = await _resolveValidUserId(
-        userId ?? client.auth.currentUser?.id);
+    final effectiveUserId = _requireActorId(userId);
     final openingQty =
         initialOpeningStock > 0 ? initialOpeningStock : product.onHandQty;
 
@@ -142,10 +141,12 @@ class ProductRepositoryImpl implements IProductRepository {
     required int qtyChange,
     required String reason,
     required String userId,
+    required String callerPin,
   }) async {
-    final effectiveUserId = await _resolveValidUserId(userId);
+    final effectiveUserId = _requireActorId(userId);
     await service.adjustStock(
       userId: effectiveUserId,
+      callerPin: callerPin,
       productId: productId,
       qtyChange: qtyChange,
       reason: reason,
@@ -402,24 +403,14 @@ class ProductRepositoryImpl implements IProductRepository {
     );
   }
 
-  Future<String> _resolveValidUserId(String? candidateId) async {
-    if (candidateId != null &&
-        candidateId.isNotEmpty &&
-        candidateId != '22222222-2222-2222-2222-222222222222') {
-      try {
-        final rows = await client
-            .from('users')
-            .select('id')
-            .eq('id', candidateId)
-            .limit(1);
-        if ((rows as List).isNotEmpty) return candidateId;
-      } catch (_) {}
+  String _requireActorId(String? candidateId) {
+    final id = (candidateId == null || candidateId.trim().isEmpty)
+        ? client.auth.currentUser?.id
+        : candidateId;
+    if (id == null || id.trim().isEmpty) {
+      throw StateError('missing authenticated user id');
     }
-    try {
-      final rows = await client.from('users').select('id').limit(1);
-      if ((rows as List).isNotEmpty) return rows.first['id'] as String;
-    } catch (_) {}
-    return '11111111-1111-1111-1111-111111111111';
+    return id;
   }
 
   // ------------------------------------------------------------------

@@ -24,6 +24,11 @@ class UserEntity extends Equatable {
   final String language;
   final String? pinCode;
 
+  /// When true the temporary/reset PIN must be replaced before the staff
+  /// workspace can be used. The router blocks navigation; PIN-checked RPCs
+  /// still require the current (temporary) PIN until it is replaced.
+  final bool mustChangePin;
+
   const UserEntity({
     required this.id,
     required this.phone,
@@ -32,6 +37,7 @@ class UserEntity extends Equatable {
     required this.active,
     required this.language,
     this.pinCode,
+    this.mustChangePin = false,
   });
 
   UserEntity copyWith({
@@ -42,6 +48,7 @@ class UserEntity extends Equatable {
     bool? active,
     String? language,
     String? pinCode,
+    bool? mustChangePin,
   }) {
     return UserEntity(
       id: id ?? this.id,
@@ -51,9 +58,11 @@ class UserEntity extends Equatable {
       active: active ?? this.active,
       language: language ?? this.language,
       pinCode: pinCode ?? this.pinCode,
+      mustChangePin: mustChangePin ?? this.mustChangePin,
     );
   }
 
   @override
-  List<Object?> get props => [id, phone, name, role, active, language, pinCode];
+  List<Object?> get props =>
+      [id, phone, name, role, active, language, pinCode, mustChangePin];
 }

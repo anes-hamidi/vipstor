@@ -143,6 +143,7 @@ class OfflineSyncService {
           await client.rpc('rpc_open_pos_shift', params: {
             'p_client_id': op.clientId,
             'p_cashier_id': payload['cashier_id'],
+            'p_cashier_pin': payload['cashier_pin'] ?? '',
             'p_cashier_name': payload['cashier_name'] ?? '\u063a\u064a\u0631 \u0645\u0633\u062c\u0644',
             'p_opening_float': payload['opening_float_centimes'] ?? 0,
             'p_z_report_sequence': payload['z_report_number'] ?? 0,
@@ -152,7 +153,9 @@ class OfflineSyncService {
         case 'pos_shift_close':
           await client.rpc('rpc_close_pos_shift', params: {
             'p_client_id': op.clientId,
+            'p_shift_id': payload['shift_id'],
             'p_cashier_id': payload['cashier_id'],
+            'p_cashier_pin': payload['cashier_pin'] ?? '',
             'p_z_report_sequence': payload['z_number'] ?? 0,
             'p_expected_cash': payload['expected_centimes'] ?? 0,
             'p_actual_cash': payload['counted_centimes'] ?? 0,
@@ -168,14 +171,21 @@ class OfflineSyncService {
           });
 
         case 'manager_purchase_post':
-          final purchaseId = payload['purchase_id'] as String;
-          final userId = payload['user_id'] as String;
-          if (!purchaseId.startsWith('OFFLINE-')) {
-            await service.postPurchase(
-              purchaseId: purchaseId,
-              userId: userId,
+          final purchaseId = payload['purchase_id'] as String?;
+          if (purchaseId == null || purchaseId.startsWith('OFFLINE-')) {
+            _nextRetryMap.remove(op.clientId);
+            await db.markOpDone(op.clientId);
+            await _recordFailedOp(
+              op,
+              'Purchase draft was never persisted on the server; '
+              'recreate it while online.',
             );
+            return;
           }
+          await service.postPurchase(
+            purchaseId: purchaseId,
+            userId: payload['user_id'] as String?,
+          );
 
         case 'manager_supplier_payment':
           // Supplier payments now require the payer's PIN at write time,
@@ -190,11 +200,51 @@ class OfflineSyncService {
           return;
 
         case 'order_status_update':
-          await client.from('orders').update({
-            'status': payload['status'],
-            if (payload['driver_id'] != null) 'driver_id': payload['driver_id'],
-            if (payload['notes'] != null) 'notes': payload['notes'],
-          }).eq('id', payload['order_id']);
+          // Replay through the same role-checked RPCs as the online path.
+          final status = payload['status'] as String?;
+          final driverId = payload['driver_id'] as String?;
+          if (status == 'assigned' && driverId != null) {
+            await client.rpc('rpc_assign_order_driver', params: {
+              'p_order_id': payload['order_id'],
+              'p_driver_id': driverId,
+            });
+          } else if (status != null) {
+            await client.rpc('rpc_update_order_status', params: {
+              'p_order_id': payload['order_id'],
+              'p_status': status,
+              'p_notes': payload['notes'],
+            });
+          } else {
+            // Legacy payloads only carried a driver/cashier id.
+            await client.rpc('rpc_confirm_online_order', params: {
+              'p_order_id': payload['order_id'],
+              'p_cashier_id':
+                  payload['cashier_id'] ?? payload['driver_id'],
+              if (driverId != null) 'p_driver_id': driverId,
+            });
+          }
+
+        case 'stock_adjustment':
+          // The old client mirrored adjustments into stock_adjustments.
+          // The server now writes the audit/ledger entry atomically inside
+          // rpc_adjust_stock; an offline replay cannot provide the PIN.
+          _nextRetryMap.remove(op.clientId);
+          await db.markOpDone(op.clientId);
+          await _recordFailedOp(
+            op,
+            'Stock adjustment requires online PIN confirmation. '
+            'The old queued adjustment was not applied; re-enter it online.',
+          );
+          return;
+
+        default:
+          _nextRetryMap.remove(op.clientId);
+          await db.markOpDone(op.clientId);
+          await _recordFailedOp(
+            op,
+            'Unsupported offline operation type: ${op.operationType}',
+          );
+          return;
       }
 
       _nextRetryMap.remove(op.clientId);

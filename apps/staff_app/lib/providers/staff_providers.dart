@@ -247,6 +247,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
 
   void openShift({
     required String cashierId,
+    required String cashierPin,
     required String cashierName,
     required int openingFloatCentimes,
   }) async {
@@ -270,6 +271,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     final payload = {
       'shift_id': shiftId,
       'cashier_id': cashierId,
+      'cashier_pin': cashierPin,
       'cashier_name': cashierName,
       'opening_float_centimes': openingFloatCentimes,
       'z_report_number': zNum,
@@ -281,6 +283,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
         await client!.rpc('rpc_open_pos_shift', params: {
           'p_client_id': clientId,
           'p_cashier_id': cashierId,
+          'p_cashier_pin': cashierPin,
           'p_cashier_name': cashierName,
           'p_opening_float': openingFloatCentimes,
           'p_z_report_sequence': zNum,
@@ -345,6 +348,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
   }
 
   ZReportSummary closeShift({
+    required String cashierPin,
     required int countedCashCentimes,
     required Map<int, int> denominations,
   }) {
@@ -379,6 +383,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
     final payload = {
       'shift_id': current.id,
       'cashier_id': current.cashierId,
+      'cashier_pin': cashierPin,
       'cashier_name': current.cashierName,
       'z_number': summary.zNumber,
       'expected_centimes': summary.expectedCashCentimes,
@@ -401,6 +406,7 @@ class PosShiftNotifier extends StateNotifier<PosShiftSession?> {
             'p_client_id': clientId,
             'p_shift_id': current.id,
             'p_cashier_id': current.cashierId,
+            'p_cashier_pin': cashierPin,
             'p_z_report_sequence': summary.zNumber,
             'p_expected_cash': summary.expectedCashCentimes,
             'p_actual_cash': summary.countedCashCentimes,
@@ -1161,6 +1167,7 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
   Future<Result<void, Failure>> processReturn({
     required String originalOrderId,
     required String cashierId,
+    required String callerPin,
     required List<Map<String, dynamic>> returnItems,
     required int totalRefundCentimes,
     required String reason,
@@ -1173,6 +1180,7 @@ class PosCartNotifier extends StateNotifier<List<PosCartItem>> {
         for (final item in returnItems) {
           await supabaseService.adjustStock(
             userId: cashierId,
+            callerPin: callerPin,
             productId: item['productId'] as String,
             qtyChange: item['qty'] as int,
             reason: 'إرجاع مبيعات: $reason (وصل #$originalOrderId)',

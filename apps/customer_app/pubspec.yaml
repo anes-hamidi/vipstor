@@ -22,6 +22,7 @@ dependencies:
     path: ../../packages/ui_kit
   l10n:
     path: ../../packages/l10n
+  crypto: ^3.0.3
   flutter_riverpod: ^2.5.1
   go_router: ^14.0.0
   geolocator: ^12.0.0

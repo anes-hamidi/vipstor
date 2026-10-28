@@ -118,6 +118,31 @@ class CustomerRepositoryImpl implements ICustomerRepository {
   }
 
   @override
+  Future<CustomerProfileEntity> getMyCustomerProfile() async {
+    final res = await client.rpc('rpc_get_my_customer_profile');
+    if (res is! Map) {
+      throw Exception('تعذر تحميل ملف الزبون');
+    }
+    final map = res.cast<String, dynamic>();
+    return CustomerProfileEntity(
+      id: map['customer_id'] as String,
+      userId: map['user_id'] as String,
+      name: map['name'] as String? ?? '',
+      phone: map['phone'] as String? ?? '',
+      creditLimitCentimes: (map['credit_limit'] as num?)?.toInt() ?? 0,
+      currentDebtCentimes: (map['current_balance'] as num?)?.toInt() ?? 0,
+      priceTier: PriceTier.fromString(
+        map['price_tier'] as String? ?? 'wholesale',
+      ),
+      wilaya: map['wilaya'] as String?,
+      commune: map['commune'] as String?,
+      addressText: map['address_text'] as String?,
+      latitude: (map['latitude'] as num?)?.toDouble(),
+      longitude: (map['longitude'] as num?)?.toDouble(),
+    );
+  }
+
+  @override
   Future<CustomerProfileEntity?> getCustomerByPhone(
     String phone, {
     required String deviceToken,

@@ -170,9 +170,30 @@ class InventoryRepositoryImpl implements IInventoryRepository {
   @override
   Future<StockAdjustmentEntity> executeStockAdjustment({
     required StockAdjustmentEntity adjustment,
+    required String callerPin,
   }) async {
     return _synchronized(() async {
-      // 1. Local atomic updates in Drift DB transaction
+      if (!ConnectivityService.instance.isOnline) {
+        throw Exception(
+          'تسوية المخزون تتطلب اتصالاً بالإنترنت لتأكيد رمز PIN وكتابة سجل التدقيق.',
+        );
+      }
+
+      // The RPC verifies the caller's PIN, derives the actor from the JWT and
+      // writes the authoritative stock ledger. Never mirror this into
+      // stock_adjustments from the client.
+      for (final item in adjustment.items) {
+        await service.adjustStock(
+          userId: adjustment.adjustedByUserId,
+          callerPin: callerPin,
+          productId: item.productId,
+          qtyChange: item.qtyChange,
+          reason:
+              '${adjustment.reason.code}: ${adjustment.notes ?? adjustment.reason.labelAr}',
+        );
+      }
+
+      // Refresh the local cache only after the server accepted the adjustment.
       await db.transaction(() async {
         for (final item in adjustment.items) {
           final cached = await (db.select(db.cachedProducts)
@@ -180,8 +201,10 @@ class InventoryRepositoryImpl implements IInventoryRepository {
               .getSingleOrNull();
 
           if (cached != null) {
-            final updatedOnHand = (cached.onHandQty + item.qtyChange).clamp(0, 9999999);
-            final updatedAvailable = (cached.availableQty + item.qtyChange).clamp(0, 9999999);
+            final updatedOnHand =
+                (cached.onHandQty + item.qtyChange).clamp(0, 9999999);
+            final updatedAvailable =
+                (cached.availableQty + item.qtyChange).clamp(0, 9999999);
 
             await (db.update(db.cachedProducts)
                   ..where((tbl) => tbl.id.equals(item.productId)))
@@ -192,67 +215,6 @@ class InventoryRepositoryImpl implements IInventoryRepository {
           }
         }
       });
-
-      // 2. Remote synchronization (if online)
-      if (ConnectivityService.instance.isOnline) {
-        try {
-          for (final item in adjustment.items) {
-            await service.adjustStock(
-              userId: adjustment.adjustedByUserId,
-              productId: item.productId,
-              qtyChange: item.qtyChange,
-              reason: '${adjustment.reason.code}: ${adjustment.notes ?? adjustment.reason.labelAr}',
-            );
-          }
-
-          // Also attempt saving to dedicated stock_adjustments table if exists
-          try {
-            await client.from('stock_adjustments').insert({
-              'id': adjustment.id,
-              'reference_number': adjustment.referenceNumber,
-              'reason': adjustment.reason.code,
-              'notes': adjustment.notes,
-              'location_id': adjustment.locationId,
-              'location_name': adjustment.locationName,
-              'adjusted_by_user_id': adjustment.adjustedByUserId,
-              'adjusted_by_name': adjustment.adjustedByName,
-              'created_at': adjustment.createdAt.toIso8601String(),
-            });
-
-            final itemInserts = adjustment.items.map((it) => {
-              'id': it.id,
-              'adjustment_id': adjustment.id,
-              'product_id': it.productId,
-              'product_name': it.productName,
-              'unit': it.unit,
-              'old_stock': it.oldStock,
-              'new_stock': it.newStock,
-              'qty_change': it.qtyChange,
-              'unit_cost_centimes': it.unitCostCentimes,
-              'batch_number': it.batchNumber,
-              'expiry_date': it.expiryDate?.toIso8601String(),
-              'notes': it.itemNotes,
-            }).toList();
-
-            await client.from('stock_adjustment_items').insert(itemInserts);
-          } catch (_) {
-            // Table stock_adjustments is optional; rpc_adjust_stock is the primary ledger record
-          }
-        } catch (_) {
-          // If RPC fails online, queue to pending operations
-          await db.enqueuePendingOp(PendingOperationsCompanion(
-            clientId: Value(adjustment.id),
-            operationType: const Value('stock_adjustment'),
-            payloadJson: Value(adjustment.items.map((e) => {
-              'productId': e.productId,
-              'qtyChange': e.qtyChange,
-              'reason': adjustment.reason.code,
-              'userId': adjustment.adjustedByUserId,
-            }).toList().toString()),
-            createdAt: Value(DateTime.now()),
-          ));
-        }
-      }
 
       return adjustment;
     });
@@ -375,6 +337,7 @@ class InventoryRepositoryImpl implements IInventoryRepository {
           try {
             await service.adjustStock(
               userId: userId,
+              callerPin: '', // TODO(P1): thread PIN through reconcileAudit call site
               productId: item.productId,
               qtyChange: item.varianceQty,
               reason: 'تسوية جرد [${audit.auditNumber}]: ${reconciliationNotes.isNotEmpty ? reconciliationNotes : "موازنة المخزون الفعلي"}',

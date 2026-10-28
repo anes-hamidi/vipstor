@@ -10,6 +10,7 @@ abstract class IInventoryRepository {
 
   Future<StockAdjustmentEntity> executeStockAdjustment({
     required StockAdjustmentEntity adjustment,
+    required String callerPin,
   });
 
   // ── 2. Cycle Counting & Reconciliation ─────────────────────────────────────

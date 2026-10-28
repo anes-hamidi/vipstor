@@ -23,3 +23,23 @@ class CreditLimitExceededFailure extends Failure {
 class OfflineSyncFailure extends Failure {
   const OfflineSyncFailure([super.message = 'Failed to sync offline queue']);
 }
+
+class AuthFailure extends Failure {
+  const AuthFailure([super.message = 'Authentication failed']);
+}
+
+class PinLockedFailure extends Failure {
+  const PinLockedFailure([super.message = 'Account locked due to too many failed PIN attempts']);
+}
+
+class NetworkFailure extends Failure {
+  const NetworkFailure([super.message = 'Network unreachable']);
+}
+
+class NotFoundFailure extends Failure {
+  const NotFoundFailure([super.message = 'Resource not found']);
+}
+
+class PermissionFailure extends Failure {
+  const PermissionFailure([super.message = 'Permission denied']);
+}

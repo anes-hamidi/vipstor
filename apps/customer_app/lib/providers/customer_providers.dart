@@ -44,6 +44,243 @@ final customerAppUpdateServiceProvider = Provider<AppUpdateService>((ref) {
   return AppUpdateService(repository: repo, appType: 'customer_app');
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Authentication
+// ─────────────────────────────────────────────────────────────────────────────
+
+final customerAuthRepositoryProvider = Provider<IAuthRepository>((ref) {
+  return AuthRepositoryImpl(client: ref.watch(customerSupabaseClientProvider));
+});
+
+/// The server explicitly rejected this device. Unlike a transient network
+/// error, this must invalidate the restored session and return to OTP login.
+class _DeviceBindingMismatch implements Exception {
+  final String message;
+
+  const _DeviceBindingMismatch(this.message);
+
+  @override
+  String toString() => message;
+}
+
+/// The single source of truth for the customer session.
+///
+/// There is no local/PIN fallback and no guest identity: the Supabase JWT is
+/// resolved to a `public.users` row with role `customer`. Profile hydration and
+/// device-token binding happen only after a real session exists.
+class CustomerAuthController extends AsyncNotifier<UserEntity?> {
+  StreamSubscription<AuthState>? _authSub;
+  bool _disposed = false;
+  bool _preparing = false;
+
+  @override
+  Future<UserEntity?> build() async {
+    ref.onDispose(() {
+      _disposed = true;
+      _authSub?.cancel();
+    });
+
+    final client = ref.read(customerSupabaseClientProvider);
+    _authSub = client.auth.onAuthStateChange.listen((authState) async {
+      if (_disposed) return;
+      if (authState.event == AuthChangeEvent.signedOut) {
+        state = const AsyncData(null);
+        return;
+      }
+      if (authState.event != AuthChangeEvent.tokenRefreshed &&
+          authState.event != AuthChangeEvent.userUpdated) {
+        return;
+      }
+      try {
+        final user =
+            await ref.read(customerAuthRepositoryProvider).getCurrentUser();
+        if (_disposed) return;
+        if (user == null || user.role != UserRole.customer) {
+          if (user != null) {
+            await ref.read(customerAuthRepositoryProvider).signOut();
+          }
+          state = const AsyncData(null);
+          return;
+        }
+        state = AsyncData(user);
+      } catch (e) {
+        if (_disposed) return;
+        state = AsyncError(e, StackTrace.current);
+      }
+    });
+
+    final user =
+        await ref.read(customerAuthRepositoryProvider).getCurrentUser();
+    if (user != null && user.role != UserRole.customer) {
+      await ref.read(customerAuthRepositoryProvider).signOut();
+      return null;
+    }
+    if (user != null) {
+      try {
+        await _afterLogin(user, rotateDevice: false);
+      } catch (e) {
+        // A restored session that no longer matches the device binding must
+        // not grant access to cached customer data. Clear it and show the OTP
+        // login instead of leaving the gate stuck on an error screen.
+        debugPrint('[CustomerAuth] session restore rejected: $e');
+        await ref.read(customerAuthRepositoryProvider).signOut();
+        if (_disposed) return null;
+        return null;
+      }
+    }
+    return user;
+  }
+
+  /// Phone + password login (no SMS provider required).
+  Future<UserEntity> signIn({
+    required String phone,
+    required String password,
+  }) async {
+    final user = await ref
+        .read(customerAuthRepositoryProvider)
+        .signInWithPhoneAndPassword(phone, password);
+    if (user.role != UserRole.customer) {
+      await ref.read(customerAuthRepositoryProvider).signOut();
+      throw Exception('هذا الحساب ليس حساب زبون.');
+    }
+    try {
+      await _afterLogin(user, rotateDevice: true);
+    } catch (e) {
+      await ref.read(customerAuthRepositoryProvider).signOut();
+      if (!_disposed) state = const AsyncData(null);
+      rethrow;
+    }
+    if (!_disposed) state = AsyncData(user);
+    return user;
+  }
+
+  Future<void> sendOtp(String phone) async {
+    await ref
+        .read(customerAuthRepositoryProvider)
+        .sendPhoneOtp(phone, shouldCreateUser: true);
+  }
+
+  Future<UserEntity> verifyOtp({
+    required String phone,
+    required String token,
+  }) async {
+    final user = await ref
+        .read(customerAuthRepositoryProvider)
+        .verifyPhoneOtp(phone: phone, token: token);
+    if (user.role != UserRole.customer) {
+      await ref.read(customerAuthRepositoryProvider).signOut();
+      throw Exception('هذا الحساب ليس حساب زبون.');
+    }
+    try {
+      await _afterLogin(user, rotateDevice: true);
+    } catch (e) {
+      await ref.read(customerAuthRepositoryProvider).signOut();
+      if (!_disposed) state = const AsyncData(null);
+      rethrow;
+    }
+    if (!_disposed) state = AsyncData(user);
+    return user;
+  }
+
+  Future<void> signOut() async {
+    // Revoke the server-side device binding while the JWT is still valid.
+    // Offline logout still clears the local session; the next OTP login rotates
+    // the token and replaces any stale binding.
+    try {
+      await ref
+          .read(customerSupabaseClientProvider)
+          .rpc('rpc_revoke_customer_device');
+    } catch (e) {
+      debugPrint('[CustomerAuth] device revoke failed: $e');
+    }
+    await ref.read(customerAuthRepositoryProvider).signOut();
+    try {
+      await CustomerDeviceAuthService.instance.clear();
+    } catch (e) {
+      debugPrint('[CustomerAuth] device token clear failed: $e');
+    }
+    ref.read(customerProfileProvider.notifier).clear();
+    if (!_disposed) state = const AsyncData(null);
+  }
+
+  Future<void> refresh() async {
+    state = const AsyncLoading();
+    try {
+      final user =
+          await ref.read(customerAuthRepositoryProvider).getCurrentUser();
+      if (user != null) {
+        await _afterLogin(user, rotateDevice: false);
+      }
+      if (!_disposed) state = AsyncData(user);
+    } catch (e) {
+      // `getCurrentUser` may fail on a dead network, and a device-binding
+      // mismatch must not be retried with the same stale session. Sign out so
+      // the OTP screen can recover; the server still requires a device token
+      // for order submission and live tracking.
+      debugPrint('[CustomerAuth] refresh rejected: $e');
+      try {
+        await ref.read(customerAuthRepositoryProvider).signOut();
+      } catch (_) {}
+      ref.read(customerProfileProvider.notifier).clear();
+      if (!_disposed) state = const AsyncData(null);
+    }
+  }
+
+  Future<void> _afterLogin(
+    UserEntity user, {
+    required bool rotateDevice,
+  }) async {
+    if (user.role != UserRole.customer) return;
+    if (_preparing) return;
+    _preparing = true;
+    try {
+      try {
+        final profile =
+            await ref.read(customerRepositoryProvider).getMyCustomerProfile();
+        ref.read(customerProfileProvider.notifier).applyServerProfile(profile);
+      } catch (e) {
+        debugPrint('[CustomerAuth] profile hydration failed: $e');
+      }
+
+      final token = rotateDevice
+          ? await CustomerDeviceAuthService.instance.rotate()
+          : await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+      try {
+        final res = await ref.read(customerSupabaseClientProvider).rpc(
+          'rpc_bind_customer_device',
+          params: {
+            'p_device_token': token,
+            'p_rotate': rotateDevice,
+          },
+        );
+        if (res is! Map || res['success'] != true) {
+          throw _DeviceBindingMismatch(
+            res is Map
+                ? (res['error']?.toString() ?? 'تعذر ربط الجهاز بالحساب.')
+                : 'تعذر ربط الجهاز بالحساب.',
+          );
+        }
+      } catch (e) {
+        // A restored session may be opened without connectivity. Server-side
+        // device checks still protect tracking and checkout, so only an
+        // explicit mismatch blocks the restored session. A fresh OTP login is
+        // online and must bind successfully before it is accepted.
+        if (rotateDevice || e is _DeviceBindingMismatch) rethrow;
+        debugPrint('[CustomerAuth] device binding deferred: $e');
+      }
+    } finally {
+      _preparing = false;
+    }
+  }
+}
+
+final customerAuthStateProvider =
+    AsyncNotifierProvider<CustomerAuthController, UserEntity?>(
+  CustomerAuthController.new,
+);
+
+
+
 final _customerDbProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
   ref.onDispose(db.close);
@@ -122,7 +359,7 @@ class CustomerProfileInfo {
     this.isSynced = false,
   });
 
-  static final _phoneRe = RegExp(r'^0[5-7]\d{8}$');
+  static final _phoneRe = RegExp(r'^(0[5-7]\d{8}|\+213[5-7]\d{8})$');
   static bool isValidPhone(String v) => _phoneRe.hasMatch(v.trim());
 
   bool get isComplete =>
@@ -307,20 +544,27 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
     return entity;
   }
 
-  Future<bool> lookupCustomerByPhone(String phone) async {
-    final clean = phone.trim();
-    if (clean.isEmpty) return false;
+  /// Replaces local profile state with the server's JWT-bound profile after
+  /// OTP login. This is authoritative: it prevents a previous device owner's
+  /// cached name/phone/address from being shown to the next signed-in customer.
+  void applyServerProfile(CustomerProfileEntity e) {
+    _set(CustomerProfileInfo(
+      id: e.id,
+      userId: e.userId,
+      name: e.name,
+      phone: e.phone,
+      priceTier: e.priceTier,
+      wilaya: e.wilaya ?? '',
+      commune: e.commune ?? '',
+      addressText: e.addressText ?? '',
+      latitude: e.latitude,
+      longitude: e.longitude,
+      isSynced: true,
+    ));
+  }
 
-    final repo = ref.read(customerRepositoryProvider);
-    final deviceToken =
-        await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
-    final entity = await repo.getCustomerByPhone(
-      clean,
-      deviceToken: deviceToken,
-    );
-    if (entity == null) return false;
-    _set(_fromEntity(entity));
-    return true;
+  void clear() {
+    _set(const CustomerProfileInfo());
   }
 
   void updateProfile({
@@ -1235,10 +1479,8 @@ final customerSyncCoordinatorProvider =
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Live order tracking (RPC with graceful direct-query fallback)
+// Live order tracking (RPC only; the device token is validated server-side)
 // ─────────────────────────────────────────────────────────────────────────────
-
-bool _rpcUnavailable = false;
 
 bool _isTerminalStatus(OrderStatus status) =>
     status == OrderStatus.delivered ||
@@ -1251,11 +1493,6 @@ final customerLiveOrderProvider =
   final client = ref.watch(customerSupabaseClientProvider);
 
   return (() async* {
-    String? token;
-    try {
-      token = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
-    } catch (_) {}
-
     while (true) {
       if (!ConnectivityService.instance.isOnline) {
         yield LiveOrderUpdate(orderId: orderId, isOffline: true);
@@ -1263,32 +1500,45 @@ final customerLiveOrderProvider =
         continue;
       }
 
-      LiveOrderUpdate? update;
-      if (!_rpcUnavailable && token != null && token.isNotEmpty) {
-        try {
-          final res = await client.rpc(
-            'rpc_get_customer_order_live',
-            params: {
-              'p_order_id': orderId,
-              'p_device_token': token,
-            },
-          );
-          update = _liveFromRpc(orderId, res);
-        } catch (e) {
-          // Only permanently disable the RPC when the function is missing;
-          // transient network failures should retry on the next poll.
-          if (_isMissingRpc(e)) _rpcUnavailable = true;
-          debugPrint('[Tracking] live RPC unavailable: $e');
-        }
+      String token;
+      try {
+        token = await CustomerDeviceAuthService.instance.getOrCreateDeviceToken();
+      } catch (e) {
+        yield LiveOrderUpdate(
+          orderId: orderId,
+          error: 'تعذر التحقق من أمان الجهاز.',
+        );
+        await Future<void>.delayed(const Duration(seconds: 12));
+        continue;
       }
 
-      update ??= await _liveFromTables(client, orderId);
+      if (token.isEmpty) {
+        yield LiveOrderUpdate(
+          orderId: orderId,
+          error: 'تعذر التحقق من أمان الجهاز.',
+        );
+        await Future<void>.delayed(const Duration(seconds: 12));
+        continue;
+      }
 
-      yield update;
-      if (update.found &&
-          update.status != null &&
-          _isTerminalStatus(update.status!)) {
-        return;
+      try {
+        final res = await client.rpc(
+          'rpc_get_customer_order_live',
+          params: {
+            'p_order_id': orderId,
+            'p_device_token': token,
+          },
+        );
+        final update = _liveFromRpc(orderId, res);
+        yield update;
+        if (update.found &&
+            update.status != null &&
+            _isTerminalStatus(update.status!)) {
+          return;
+        }
+      } catch (e) {
+        debugPrint('[Tracking] live RPC unavailable: $e');
+        yield LiveOrderUpdate(orderId: orderId, error: _prettyError(e));
       }
 
       await Future<void>.delayed(const Duration(seconds: 12));
@@ -1326,82 +1576,6 @@ LiveOrderUpdate _liveFromRpc(String orderId, dynamic response) {
   );
 }
 
-Future<LiveOrderUpdate> _liveFromTables(
-  SupabaseClient client,
-  String orderId,
-) async {
-  try {
-    final rows = await client.from('orders').select('''
-          order_number, status, driver_id, delivery_address,
-          confirmed_at, delivered_at, settled_at
-        ''').eq('id', orderId).limit(1);
-
-    if ((rows as List).isEmpty) {
-      return LiveOrderUpdate(orderId: orderId, error: 'الطلب غير موجود');
-    }
-
-    final row = (rows.first as Map).cast<String, dynamic>();
-    final address =
-        (row['delivery_address'] as Map?)?.cast<String, dynamic>() ?? const {};
-    final driverId = row['driver_id'] as String?;
-
-    String? driverName;
-    String? driverPhone;
-    double? lat;
-    double? lng;
-    DateTime? updatedAt;
-
-    if (driverId != null && driverId.isNotEmpty) {
-      try {
-        final driverRows = await client
-            .from('users')
-            .select('name, phone')
-            .eq('id', driverId)
-            .limit(1);
-        if ((driverRows as List).isNotEmpty) {
-          final driver = (driverRows.first as Map).cast<String, dynamic>();
-          driverName = driver['name'] as String?;
-          driverPhone = driver['phone'] as String?;
-        }
-      } catch (_) {}
-
-      try {
-        final locations = await client
-            .from('driver_locations')
-            .select('latitude, longitude, updated_at')
-            .eq('driver_id', driverId)
-            .limit(1);
-        if ((locations as List).isNotEmpty) {
-          final location = (locations.first as Map).cast<String, dynamic>();
-          lat = _asDouble(location['latitude']);
-          lng = _asDouble(location['longitude']);
-          updatedAt = _parseDate(location['updated_at']);
-        }
-      } catch (_) {}
-    }
-
-    return LiveOrderUpdate(
-      orderId: orderId,
-      found: true,
-      status: OrderStatus.fromString(row['status'] as String? ?? 'submitted'),
-      orderNumber: (row['order_number'] as num?)?.toInt(),
-      driverId: driverId,
-      driverName: driverName,
-      driverPhone: driverPhone,
-      driverLat: lat,
-      driverLng: lng,
-      driverUpdatedAt: updatedAt,
-      destinationLat: _asDouble(address['latitude']),
-      destinationLng: _asDouble(address['longitude']),
-      confirmedAt: _parseDate(row['confirmed_at']),
-      deliveredAt: _parseDate(row['delivered_at']),
-      settledAt: _parseDate(row['settled_at']),
-    );
-  } catch (e) {
-    return LiveOrderUpdate(orderId: orderId, error: _prettyError(e));
-  }
-}
-
 double? _asDouble(dynamic value) {
   if (value is num) return value.toDouble();
   if (value is String) return double.tryParse(value);
@@ -1413,10 +1587,3 @@ DateTime? _parseDate(dynamic value) =>
 
 String _prettyError(Object error) =>
     error.toString().replaceFirst('Exception: ', '').trim();
-
-bool _isMissingRpc(Object error) {
-  final message = error.toString().toLowerCase();
-  return message.contains('could not find the function') ||
-      message.contains('pgrst202') ||
-      message.contains('function public.rpc_get_customer_order_live');
-}

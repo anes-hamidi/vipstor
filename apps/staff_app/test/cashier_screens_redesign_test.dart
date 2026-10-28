@@ -8,9 +8,7 @@ import 'package:staff_app/features/cashier/widgets/item_discount_dialog.dart';
 import 'package:staff_app/features/cashier/widgets/shift_audit_dialog.dart';
 import 'package:staff_app/features/cashier/widgets/printer_settings_dialog.dart';
 import 'package:staff_app/features/cashier/widgets/cashier_pin_dialog.dart';
-import 'package:staff_app/features/cashier/models/pos_models.dart';
 import 'package:staff_app/providers/staff_providers.dart';
-import 'package:ui_kit/ui_kit.dart';
 
 class FakePosShiftNotifier extends PosShiftNotifier {
   FakePosShiftNotifier([PosShiftSession? initial])
@@ -25,6 +23,7 @@ class FakePosShiftNotifier extends PosShiftNotifier {
   @override
   void openShift({
     required String cashierId,
+    required String cashierPin,
     required String cashierName,
     required int openingFloatCentimes,
   }) {
@@ -40,6 +39,7 @@ class FakePosShiftNotifier extends PosShiftNotifier {
 
   @override
   ZReportSummary closeShift({
+    required String cashierPin,
     required int countedCashCentimes,
     required Map<int, int> denominations,
   }) {

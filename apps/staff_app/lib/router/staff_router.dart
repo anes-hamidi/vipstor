@@ -4,7 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:domain/domain.dart';
 
-import '../features/auth/login_screen.dart';
+import '../features/auth/change_pin_screen.dart';
+import '../features/auth/secure_login_screen.dart';
 import '../features/moderator/moderator_dashboard_screen.dart';
 import '../features/manager/purchase_receiving_screen.dart';
 import '../features/cashier/counter_pos_screen.dart';
@@ -77,7 +78,11 @@ final staffRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: '/login',
-        builder: (_, __) => const LoginScreen(),
+        builder: (_, __) => const SecureLoginScreen(),
+      ),
+      GoRoute(
+        path: '/change-pin',
+        builder: (_, __) => const ChangePinScreen(),
       ),
       GoRoute(
         path: '/moderator',
@@ -113,6 +118,14 @@ final staffRouterProvider = Provider<GoRouter>((ref) {
       if (!authUser.active) {
         ref.read(authStateProvider.notifier).state = null;
         return '/login';
+      }
+
+      // A temporary/reset PIN blocks every workspace route until replaced.
+      if (authUser.mustChangePin) {
+        return state.matchedLocation == '/change-pin' ? null : '/change-pin';
+      }
+      if (state.matchedLocation == '/change-pin') {
+        return _dashboardFor(authUser.role);
       }
 
       // Authenticated + on login page → redirect to role dashboard

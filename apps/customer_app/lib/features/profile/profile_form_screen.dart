@@ -322,7 +322,7 @@ class _OnboardingHero extends StatelessWidget {
           // Gold icon
           const DecoratedBox(
             decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+              gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               shape: BoxShape.circle,
               boxShadow: [BoxShadow(color: Color(0x501DAB61), blurRadius: 14, offset: Offset(0,5))],
             ),
@@ -399,7 +399,7 @@ class _GpsCard extends StatelessWidget {
                       ? const Color(0xFF2A2518)
                       : const Color(0xFFF3E8C8)),
               borderRadius: AppRadius.smAll,
-              boxShadow: hasLocation ? [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))] : null,
+              boxShadow: hasLocation ? const [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))] : null,
             ),
             child: Icon(
               hasLocation ? Icons.location_on_rounded : Icons.my_location_rounded,

@@ -146,14 +146,13 @@ class DriverTelemetryService extends ChangeNotifier {
     }
 
     try {
-      await Supabase.instance.client.from('driver_locations').upsert({
-        'driver_id': _driverId,
-        'latitude': pos.latitude,
-        'longitude': pos.longitude,
-        'heading': pos.heading,
-        'speed': pos.speed,
-        'battery_level': _state.batteryLevel,
-        'updated_at': now.toIso8601String(),
+      await Supabase.instance.client.rpc('rpc_update_driver_location', params: {
+        'p_driver_id': _driverId,
+        'p_latitude': pos.latitude,
+        'p_longitude': pos.longitude,
+        'p_heading': pos.heading,
+        'p_speed': pos.speed,
+        'p_battery_level': _state.batteryLevel,
       });
 
       _lastLocationUpload = now;
@@ -169,12 +168,11 @@ class DriverTelemetryService extends ChangeNotifier {
     if (_driverId == null) return;
     final pos = _state.currentPosition;
     try {
-      await Supabase.instance.client.from('driver_location_events').insert({
-        'driver_id': _driverId,
-        'event_type': eventType,
-        'latitude': pos?.latitude,
-        'longitude': pos?.longitude,
-        'recorded_at': DateTime.now().toIso8601String(),
+      await Supabase.instance.client
+          .rpc('rpc_log_driver_location_event', params: {
+        'p_event_type': eventType,
+        'p_latitude': pos?.latitude,
+        'p_longitude': pos?.longitude,
       });
     } catch (_) {
       // Event logging is best-effort; must not break the driver flow.

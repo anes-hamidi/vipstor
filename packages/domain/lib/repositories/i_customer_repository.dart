@@ -4,6 +4,9 @@ import '../entities/customer_ledger_entity.dart';
 abstract class ICustomerRepository {
   Future<List<CustomerProfileEntity>> getCustomers({String? search});
   Future<CustomerProfileEntity?> getCustomerById(String customerId);
+
+  /// Returns the profile bound to the current Supabase Auth session.
+  Future<CustomerProfileEntity> getMyCustomerProfile();
   Future<CustomerProfileEntity> createCustomer({
     required String name,
     required String phone,

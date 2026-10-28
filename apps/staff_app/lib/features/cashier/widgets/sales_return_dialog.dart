@@ -115,6 +115,40 @@ class _SalesReturnDialogState extends ConsumerState<SalesReturnDialog> {
     });
   }
 
+  Future<String?> _promptCashierPin() async {
+    final controller = TextEditingController();
+    final pin = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('تأكيد رمز PIN'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(
+            labelText: 'رمز PIN الحالي',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('تأكيد'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return (pin == null || pin.trim().isEmpty) ? null : pin.trim();
+  }
+
   Future<void> _handleConfirmReturn() async {
     if (_calculatedRefundTotalCentimes <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -126,9 +160,13 @@ class _SalesReturnDialogState extends ConsumerState<SalesReturnDialog> {
       return;
     }
 
+    final user = ref.read(authStateProvider);
+    if (user == null) return;
+    final pin = await _promptCashierPin();
+    if (!mounted || pin == null) return;
+
     setState(() => _isSubmitting = true);
     try {
-      final user = ref.read(authStateProvider);
       final returnItemsList = _fetchedOrder!.items
           .where((it) => (_returnQuantities[it.productId] ?? 0) > 0)
           .map((it) => {
@@ -141,7 +179,8 @@ class _SalesReturnDialogState extends ConsumerState<SalesReturnDialog> {
 
       final result = await ref.read(posCartProvider.notifier).processReturn(
             originalOrderId: _fetchedOrder!.id,
-            cashierId: user?.id ?? '',
+            cashierId: user.id,
+            callerPin: pin,
             returnItems: returnItemsList,
             totalRefundCentimes: _calculatedRefundTotalCentimes,
             reason: _reasons[_selectedReason] ?? _selectedReason,

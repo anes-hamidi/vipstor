@@ -1,5 +1,5 @@
 import 'package:core/core.dart';
-import 'package:customer_app/features/shell/customer_shell.dart';
+import 'package:customer_app/features/auth/customer_auth_gate.dart';
 import 'package:customer_app/providers/customer_providers.dart';
 import 'package:data/data.dart';
 import 'package:flutter/material.dart';
@@ -66,7 +66,7 @@ class _CustomerAppState extends ConsumerState<CustomerApp> {
       theme: lightTheme,
       darkTheme: darkTheme,
       themeMode: themeMode,
-      home: CustomerShell(onExit: widget.onExit),
+      home: CustomerAuthGate(onExit: widget.onExit),
       debugShowCheckedModeBanner: false,
       locale: const Locale('ar'),
       supportedLocales: AppLocalizationHelper.supportedLocales,

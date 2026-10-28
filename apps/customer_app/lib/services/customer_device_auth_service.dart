@@ -1,12 +1,18 @@
 import 'dart:convert';
-import 'package:crypto/crypto.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:uuid/uuid.dart';
+import 'dart:math';
 
-/// Manages a unique, permanent, cryptographic device token stored securely
-/// on the customer's phone to authenticate all requests without SMS OTP.
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// Manages the opaque device token used to bind an OTP-verified customer
+/// session to this installation.
+///
+/// The token is generated with a cryptographically secure RNG and stored via
+/// SharedPreferences. The token is a binding identifier only — actual auth
+/// is handled by Supabase JWT; this token prevents account-sharing between
+/// devices by binding the customer to their first verified device.
 class CustomerDeviceAuthService {
   static const _kDeviceTokenKey = 'customer_device_auth_token_v1';
+
   static CustomerDeviceAuthService? _instance;
 
   CustomerDeviceAuthService._();
@@ -14,21 +20,32 @@ class CustomerDeviceAuthService {
   static CustomerDeviceAuthService get instance =>
       _instance ??= CustomerDeviceAuthService._();
 
-  /// Gets the persistent device-bound token or creates a new cryptographically
-  /// signed token if not yet initialized.
   Future<String> getOrCreateDeviceToken() async {
     final prefs = await SharedPreferences.getInstance();
-    String? token = prefs.getString(_kDeviceTokenKey);
+    final existing = prefs.getString(_kDeviceTokenKey);
+    if (existing != null && existing.length >= 32) return existing;
+    return _generateAndStore(prefs);
+  }
 
-    if (token == null || token.isEmpty) {
-      final randomUuid = const Uuid().v4();
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final raw = 'device_${randomUuid}_$timestamp';
-      final digest = sha256.convert(utf8.encode(raw)).toString();
-      token = 'dev_$digest';
-      await prefs.setString(_kDeviceTokenKey, token);
-    }
+  /// Explicit rotation after an OTP login or when the server reports a
+  /// device mismatch.
+  Future<String> rotate() async {
+    final prefs = await SharedPreferences.getInstance();
+    return _generateAndStore(prefs);
+  }
 
+  /// Removes the locally stored token after logout. The next OTP login rotates
+  /// and rebinds a fresh token instead of reusing the logged-out device secret.
+  Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kDeviceTokenKey);
+  }
+
+  Future<String> _generateAndStore(SharedPreferences prefs) async {
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    final token = base64UrlEncode(bytes).replaceAll('=', '');
+    await prefs.setString(_kDeviceTokenKey, token);
     return token;
   }
 }

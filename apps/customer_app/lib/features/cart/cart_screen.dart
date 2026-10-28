@@ -156,7 +156,7 @@ class CartScreen extends ConsumerWidget {
           children: [
             const DecoratedBox(
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: AppRadius.smAll,
                 boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
               ),

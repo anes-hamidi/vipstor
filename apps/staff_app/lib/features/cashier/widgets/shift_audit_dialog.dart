@@ -77,31 +77,58 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
     });
   }
 
-  void _handleOpenShift() {
+  Future<String?> _promptCashierPin() async {
+    final controller = TextEditingController();
+    final pin = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('تأكيد رمز PIN'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(
+            labelText: 'رمز PIN الحالي',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('تأكيد'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return (pin == null || pin.trim().isEmpty) ? null : pin.trim();
+  }
+
+  Future<void> _handleOpenShift() async {
     final user = ref.read(authStateProvider);
+    if (user == null) return;
+    final pin = await _promptCashierPin();
+    if (!mounted || pin == null) return;
+
     final floatDzd =
         double.tryParse(_openingFloatController.text.trim()) ?? 0.0;
     final floatCentimes = (floatDzd * 100).round();
 
-    final cashierId = user?.id ?? '';
-    final cashierName = user?.name ?? 'أمين الصندوق';
-
     ref.read(posActiveShiftProvider.notifier).openShift(
-          cashierId: cashierId,
-          cashierName: cashierName,
+          cashierId: user.id,
+          cashierPin: pin,
+          cashierName: user.name,
           openingFloatCentimes: floatCentimes,
         );
 
-    final currentShift = ref.read(posActiveShiftProvider);
-    if (currentShift != null) {
-      ref.read(staffAuditLoggerProvider).logShiftOpened(
-            cashierId: cashierId,
-            cashierName: cashierName,
-            openingFloatCentimes: floatCentimes,
-            zReportNumber: currentShift.zReportNumber,
-          );
-    }
-
+    if (!mounted) return;
     Navigator.pop(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -149,7 +176,12 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
     }
   }
 
-  void _handleCloseShiftAndZReport(PosShiftSession shift) async {
+  Future<void> _handleCloseShiftAndZReport(PosShiftSession shift) async {
+    final user = ref.read(authStateProvider);
+    if (user == null) return;
+    final pin = await _promptCashierPin();
+    if (!mounted || pin == null) return;
+
     final counted = _calculatedCountedCashCentimes;
     final denomCounts = <int, int>{};
     _denominationControllers.forEach((k, v) {
@@ -157,23 +189,12 @@ class _ShiftAuditDialogState extends ConsumerState<ShiftAuditDialog> {
     });
 
     final zReport = ref.read(posActiveShiftProvider.notifier).closeShift(
+          cashierPin: pin,
           countedCashCentimes: counted,
           denominations: denomCounts,
         );
 
-    ref.read(staffAuditLoggerProvider).logShiftClosed(
-          cashierId: shift.cashierId,
-          cashierName: shift.cashierName,
-          zNumber: zReport.zNumber,
-          expectedCentimes: zReport.expectedCashCentimes,
-          countedCentimes: zReport.countedCashCentimes,
-          varianceCentimes: zReport.varianceCentimes,
-          cashSalesCentimes: zReport.cashSalesCentimes,
-          creditSalesCentimes: zReport.creditSalesCentimes,
-          debtCollectedCentimes: zReport.collectedDebtCashCentimes,
-          supplierPaymentsCentimes: zReport.supplierPaymentsCashCentimes,
-        );
-
+    if (!mounted) return;
     Navigator.pop(context);
 
     await PosThermalPrinterService.printZReport(zReport);

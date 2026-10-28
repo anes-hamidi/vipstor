@@ -8,7 +8,7 @@ class SupabaseService {
   /// Post Supplier Purchase Invoice
   Future<Map<String, dynamic>> postPurchase({
     required String purchaseId,
-    required String userId,
+    String? userId,
   }) async {
     final response = await client.rpc('rpc_post_purchase', params: {
       'p_purchase_id': purchaseId,
@@ -104,12 +104,14 @@ class SupabaseService {
   /// Adjust Stock
   Future<Map<String, dynamic>> adjustStock({
     required String userId,
+    required String callerPin,
     required String productId,
     required int qtyChange,
     required String reason,
   }) async {
     final response = await client.rpc('rpc_adjust_stock', params: {
       'p_user_id': userId,
+      'p_caller_pin': callerPin,
       'p_product_id': productId,
       'p_qty_change': qtyChange,
       'p_reason': reason,
@@ -195,6 +197,8 @@ class SupabaseService {
   }
 
   /// Update or Upsert Driver Live Location
+  /// Uses an RPC so the server validates auth.uid() == p_driver_id,
+  /// preventing any authenticated user from spoofing another driver's position.
   Future<void> updateDriverLocation({
     required String driverId,
     required double latitude,
@@ -203,14 +207,13 @@ class SupabaseService {
     double? speed,
     int? batteryLevel,
   }) async {
-    await client.from('driver_locations').upsert({
-      'driver_id': driverId,
-      'latitude': latitude,
-      'longitude': longitude,
-      'heading': heading,
-      'speed': speed,
-      'battery_level': batteryLevel,
-      'updated_at': DateTime.now().toIso8601String(),
+    await client.rpc('rpc_update_driver_location', params: {
+      'p_driver_id': driverId,
+      'p_latitude': latitude,
+      'p_longitude': longitude,
+      'p_heading': heading,
+      'p_speed': speed,
+      'p_battery_level': batteryLevel,
     });
   }
 }

@@ -216,24 +216,14 @@ class OrderRepositoryImpl implements IOrderRepository {
     );
   }
 
-  Future<String> _resolveValidUserId(String? candidateId) async {
-    if (candidateId != null && candidateId.isNotEmpty && candidateId != '22222222-2222-2222-2222-222222222222') {
-      try {
-        final rows = await client.from('users').select('id').eq('id', candidateId).limit(1);
-        if ((rows as List).isNotEmpty) {
-          return candidateId;
-        }
-      } catch (_) {}
+  /// The server derives the real actor from the JWT. This helper only rejects
+  /// empty local IDs so offline payloads stay well-formed; it never substitutes
+  /// another user.
+  String _requireUserId(String? candidateId) {
+    if (candidateId == null || candidateId.trim().isEmpty) {
+      throw StateError('missing authenticated user id');
     }
-
-    try {
-      final rows = await client.from('users').select('id').limit(1);
-      if ((rows as List).isNotEmpty) {
-        return rows.first['id'] as String;
-      }
-    } catch (_) {}
-
-    return '11111111-1111-1111-1111-111111111111';
+    return candidateId;
   }
 
   @override
@@ -244,7 +234,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     required int paidCashCentimes,
     required int onAccountCentimes,
   }) async {
-    final effectiveCashierId = await _resolveValidUserId(cashierId);
+    final effectiveCashierId = _requireUserId(cashierId);
     final clientId = const Uuid().v4();
 
     if (ConnectivityService.instance.isOnline) {
@@ -280,27 +270,6 @@ class OrderRepositoryImpl implements IOrderRepository {
     return clientId;
   }
 
-  Future<String?> _resolveValidCustomerId(String? candidateId) async {
-    if (candidateId == null ||
-        candidateId.isEmpty ||
-        candidateId == '22222222-2222-2222-2222-222222222222') {
-      return null;
-    }
-
-    try {
-      final rows = await client
-          .from('customers')
-          .select('id')
-          .eq('id', candidateId)
-          .limit(1);
-      if ((rows as List).isNotEmpty) {
-        return candidateId;
-      }
-    } catch (_) {}
-
-    return null;
-  }
-
   @override
   Future<String> submitCustomerOrder({
     required String customerId,
@@ -309,9 +278,8 @@ class OrderRepositoryImpl implements IOrderRepository {
     String? clientId,
     String? deviceToken,
   }) async {
-    final validCustomerId = await _resolveValidCustomerId(customerId);
-
-    // Only send product_id and quantity to the server
+    // Only send product_id and quantity. The RPC derives the customer from the
+    // JWT and computes price/cost server-side; p_customer_id is ignored.
     final cleanItems = items.map((it) {
       return {
         'product_id': it['product_id'],
@@ -321,7 +289,7 @@ class OrderRepositoryImpl implements IOrderRepository {
 
     return await service.submitCustomerOrder(
       clientId: clientId,
-      customerId: validCustomerId,
+      customerId: customerId,
       address: address,
       items: cleanItems,
       deviceToken: deviceToken,
@@ -334,12 +302,10 @@ class OrderRepositoryImpl implements IOrderRepository {
     required String cashierId,
     String? driverId,
   }) async {
-    final effectiveCashierId = await _resolveValidUserId(cashierId);
-    final effectiveDriverId = driverId != null ? await _resolveValidUserId(driverId) : null;
     await service.confirmOnlineOrder(
       orderId: orderId,
-      cashierId: effectiveCashierId,
-      driverId: effectiveDriverId,
+      cashierId: _requireUserId(cashierId),
+      driverId: driverId,
     );
   }
 
@@ -349,9 +315,11 @@ class OrderRepositoryImpl implements IOrderRepository {
     required OrderStatus status,
     String? notes,
   }) async {
-    final payload = <String, dynamic>{'status': status.dbValue};
-    if (notes != null) payload['notes'] = notes;
-    await client.from('orders').update(payload).eq('id', orderId);
+    await client.rpc('rpc_update_order_status', params: {
+      'p_order_id': orderId,
+      'p_status': status.dbValue,
+      'p_notes': notes,
+    });
   }
 
   @override
@@ -361,11 +329,10 @@ class OrderRepositoryImpl implements IOrderRepository {
     required String driverName,
     String? driverPhone,
   }) async {
-    final effectiveDriverId = await _resolveValidUserId(driverId);
-    await client.from('orders').update({
-      'driver_id': effectiveDriverId,
-      'status': 'assigned',
-    }).eq('id', orderId);
+    await client.rpc('rpc_assign_order_driver', params: {
+      'p_order_id': orderId,
+      'p_driver_id': driverId,
+    });
   }
 
   @override
@@ -374,10 +341,10 @@ class OrderRepositoryImpl implements IOrderRepository {
     required String preparedBy,
     String? notes,
   }) async {
-    await client.from('orders').update({
-      'status': 'ready',
-      if (notes != null) 'notes': notes,
-    }).eq('id', orderId);
+    await client.rpc('rpc_mark_order_ready', params: {
+      'p_order_id': orderId,
+      'p_notes': notes,
+    });
   }
 
   @override
@@ -387,7 +354,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     required int collectedCashCentimes,
     required String clientId,
   }) async {
-    final effectiveDriverId = await _resolveValidUserId(driverId);
+    final effectiveDriverId = _requireUserId(driverId);
 
     if (ConnectivityService.instance.isOnline) {
       try {
@@ -428,7 +395,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     String? notes,
     required String clientId,
   }) async {
-    final effectiveDriverId = await _resolveValidUserId(driverId);
+    final effectiveDriverId = _requireUserId(driverId);
 
     if (ConnectivityService.instance.isOnline) {
       try {
@@ -484,8 +451,8 @@ class OrderRepositoryImpl implements IOrderRepository {
     }
 
     final rows = await query
-        .gt('created_at', since.toIso8601String())
-        .order('created_at', ascending: false)
+        .gt('updated_at', since.toUtc().toIso8601String())
+        .order('updated_at', ascending: false)
         .limit(limit);
 
     return _buildOrderEntities(rows as List);

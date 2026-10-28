@@ -26,7 +26,7 @@ class WalletScreen extends ConsumerWidget {
           children: [
             DecoratedBox(
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+                gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
                 borderRadius: AppRadius.smAll,
                 boxShadow: [BoxShadow(color: Color(0x3D1DAB61), blurRadius: 8, offset: Offset(0,3))],
               ),
@@ -476,7 +476,7 @@ class _UnpaidOrderCard extends StatelessWidget {
                   borderRadius: AppRadius.smAll,
                 ),
                 child: const Icon(Icons.receipt_long_outlined,
-                    size: 16, color: const Color(0xFF1DAB61)),
+                    size: 16, color: Color(0xFF1DAB61)),
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
@@ -768,7 +768,7 @@ class _NoAccountCard extends StatelessWidget {
         children: [
           const DecoratedBox(
             decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+              gradient: LinearGradient(colors: [Color(0xFF1DAB61), Color(0xFF034F40)], begin: Alignment.topLeft, end: Alignment.bottomRight),
               shape: BoxShape.circle,
               boxShadow: [BoxShadow(color: Color(0x501DAB61), blurRadius: 14, offset: Offset(0,5))],
             ),
@@ -828,7 +828,7 @@ class _PaymentHint extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(Icons.info_outline_rounded,
-              size: 16, color: const Color(0xFF1DAB61)),
+              size: 16, color: Color(0xFF1DAB61)),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(

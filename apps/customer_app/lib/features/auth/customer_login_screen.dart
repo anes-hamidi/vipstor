@@ -122,7 +122,7 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     // ── Algomend Logo SVG ─────────────────────────────────
-                    _AlgomendLogo(size: 80),
+                    const _AlgomendLogo(size: 80),
                     const SizedBox(height: 16),
                     // ── Brand name ────────────────────────────────────────
                     Text(
@@ -136,7 +136,7 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
+                    const Text(
                       'DIGITAL SYSTEMS & ENTERPRISE SOLUTIONS',
                       textAlign: TextAlign.center,
                       style: TextStyle(
@@ -310,10 +310,10 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
                                                   Colors.white),
                                         ),
                                       )
-                                    : Row(
+                                    : const Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
-                                        children: const [
+                                        children: [
                                           Icon(Icons.login_rounded, size: 18),
                                           SizedBox(width: 8),
                                           Text(
@@ -439,8 +439,8 @@ class _AlgomendLogoPainter extends CustomPainter {
 
     // Gradient for the wrench (green side)
     final gradientPaint = Paint()
-      ..shader = LinearGradient(
-        colors: const [Color(0xFF1DAB61), Color(0xFF034F40)],
+      ..shader = const LinearGradient(
+        colors: [Color(0xFF1DAB61), Color(0xFF034F40)],
         begin: Alignment.topRight,
         end: Alignment.bottomLeft,
       ).createShader(Rect.fromLTWH(0, 0, w, h))

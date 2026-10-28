@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:core/core.dart' show Success, FailureResult;
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
 
@@ -94,7 +95,7 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
       });
 
       final repo = ref.read(authRepositoryProvider);
-      final isValid = await repo.verifyPin(
+      final result = await repo.verifyPin(
         userId: widget.staffMember.id,
         pin: pin,
       );
@@ -102,17 +103,23 @@ class _ChangePinDialogState extends ConsumerState<ChangePinDialog> {
       if (!mounted) return;
       setState(() => _isProcessing = false);
 
-      if (isValid) {
-        setState(() {
-          _oldPin = pin;
-          _currentStep = 2;
-          _pinController.clear();
-        });
-      } else {
-        setState(() {
-          _errorMessage = 'رمز PIN الحالي غير صحيح!';
-          _pinController.clear();
-        });
+      switch (result) {
+        case Success(:final value) when value:
+          setState(() {
+            _oldPin = pin;
+            _currentStep = 2;
+            _pinController.clear();
+          });
+        case Success():
+          setState(() {
+            _errorMessage = 'رمز PIN الحالي غير صحيح!';
+            _pinController.clear();
+          });
+        case FailureResult(:final error):
+          setState(() {
+            _errorMessage = error.message;
+            _pinController.clear();
+          });
       }
     } else if (_currentStep == 2) {
       setState(() {

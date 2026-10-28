@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:core/core.dart' show themeModeProvider;
+import 'package:core/core.dart' show themeModeProvider, Success, FailureResult;
 import 'package:data/data.dart';
 import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
@@ -138,33 +138,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     try {
       final repo = ref.read(authRepositoryProvider);
-      final isValid = await repo.verifyPin(
+      final result = await repo.verifyPin(
         userId: _selectedStaff!.id,
         pin: pin,
       );
 
       if (!mounted) return;
 
-      if (isValid) {
-        final staff = _selectedStaff!;
-        await ref.read(staffLocalAuthStoreProvider).saveLastActiveUser(staff);
-        ref.read(staffAuditLoggerProvider).logLogin(user: staff);
-        ref.read(authStateProvider.notifier).state = staff;
-      } else {
-        setState(() {
-          _isAuthenticating = false;
-          _errorMessage = 'رمز PIN غير صحيح!';
-          _pinController.clear();
-        });
+      switch (result) {
+        case Success(:final value) when value:
+          final staff = _selectedStaff!;
+          await ref.read(staffLocalAuthStoreProvider).saveLastActiveUser(staff);
+          ref.read(staffAuditLoggerProvider).logLogin(user: staff);
+          ref.read(authStateProvider.notifier).state = staff;
+        case Success():
+          setState(() {
+            _isAuthenticating = false;
+            _errorMessage = 'رمز PIN غير صحيح!';
+            _pinController.clear();
+          });
+        case FailureResult(:final error):
+          setState(() {
+            _isAuthenticating = false;
+            _errorMessage = error.message;
+            _pinController.clear();
+          });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isAuthenticating = false;
-        _errorMessage = e
-            .toString()
-            .replaceFirst('AuthException: ', '')
-            .replaceFirst('Exception: ', '');
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
         _pinController.clear();
       });
     }

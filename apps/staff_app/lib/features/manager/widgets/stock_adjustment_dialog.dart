@@ -75,8 +75,23 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
     }
 
     final authUser = ref.read(authStateProvider);
-    final userId = authUser?.id ?? 'manager';
-    final userName = authUser?.name ?? 'مدير المخزون';
+    if (authUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('انتهت الجلسة. سجّل الدخول من جديد.')),
+      );
+      return;
+    }
+    final userId = authUser.id;
+    final userName = authUser.name;
+
+    // Require PIN re-confirmation before committing stock adjustment
+    // (mirrors the server-side p_caller_pin gate in rpc_adjust_stock)
+    final pin = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _PinConfirmDialog(),
+    );
+    if (!mounted || pin == null || pin.isEmpty) return;
 
     setState(() => _isSubmitting = true);
 
@@ -117,7 +132,7 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
         ],
       );
 
-      await repo.executeStockAdjustment(adjustment: adjustment);
+      await repo.executeStockAdjustment(adjustment: adjustment, callerPin: pin);
 
       // Invalidate relevant providers
       ref.invalidate(liveProductsProvider);
@@ -489,6 +504,78 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
           ),
         ),
       ),
+    );
+  }
+}
+
+
+/// Compact 4-digit PIN confirmation dialog shown before committing a stock
+/// adjustment. Returns the entered PIN string or null if cancelled.
+class _PinConfirmDialog extends StatefulWidget {
+  const _PinConfirmDialog();
+
+  @override
+  State<_PinConfirmDialog> createState() => _PinConfirmDialogState();
+}
+
+class _PinConfirmDialogState extends State<_PinConfirmDialog> {
+  final _controller = TextEditingController();
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('تأكيد هوية المسؤول'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('أدخل رمز PIN لتأكيد تسوية المخزون'),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _controller,
+            obscureText: _obscure,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'PIN',
+              counterText: '',
+              suffixIcon: IconButton(
+                icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
+                onPressed: () => setState(() => _obscure = !_obscure),
+              ),
+            ),
+            onSubmitted: (v) {
+              if (v.length == 4) Navigator.of(context).pop(v);
+            },
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: Text(
+            'إلغاء',
+            style: TextStyle(color: theme.colorScheme.error),
+          ),
+        ),
+        ValueListenableBuilder(
+          valueListenable: _controller,
+          builder: (_, value, __) => FilledButton(
+            onPressed: value.text.length == 4
+                ? () => Navigator.of(context).pop(_controller.text)
+                : null,
+            child: const Text('تأكيد'),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:domain/domain.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -303,25 +302,7 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     }).toList();
   }
 
-  Future<String> _resolveValidUserId(String? candidateId) async {
-    if (candidateId != null && candidateId.isNotEmpty && candidateId != '22222222-2222-2222-2222-222222222222') {
-      try {
-        final rows = await client.from('users').select('id').eq('id', candidateId).limit(1);
-        if ((rows as List).isNotEmpty) {
-          return candidateId;
-        }
-      } catch (_) {}
-    }
 
-    try {
-      final rows = await client.from('users').select('id').limit(1);
-      if ((rows as List).isNotEmpty) {
-        return rows.first['id'] as String;
-      }
-    } catch (_) {}
-
-    return '11111111-1111-1111-1111-111111111111';
-  }
 
   @override
   Future<String> createDraftPurchase({
@@ -332,7 +313,7 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     List<Map<String, dynamic>> items = const [],
   }) async {
     final date = invoiceDate ?? DateTime.now();
-    final user = await _resolveValidUserId(createdBy ?? client.auth.currentUser?.id);
+    final user = createdBy ?? client.auth.currentUser?.id;
     int total = 0;
     for (final it in items) {
       final q = (it['quantity'] ?? it['qty'] ?? 1) as num;
@@ -341,25 +322,21 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     }
 
     if (!ConnectivityService.instance.isOnline) {
-      // Offline fallback: generate an offline draft purchase ID
-      return 'OFFLINE-${const Uuid().v4()}';
+      throw Exception(
+        'إنشاء مسودة فاتورة الشراء يتطلب اتصالاً بالإنترنت. '
+        'أعد المحاولة عند عودة الشبكة.',
+      );
     }
 
-    try {
-      final res = await client.rpc('rpc_create_draft_purchase', params: {
-        'p_supplier_id': supplierId,
-        'p_invoice_no': invoiceNo,
-        'p_invoice_date': date.toIso8601String().split('T').first,
-        'p_total_amount': total,
-        'p_created_by': user,
-        'p_items': items,
-      });
-      return res.toString();
-    } catch (_) {
-      // The RPC is the only supported write path. Return an offline marker
-      // so the caller can retry instead of bypassing the permission model.
-      return 'OFFLINE-${const Uuid().v4()}';
-    }
+    final res = await client.rpc('rpc_create_draft_purchase', params: {
+      'p_supplier_id': supplierId,
+      'p_invoice_no': invoiceNo,
+      'p_invoice_date': date.toIso8601String().split('T').first,
+      'p_total_amount': total,
+      'p_created_by': user,
+      'p_items': items,
+    });
+    return res.toString();
   }
 
   @override
@@ -368,33 +345,24 @@ class PurchaseRepositoryImpl implements IPurchaseRepository {
     required String userId,
     List<Map<String, dynamic>> items = const [],
   }) async {
-    final effectiveUserId = await _resolveValidUserId(userId.isNotEmpty ? userId : client.auth.currentUser?.id);
+    final effectiveUserId =
+        userId.isNotEmpty ? userId : client.auth.currentUser?.id;
 
-    if (ConnectivityService.instance.isOnline && !purchaseId.startsWith('OFFLINE-')) {
-      try {
-        await service.postPurchase(
-          purchaseId: purchaseId,
-          userId: effectiveUserId,
-        );
-        return;
-      } catch (_) {
-        // Fall through to offline queue
-      }
+    if (purchaseId.startsWith('OFFLINE-')) {
+      throw Exception(
+        'لا يمكن ترحيل مسودة محلية غير محفوظة على الخادم. '
+        'أنشئ المسودة مرة أخرى أثناء الاتصال.',
+      );
     }
-
-    // Offline: queue in PendingOperations
-    if (db != null) {
-      final clientId = const Uuid().v4();
-      await db!.enqueuePendingOp(PendingOperationsCompanion.insert(
-        clientId: clientId,
-        operationType: 'manager_purchase_post',
-        payloadJson: jsonEncode({
-          'purchase_id': purchaseId,
-          'user_id': effectiveUserId,
-          'items': items,
-        }),
-        createdAt: DateTime.now(),
-      ));
+    if (!ConnectivityService.instance.isOnline) {
+      throw Exception(
+        'ترحيل فاتورة الشراء يتطلب اتصالاً بالإنترنت. '
+        'المسودة محفوظة على الخادم ويمكن ترحيلها لاحقاً.',
+      );
     }
+    await service.postPurchase(
+      purchaseId: purchaseId,
+      userId: effectiveUserId,
+    );
   }
 }

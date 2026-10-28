@@ -243,24 +243,11 @@ class SettlementRepositoryImpl implements ISettlementRepository {
     }
   }
 
-  Future<String> _resolveValidUserId(String? candidateId) async {
-    if (candidateId != null && candidateId.isNotEmpty && candidateId != '22222222-2222-2222-2222-222222222222') {
-      try {
-        final rows = await client.from('users').select('id').eq('id', candidateId).limit(1);
-        if ((rows as List).isNotEmpty) {
-          return candidateId;
-        }
-      } catch (_) {}
+  String _requireUserId(String candidateId) {
+    if (candidateId.trim().isEmpty) {
+      throw StateError('missing authenticated user id');
     }
-
-    try {
-      final rows = await client.from('users').select('id').limit(1);
-      if ((rows as List).isNotEmpty) {
-        return rows.first['id'] as String;
-      }
-    } catch (_) {}
-
-    return '11111111-1111-1111-1111-111111111111';
+    return candidateId;
   }
 
   @override
@@ -270,8 +257,8 @@ class SettlementRepositoryImpl implements ISettlementRepository {
     required int countedAmountCentimes,
     String? notes,
   }) async {
-    final effectiveCashierId = await _resolveValidUserId(cashierId);
-    final effectiveDriverId = await _resolveValidUserId(driverId);
+    final effectiveCashierId = _requireUserId(cashierId);
+    final effectiveDriverId = _requireUserId(driverId);
     final res = await service.settleDriverWallet(
       cashierId: effectiveCashierId,
       driverId: effectiveDriverId,

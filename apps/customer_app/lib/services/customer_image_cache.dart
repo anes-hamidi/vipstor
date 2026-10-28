@@ -1,25 +1,20 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 /// Persistent image cache shared by every product / avatar image.
 ///
-/// A dedicated cache key lets us tune retention for catalogue photos while
-/// keeping Flutter's default cache free for other network images.
+/// Delegates to CachedNetworkImage's DefaultCacheManager so all catalogue
+/// images share one unified cache without adding a separate dependency.
 class CustomerImageCache {
   CustomerImageCache._();
 
-  static const _cacheKey = 'vip_customer_catalogue_v1';
-
-  static final CacheManager manager = CacheManager(
-    Config(
-      _cacheKey,
-      stalePeriod: const Duration(days: 30),
-      maxNrOfCacheObjects: 400,
-      repo: JsonCacheInfoRepository(databaseName: _cacheKey),
-      fileService: HttpFileService(),
-    ),
-  );
+  /// The shared cache manager instance used by [CachedNetworkImage] widgets.
+  ///
+  /// Pass this as `cacheManager:` to every [CachedNetworkImage] so all images
+  /// share one unified LRU disk cache.
+  static final manager = DefaultCacheManager();
 
   static bool _warming = false;
 
@@ -48,9 +43,11 @@ class CustomerImageCache {
         final batch = unique.skip(i).take(concurrency);
         await Future.wait(batch.map((url) async {
           try {
-            await manager.downloadFile(url);
+            // Pre-populate the shared disk cache via DefaultCacheManager.
+            await manager.getSingleFile(url);
           } catch (_) {
-            // Ignore individual image failures.
+            // Ignore individual image failures — a missing photo must not
+            // interrupt catalogue rendering.
           }
         }));
       }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pinput/pinput.dart';
+import 'package:core/core.dart' show Success, FailureResult;
 import 'package:staff_app/providers/staff_providers.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:domain/domain.dart';
@@ -55,30 +56,15 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
 
   List<UserEntity> get _availableStaff {
     final currentAuth = ref.read(authStateProvider);
-    final list = <UserEntity>[];
-    final staffList = ref.read(staffListProvider).value ?? const <UserEntity>[];
-    if (currentAuth != null) {
-      list.add(currentAuth);
-    }
-    for (final staff in staffList) {
-      if (!list.any((u) => u.id == staff.id)) {
-        list.add(staff);
-      }
-    }
-    return list;
+    // PIN is step-up only. The JWT identity cannot be switched by this dialog.
+    return currentAuth == null ? const <UserEntity>[] : [currentAuth];
   }
 
   @override
   void initState() {
     super.initState();
     final currentAuth = ref.read(authStateProvider);
-    final staffList = ref.read(staffListProvider).value ?? const <UserEntity>[];
-    final fallbackStaff = staffList.isNotEmpty ? staffList.first : null;
-    if (widget.mode == CashierPinMode.unlockTerminal) {
-      _selectedStaff = widget.lockedUser ?? currentAuth ?? fallbackStaff;
-    } else {
-      _selectedStaff = currentAuth ?? fallbackStaff;
-    }
+    _selectedStaff = currentAuth;
   }
 
   @override
@@ -111,43 +97,35 @@ class _CashierPinDialogState extends ConsumerState<CashierPinDialog> {
 
     try {
       final repo = ref.read(authRepositoryProvider);
-      final isValid = await repo.verifyPin(userId: targetUser.id, pin: pin);
+      final result = await repo.verifyPin(userId: targetUser.id, pin: pin);
 
       if (!mounted) return;
-      if (isValid) {
-        final selected = _selectedStaff;
-        final nav = Navigator.of(context);
-        if (nav.canPop()) {
-          nav.pop(true);
-        }
-        if (widget.mode == CashierPinMode.switchCashier && selected != null) {
-          final currentAuth = ref.read(authStateProvider);
-          if (currentAuth != null) {
-            ref.read(staffAuditLoggerProvider).logCashierSwitch(
-                  previousCashier: currentAuth,
-                  newCashier: selected,
-                );
-          } else {
-            ref.read(staffAuditLoggerProvider).logLogin(user: selected);
+      switch (result) {
+        case Success(:final value) when value:
+          final nav = Navigator.of(context);
+          if (nav.canPop()) {
+            nav.pop(true);
           }
-          ref.read(authStateProvider.notifier).state = selected;
-        }
-      } else {
-        setState(() {
-          _isVerifying = false;
-          _errorMessage = 'رمز PIN غير صحيح!';
-          _pinController.clear();
-        });
-        _focusNode.requestFocus();
+        case Success():
+          setState(() {
+            _isVerifying = false;
+            _errorMessage = 'رمز PIN غير صحيح!';
+            _pinController.clear();
+          });
+          _focusNode.requestFocus();
+        case FailureResult(:final error):
+          setState(() {
+            _isVerifying = false;
+            _errorMessage = error.message;
+            _pinController.clear();
+          });
+          _focusNode.requestFocus();
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isVerifying = false;
-        _errorMessage = e
-            .toString()
-            .replaceFirst('AuthException: ', '')
-            .replaceFirst('Exception: ', '');
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
         _pinController.clear();
       });
       _focusNode.requestFocus();
