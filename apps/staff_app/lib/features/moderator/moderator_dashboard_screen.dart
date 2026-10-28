@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:core/core.dart';
@@ -14,12 +15,13 @@ import '../cashier/widgets/driver_settlement_dialog.dart';
 
 // ── Providers ─────────────────────────────────────────────────────────────────
 
-final auditSearchQueryProvider    = StateProvider<String>((ref) => '');
-final auditActorFilterProvider    = StateProvider<String>((ref) => 'all');
+final auditSearchQueryProvider = StateProvider<String>((ref) => '');
+final auditActorFilterProvider = StateProvider<String>((ref) => 'all');
 final auditCategoryFilterProvider = StateProvider<String>((ref) => 'all');
 
 /// Full KPI + cash-flow data in one query batch.
-final moderatorStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async {
+final moderatorStatsProvider =
+    FutureProvider<Map<String, dynamic>>((ref) async {
   final client = ref.watch(supabaseClientProvider);
 
   // Orders: total sales, collected, uncollected, by channel
@@ -35,19 +37,20 @@ final moderatorStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async 
   final now = DateTime.now();
   for (var i = 6; i >= 0; i--) {
     final d = now.subtract(Duration(days: i));
-    dailySales['${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}'] = 0;
+    dailySales[
+        '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}'] = 0;
   }
 
   for (final r in orderRows as List) {
-    final amt  = (r['total_amount'] as num?)?.toInt() ?? 0;
-    final paid = (r['paid_amount']  as num?)?.toInt() ?? 0;
-    final ch   = r['channel'] as String? ?? 'store';
-    final st   = r['status']  as String? ?? '';
+    final amt = (r['total_amount'] as num?)?.toInt() ?? 0;
+    final paid = (r['paid_amount'] as num?)?.toInt() ?? 0;
+    final ch = r['channel'] as String? ?? 'store';
+    final st = r['status'] as String? ?? '';
     final rawDate = r['created_at'] as String?;
 
-    totalSales     += amt;
+    totalSales += amt;
     totalCollected += paid;
-    if (ch == 'store')  storeSales  += amt;
+    if (ch == 'store') storeSales += amt;
     if (ch == 'online') onlineSales += amt;
     if (st == 'delivered' || st == 'settled') {
       deliveredCount++;
@@ -60,29 +63,37 @@ final moderatorStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async 
     if (rawDate != null) {
       final d = DateTime.tryParse(rawDate)?.toLocal();
       if (d != null) {
-        final key = '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
-        if (dailySales.containsKey(key)) dailySales[key] = dailySales[key]! + amt;
+        final key =
+            '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+        if (dailySales.containsKey(key)) {
+          dailySales[key] = dailySales[key]! + amt;
+        }
       }
     }
   }
 
   // Driver wallets
-  final walletRows = await client.from('view_driver_wallet_balance').select('current_wallet_balance');
+  final walletRows = await client
+      .from('view_driver_wallet_balance')
+      .select('current_wallet_balance');
   int totalDriverCash = 0;
   for (final w in walletRows as List) {
     totalDriverCash += (w['current_wallet_balance'] as num?)?.toInt() ?? 0;
   }
 
   // Customer debt
-  final customerRows = await client.from('view_customer_balance').select('current_balance, credit_limit');
+  final customerRows = await client
+      .from('view_customer_balance')
+      .select('current_balance, credit_limit');
   int totalCustomerDebt = 0, totalCreditLimit = 0;
   for (final c in customerRows as List) {
     totalCustomerDebt += (c['current_balance'] as num?)?.toInt() ?? 0;
-    totalCreditLimit  += (c['credit_limit']    as num?)?.toInt() ?? 0;
+    totalCreditLimit += (c['credit_limit'] as num?)?.toInt() ?? 0;
   }
 
   // Supplier debt
-  final supplierRows = await client.from('view_supplier_balance').select('current_balance');
+  final supplierRows =
+      await client.from('view_supplier_balance').select('current_balance');
   int totalSupplierDebt = 0;
   for (final s in supplierRows as List) {
     totalSupplierDebt += (s['current_balance'] as num?)?.toInt() ?? 0;
@@ -94,7 +105,7 @@ final moderatorStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async 
       .select('on_hand_qty, last_unit_cost, available_qty');
   int inventoryValue = 0, lowStockCount = 0, outOfStockCount = 0;
   for (final s in stockRows as List) {
-    final qty  = (s['on_hand_qty']    as num?)?.toInt() ?? 0;
+    final qty = (s['on_hand_qty'] as num?)?.toInt() ?? 0;
     final cost = (s['last_unit_cost'] as num?)?.toInt() ?? 0;
     final avail = (s['available_qty'] as num?)?.toInt() ?? 0;
     inventoryValue += qty * cost;
@@ -106,7 +117,11 @@ final moderatorStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async 
   }
 
   // Staff count
-  final staffRows = await client.from('users').select('role, active').neq('role', 'customer');
+  final staffRows = await client
+      .from('users')
+      .select('role, active')
+      .neq('role', 'customer')
+      .isFilter('deleted_at', null);
   int activeStaff = 0, inactiveStaff = 0;
   for (final s in staffRows as List) {
     if (s['active'] == true) {
@@ -120,34 +135,37 @@ final moderatorStatsProvider = FutureProvider<Map<String, dynamic>>((ref) async 
   final netCashFlow = totalCollected - totalSupplierDebt;
   // Gross profit estimate: sales - (supplier payments this month)
   final grossMargin = totalSales > 0
-      ? ((totalSales - totalSupplierDebt) / totalSales * 100).clamp(0, 100).round()
+      ? ((totalSales - totalSupplierDebt) / totalSales * 100)
+          .clamp(0, 100)
+          .round()
       : 0;
 
   return {
-    'total_sales':       totalSales,
-    'total_collected':   totalCollected,
-    'uncollected':       totalSales - totalCollected,
-    'store_sales':       storeSales,
-    'online_sales':      onlineSales,
-    'driver_cash':       totalDriverCash,
-    'customer_debt':     totalCustomerDebt,
-    'credit_limit':      totalCreditLimit,
-    'supplier_debt':     totalSupplierDebt,
-    'net_cash_flow':     netCashFlow,
-    'gross_margin_pct':  grossMargin,
-    'inventory_value':   inventoryValue,
-    'low_stock_count':   lowStockCount,
-    'out_of_stock_count':outOfStockCount,
-    'delivered_count':   deliveredCount,
-    'pending_count':     pendingCount,
-    'cancelled_count':   cancelledCount,
-    'active_staff':      activeStaff,
-    'inactive_staff':    inactiveStaff,
-    'daily_sales':       dailySales,
+    'total_sales': totalSales,
+    'total_collected': totalCollected,
+    'uncollected': totalSales - totalCollected,
+    'store_sales': storeSales,
+    'online_sales': onlineSales,
+    'driver_cash': totalDriverCash,
+    'customer_debt': totalCustomerDebt,
+    'credit_limit': totalCreditLimit,
+    'supplier_debt': totalSupplierDebt,
+    'net_cash_flow': netCashFlow,
+    'gross_margin_pct': grossMargin,
+    'inventory_value': inventoryValue,
+    'low_stock_count': lowStockCount,
+    'out_of_stock_count': outOfStockCount,
+    'delivered_count': deliveredCount,
+    'pending_count': pendingCount,
+    'cancelled_count': cancelledCount,
+    'active_staff': activeStaff,
+    'inactive_staff': inactiveStaff,
+    'daily_sales': dailySales,
   };
 });
 
-final auditTrailLogsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+final auditTrailLogsProvider =
+    FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final client = ref.watch(supabaseClientProvider);
   try {
     // Use the enriched view which has human-readable titles, actor info,
@@ -160,23 +178,23 @@ final auditTrailLogsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) 
 
     return (rows as List).map((r) {
       return {
-        'id':               r['id'],
-        'created_at':       r['created_at'],
-        'action':           r['action'] as String? ?? '',
-        'target_table':     r['target_table'] as String? ?? '',
-        'target_id':        r['target_id'],
-        'user_id':          r['user_id'] ?? '',
-        'actor_name':       r['actor_name'] ?? 'النظام',
-        'actor_role':       r['actor_role'] ?? 'system',
-        'actor_phone':      r['actor_phone'] ?? '',
+        'id': r['id'],
+        'created_at': r['created_at'],
+        'action': r['action'] as String? ?? '',
+        'target_table': r['target_table'] as String? ?? '',
+        'target_id': r['target_id'],
+        'user_id': r['user_id'] ?? '',
+        'actor_name': r['actor_name'] ?? 'النظام',
+        'actor_role': r['actor_role'] ?? 'system',
+        'actor_phone': r['actor_phone'] ?? '',
         'intelligent_title': r['intelligent_title'] ?? r['action'],
-        'category':         r['category'] ?? 'عام',
-        'actor_type':       (r['actor_role'] == 'customer')
-                                ? 'customer'
-                                : (['cashier','driver','manager','moderator']
-                                    .contains(r['actor_role'])
-                                        ? 'staff'
-                                        : 'system'),
+        'category': r['category'] ?? 'عام',
+        'actor_type': (r['actor_role'] == 'customer')
+            ? 'customer'
+            : (['cashier', 'driver', 'manager', 'moderator']
+                    .contains(r['actor_role'])
+                ? 'staff'
+                : 'system'),
       };
     }).toList();
   } catch (_) {
@@ -263,7 +281,8 @@ class _ModeratorDashboardScreenState
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
+            content: Text(
+                'أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
             backgroundColor: const Color(0xFF1E3A2F),
           ),
         );
@@ -282,13 +301,15 @@ class _ModeratorDashboardScreenState
   @override
   Widget build(BuildContext context) {
     final authUser = ref.watch(authStateProvider);
-    final theme    = Theme.of(context);
-    final isDark   = theme.brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0A0908) : const Color(0xFFFAF7F2),
+      backgroundColor:
+          isDark ? const Color(0xFF0A0908) : const Color(0xFFFAF7F2),
       appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF0A0908) : const Color(0xFFFAF7F2),
+        backgroundColor:
+            isDark ? const Color(0xFF0A0908) : const Color(0xFFFAF7F2),
         elevation: 0,
         title: Row(
           children: [
@@ -344,8 +365,12 @@ class _ModeratorDashboardScreenState
           labelColor: const Color(0xFFD4AF37),
           unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
           tabs: const [
-            Tab(icon: Icon(Icons.analytics_rounded, size: 18), text: 'المؤشرات'),
-            Tab(icon: Icon(Icons.history_edu_rounded, size: 18), text: 'التدقيق'),
+            Tab(
+                icon: Icon(Icons.analytics_rounded, size: 18),
+                text: 'المؤشرات'),
+            Tab(
+                icon: Icon(Icons.history_edu_rounded, size: 18),
+                text: 'التدقيق'),
             Tab(icon: Icon(Icons.badge_rounded, size: 18), text: 'الموظفون'),
           ],
         ),
@@ -384,7 +409,8 @@ class _KpiContent extends StatelessWidget {
   final Map<String, dynamic> stats;
   final VoidCallback onGoAudit;
   final WidgetRef ref;
-  const _KpiContent({required this.stats, required this.onGoAudit, required this.ref});
+  const _KpiContent(
+      {required this.stats, required this.onGoAudit, required this.ref});
 
   void _openSupplierPayment(BuildContext context) {
     final authUser = ref.read(authStateProvider);
@@ -398,7 +424,7 @@ class _KpiContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme  = Theme.of(context);
+    final theme = Theme.of(context);
     final colors = context.appColors;
     final isDark = theme.brightness == Brightness.dark;
 
@@ -448,7 +474,8 @@ class _KpiContent extends StatelessWidget {
                   children: dailySales.keys.map((k) {
                     final parts = k.split('-');
                     return Text('${parts[2]}/${parts[1]}',
-                        style: const TextStyle(fontSize: 9, color: Colors.grey));
+                        style:
+                            const TextStyle(fontSize: 9, color: Colors.grey));
                   }).toList(),
                 ),
               ],
@@ -477,32 +504,40 @@ class _KpiContent extends StatelessWidget {
               ),
               _MiniKpi(
                 label: 'ديون الزبائن',
-                value: DzdFormatter.formatCentimes(stats['customer_debt'] as int),
+                value:
+                    DzdFormatter.formatCentimes(stats['customer_debt'] as int),
                 icon: Icons.people_alt_rounded,
                 color: colors.info,
               ),
               _MiniKpi(
                 label: 'مستحقات الموردين',
-                value: DzdFormatter.formatCentimes(stats['supplier_debt'] as int),
+                value:
+                    DzdFormatter.formatCentimes(stats['supplier_debt'] as int),
                 icon: Icons.local_shipping_rounded,
                 color: colors.error,
                 onTap: () => _openSupplierPayment(context),
                 trailing: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: const Color(0xFFD4AF37).withValues(alpha: 0.2),
                     borderRadius: AppRadius.xsAll,
-                    border: Border.all(color: const Color(0xFFD4AF37), width: 0.8),
+                    border:
+                        Border.all(color: const Color(0xFFD4AF37), width: 0.8),
                   ),
                   child: const Text(
                     'تسديد نقدًا',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFD4AF37)),
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFD4AF37)),
                   ),
                 ),
               ),
               _MiniKpi(
                 label: 'قيمة المخزون',
-                value: DzdFormatter.formatCentimes(stats['inventory_value'] as int),
+                value: DzdFormatter.formatCentimes(
+                    stats['inventory_value'] as int),
                 icon: Icons.inventory_2_rounded,
                 color: colors.success,
               ),
@@ -529,24 +564,36 @@ class _KpiContent extends StatelessWidget {
                           segments: [
                             _DonutSegment(
                                 label: 'مُسلَّمة',
-                                value: (stats['delivered_count'] as int).toDouble(),
+                                value: (stats['delivered_count'] as int)
+                                    .toDouble(),
                                 color: colors.success),
                             _DonutSegment(
                                 label: 'قيد المعالجة',
-                                value: (stats['pending_count'] as int).toDouble(),
+                                value:
+                                    (stats['pending_count'] as int).toDouble(),
                                 color: colors.warning),
                             _DonutSegment(
                                 label: 'ملغاة',
-                                value: (stats['cancelled_count'] as int).toDouble(),
+                                value: (stats['cancelled_count'] as int)
+                                    .toDouble(),
                                 color: colors.error),
                           ],
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       _DonutLegend(segments: [
-                        _DonutSegment(label: 'مُسلَّمة (${stats['delivered_count']})',  value: 0, color: colors.success),
-                        _DonutSegment(label: 'معالجة (${stats['pending_count']})',   value: 0, color: colors.warning),
-                        _DonutSegment(label: 'ملغاة (${stats['cancelled_count']})',     value: 0, color: colors.error),
+                        _DonutSegment(
+                            label: 'مُسلَّمة (${stats['delivered_count']})',
+                            value: 0,
+                            color: colors.success),
+                        _DonutSegment(
+                            label: 'معالجة (${stats['pending_count']})',
+                            value: 0,
+                            color: colors.warning),
+                        _DonutSegment(
+                            label: 'ملغاة (${stats['cancelled_count']})',
+                            value: 0,
+                            color: colors.error),
                       ]),
                     ],
                   ),
@@ -655,19 +702,23 @@ class _CashFlowCard extends StatelessWidget {
     final theme = Theme.of(context);
     final net = stats['net_cash_flow'] as int;
     final isPositive = net >= 0;
-    final netColor = isPositive ? context.appColors.success : context.appColors.error;
+    final netColor =
+        isPositive ? context.appColors.success : context.appColors.error;
 
     return Container(
       decoration: BoxDecoration(
         gradient: isDark
             ? const LinearGradient(
                 colors: [Color(0xFF1A1400), Color(0xFF2A2010)],
-                begin: Alignment.topLeft, end: Alignment.bottomRight)
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight)
             : const LinearGradient(
                 colors: [Color(0xFF3D2B00), Color(0xFF6B4A00)],
-                begin: Alignment.topLeft, end: Alignment.bottomRight),
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
         borderRadius: AppRadius.lgAll,
-        border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.4)),
+        border:
+            Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.4)),
         boxShadow: const [AppShadows.goldRim],
       ),
       padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
@@ -685,7 +736,8 @@ class _CashFlowCard extends StatelessWidget {
                       fontWeight: FontWeight.bold)),
               const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: netColor.withValues(alpha: 0.2),
                   borderRadius: AppRadius.pillAll,
@@ -695,13 +747,18 @@ class _CashFlowCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      isPositive ? Icons.trending_up_rounded : Icons.trending_down_rounded,
-                      color: netColor, size: 14),
+                        isPositive
+                            ? Icons.trending_up_rounded
+                            : Icons.trending_down_rounded,
+                        color: netColor,
+                        size: 14),
                     const SizedBox(width: 4),
                     Text(
                       isPositive ? 'إيجابي' : 'سلبي',
                       style: TextStyle(
-                          color: netColor, fontSize: 11, fontWeight: FontWeight.bold),
+                          color: netColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -725,14 +782,16 @@ class _CashFlowCard extends StatelessWidget {
               Expanded(
                 child: _CfRow(
                   label: 'إجمالي المبيعات',
-                  value: DzdFormatter.formatCentimes(stats['total_sales'] as int),
+                  value:
+                      DzdFormatter.formatCentimes(stats['total_sales'] as int),
                   color: const Color(0xFFD4AF37),
                 ),
               ),
               Expanded(
                 child: _CfRow(
                   label: 'تم تحصيله',
-                  value: DzdFormatter.formatCentimes(stats['total_collected'] as int),
+                  value: DzdFormatter.formatCentimes(
+                      stats['total_collected'] as int),
                   color: context.appColors.success,
                 ),
               ),
@@ -744,7 +803,8 @@ class _CashFlowCard extends StatelessWidget {
               Expanded(
                 child: _CfRow(
                   label: 'غير محصَّل',
-                  value: DzdFormatter.formatCentimes(stats['uncollected'] as int),
+                  value:
+                      DzdFormatter.formatCentimes(stats['uncollected'] as int),
                   color: context.appColors.warning,
                 ),
               ),
@@ -924,8 +984,7 @@ class _DonutLegend extends StatelessWidget {
                           decoration: BoxDecoration(
                               color: s.color, shape: BoxShape.circle)),
                       const SizedBox(width: 6),
-                      Text(s.label,
-                          style: const TextStyle(fontSize: 10)),
+                      Text(s.label, style: const TextStyle(fontSize: 10)),
                     ],
                   ),
                 ))
@@ -1011,9 +1070,7 @@ class _StockStatusRow extends StatelessWidget {
         children: [
           Icon(icon, color: color, size: 16),
           const SizedBox(width: AppSpacing.sm),
-          Expanded(
-              child: Text(label,
-                  style: const TextStyle(fontSize: 12))),
+          Expanded(child: Text(label, style: const TextStyle(fontSize: 12))),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
@@ -1022,9 +1079,7 @@ class _StockStatusRow extends StatelessWidget {
             ),
             child: Text('$count',
                 style: TextStyle(
-                    color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold)),
+                    color: color, fontSize: 12, fontWeight: FontWeight.bold)),
           ),
         ],
       );
@@ -1035,10 +1090,11 @@ class _StockStatusRow extends StatelessWidget {
 class _AuditTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final auditAsync      = ref.watch(auditTrailLogsProvider);
-    final searchQuery     = ref.watch(auditSearchQueryProvider).trim().toLowerCase();
-    final actorFilter     = ref.watch(auditActorFilterProvider);
-    final categoryFilter  = ref.watch(auditCategoryFilterProvider);
+    final auditAsync = ref.watch(auditTrailLogsProvider);
+    final searchQuery =
+        ref.watch(auditSearchQueryProvider).trim().toLowerCase();
+    final actorFilter = ref.watch(auditActorFilterProvider);
+    final categoryFilter = ref.watch(auditCategoryFilterProvider);
 
     return Column(
       children: [
@@ -1049,12 +1105,19 @@ class _AuditTab extends ConsumerWidget {
           child: auditAsync.when(
             data: (logs) {
               final filtered = logs.where((item) {
-                if (actorFilter != 'all' && item['actor_type'] != actorFilter) return false;
-                if (categoryFilter != 'all' && item['category'] != categoryFilter) return false;
+                if (actorFilter != 'all' && item['actor_type'] != actorFilter) {
+                  return false;
+                }
+                if (categoryFilter != 'all' &&
+                    item['category'] != categoryFilter) {
+                  return false;
+                }
                 if (searchQuery.isNotEmpty) {
                   final hay = [
-                    item['intelligent_title'], item['actor_name'],
-                    item['target_table'], item['action'],
+                    item['intelligent_title'],
+                    item['actor_name'],
+                    item['target_table'],
+                    item['action'],
                   ].join(' ').toLowerCase();
                   if (!hay.contains(searchQuery)) return false;
                 }
@@ -1074,8 +1137,7 @@ class _AuditTab extends ConsumerWidget {
                 itemCount: filtered.length,
                 separatorBuilder: (_, __) =>
                     const SizedBox(height: AppSpacing.xs),
-                itemBuilder: (ctx, i) =>
-                    _AuditRow(log: filtered[i]),
+                itemBuilder: (ctx, i) => _AuditRow(log: filtered[i]),
               );
             },
             loading: () => AppStates.loading(message: 'جاري جلب السجل...'),
@@ -1091,9 +1153,9 @@ class _AuditTab extends ConsumerWidget {
 class _AuditFilterBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme          = Theme.of(context);
-    final searchQuery    = ref.watch(auditSearchQueryProvider);
-    final actorFilter    = ref.watch(auditActorFilterProvider);
+    final theme = Theme.of(context);
+    final searchQuery = ref.watch(auditSearchQueryProvider);
+    final actorFilter = ref.watch(auditActorFilterProvider);
     final categoryFilter = ref.watch(auditCategoryFilterProvider);
 
     return Padding(
@@ -1115,9 +1177,9 @@ class _AuditFilterBar extends ConsumerWidget {
               suffixIcon: searchQuery.isNotEmpty
                   ? IconButton(
                       icon: const Icon(Icons.clear_rounded, size: 16),
-                      onPressed: () =>
-                          ref.read(auditSearchQueryProvider.notifier).state =
-                              '',
+                      onPressed: () => ref
+                          .read(auditSearchQueryProvider.notifier)
+                          .state = '',
                     )
                   : null,
             ),
@@ -1130,14 +1192,57 @@ class _AuditFilterBar extends ConsumerWidget {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _FilterChip(label: 'الكل',     value: 'all',      current: actorFilter,    onTap: (v) => ref.read(auditActorFilterProvider.notifier).state = v),
-                _FilterChip(label: 'موظفون',   value: 'staff',    current: actorFilter,    onTap: (v) => ref.read(auditActorFilterProvider.notifier).state = v),
-                _FilterChip(label: 'زبائن',    value: 'customer', current: actorFilter,    onTap: (v) => ref.read(auditActorFilterProvider.notifier).state = v),
+                _FilterChip(
+                    label: 'الكل',
+                    value: 'all',
+                    current: actorFilter,
+                    onTap: (v) =>
+                        ref.read(auditActorFilterProvider.notifier).state = v),
+                _FilterChip(
+                    label: 'موظفون',
+                    value: 'staff',
+                    current: actorFilter,
+                    onTap: (v) =>
+                        ref.read(auditActorFilterProvider.notifier).state = v),
+                _FilterChip(
+                    label: 'زبائن',
+                    value: 'customer',
+                    current: actorFilter,
+                    onTap: (v) =>
+                        ref.read(auditActorFilterProvider.notifier).state = v),
                 const SizedBox(width: AppSpacing.md),
-                _FilterChip(label: 'مبيعات',   value: 'sales',    current: categoryFilter, onTap: (v) => ref.read(auditCategoryFilterProvider.notifier).state = v, isCategory: true),
-                _FilterChip(label: 'مالية',    value: 'finance',  current: categoryFilter, onTap: (v) => ref.read(auditCategoryFilterProvider.notifier).state = v, isCategory: true),
-                _FilterChip(label: 'مخزون',    value: 'inventory',current: categoryFilter, onTap: (v) => ref.read(auditCategoryFilterProvider.notifier).state = v, isCategory: true),
-                _FilterChip(label: 'أمان',     value: 'security', current: categoryFilter, onTap: (v) => ref.read(auditCategoryFilterProvider.notifier).state = v, isCategory: true),
+                _FilterChip(
+                    label: 'مبيعات',
+                    value: 'sales',
+                    current: categoryFilter,
+                    onTap: (v) => ref
+                        .read(auditCategoryFilterProvider.notifier)
+                        .state = v,
+                    isCategory: true),
+                _FilterChip(
+                    label: 'مالية',
+                    value: 'finance',
+                    current: categoryFilter,
+                    onTap: (v) => ref
+                        .read(auditCategoryFilterProvider.notifier)
+                        .state = v,
+                    isCategory: true),
+                _FilterChip(
+                    label: 'مخزون',
+                    value: 'inventory',
+                    current: categoryFilter,
+                    onTap: (v) => ref
+                        .read(auditCategoryFilterProvider.notifier)
+                        .state = v,
+                    isCategory: true),
+                _FilterChip(
+                    label: 'أمان',
+                    value: 'security',
+                    current: categoryFilter,
+                    onTap: (v) => ref
+                        .read(auditCategoryFilterProvider.notifier)
+                        .state = v,
+                    isCategory: true),
               ],
             ),
           ),
@@ -1204,25 +1309,32 @@ class _AuditRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme  = Theme.of(context);
+    final theme = Theme.of(context);
     final colors = context.appColors;
     final action = (log['action'] as String? ?? '').toUpperCase();
-    final table  = log['target_table'] as String? ?? '';
-    final name   = log['actor_name']  as String? ?? 'النظام';
+    final table = log['target_table'] as String? ?? '';
+    final name = log['actor_name'] as String? ?? 'النظام';
     final rawDate = log['created_at'] as String?;
-    final date   = rawDate != null ? DateTime.tryParse(rawDate)?.toLocal() : null;
+    final date = rawDate != null ? DateTime.tryParse(rawDate)?.toLocal() : null;
 
     Color actionColor;
     IconData actionIcon;
     switch (action) {
       case 'INSERT':
-        actionColor = colors.success; actionIcon = Icons.add_circle_outline_rounded; break;
+        actionColor = colors.success;
+        actionIcon = Icons.add_circle_outline_rounded;
+        break;
       case 'UPDATE':
-        actionColor = colors.warning; actionIcon = Icons.edit_rounded; break;
+        actionColor = colors.warning;
+        actionIcon = Icons.edit_rounded;
+        break;
       case 'DELETE':
-        actionColor = colors.error;   actionIcon = Icons.delete_rounded; break;
+        actionColor = colors.error;
+        actionIcon = Icons.delete_rounded;
+        break;
       default:
-        actionColor = colors.info;    actionIcon = Icons.info_rounded;
+        actionColor = colors.info;
+        actionIcon = Icons.info_rounded;
     }
 
     return LuxuryCard(
@@ -1280,18 +1392,17 @@ class _AuditRow extends ConsumerWidget {
                   Row(
                     children: [
                       Icon(Icons.person_rounded,
-                          size: 11,
-                          color: theme.colorScheme.onSurfaceVariant),
+                          size: 11, color: theme.colorScheme.onSurfaceVariant),
                       const SizedBox(width: 3),
                       Text(name,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              fontSize: 11)),
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(fontSize: 11)),
                       const Spacer(),
                       if (date != null)
                         Text(
-                          '${date.day}/${date.month} ${date.hour.toString().padLeft(2,'0')}:${date.minute.toString().padLeft(2,'0')}',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(fontSize: 10, color: theme.colorScheme.outline),
+                          '${date.day}/${date.month} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              fontSize: 10, color: theme.colorScheme.outline),
                         ),
                     ],
                   ),
@@ -1317,33 +1428,134 @@ class _StaffTabState extends ConsumerState<_StaffTab> {
   Future<void> _addStaff() async {
     final res = await showDialog<Map<String, dynamic>>(
       context: context,
+      barrierDismissible: false,
       builder: (_) => const CreateStaffDialog(),
     );
     if (res != null && mounted) {
       ref.invalidate(staffMembersProvider);
       ref.invalidate(liveStaffUsersProvider);
-      final pin = res['pin'] as String?;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('تم إنشاء حساب "${res['name']}"'
-            '${pin != null ? " — PIN: $pin" : ""}'),
-        backgroundColor: context.appColors.success,
-      ));
+      await _showStaffCredentials(res);
     }
+  }
+
+  Future<void> _showStaffCredentials(Map<String, dynamic> res) async {
+    final name = res['name']?.toString() ?? '';
+    final phone = res['phone']?.toString() ?? '';
+    final password = res['temporary_password']?.toString() ?? '';
+    final pin = res['pin']?.toString() ?? '';
+    final all = <String>[
+      if (name.isNotEmpty) 'الاسم: $name',
+      if (phone.isNotEmpty) 'الهاتف: $phone',
+      if (password.isNotEmpty) 'كلمة المرور المؤقتة: $password',
+      if (pin.isNotEmpty) 'رمز PIN: $pin',
+    ].join('\n');
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          icon: const Icon(Icons.badge_rounded),
+          title: const Text('بيانات دخول الموظف'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: Theme.of(dialogContext)
+                        .colorScheme
+                        .errorContainer
+                        .withValues(alpha: 0.65),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'اعرض هذه البيانات مرة واحدة وسلّمها للموظف بطريقة آمنة. '
+                    'لن تظهر كلمة المرور المؤقتة مرة أخرى.',
+                    style: Theme.of(dialogContext).textTheme.bodySmall,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                if (name.isNotEmpty) _credentialRow('الاسم', name),
+                if (phone.isNotEmpty) _credentialRow('رقم الهاتف', phone),
+                if (password.isNotEmpty)
+                  _credentialRow('كلمة المرور المؤقتة', password, ltr: true),
+                if (pin.isNotEmpty) _credentialRow('رمز PIN', pin, ltr: true),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: all));
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('تم نسخ بيانات الدخول')),
+                );
+              },
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              label: const Text('نسخ الكل'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('تم'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _credentialRow(String label, String value, {bool ltr = false}) {
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(bottom: AppSpacing.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 112,
+            child: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+          ),
+          Expanded(
+            child: SelectableText(
+              value,
+              textDirection: ltr ? TextDirection.ltr : TextDirection.rtl,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _editProfile(Map<String, dynamic> user) async {
     final changed = await StaffProfileEditSheet.show(
-      context, ref,
-      userId:   user['id']       as String,
-      name:     user['name']     as String?  ?? '',
-      phone:    user['phone']    as String?  ?? '',
-      role:     user['role']     as String?  ?? 'cashier',
-      active:   user['active']   as bool?    ?? true,
-      language: user['language'] as String?  ?? 'ar',
+      context,
+      ref,
+      userId: user['id'] as String,
+      name: user['name'] as String? ?? '',
+      phone: user['phone'] as String? ?? '',
+      role: user['role'] as String? ?? 'cashier',
+      active: user['active'] as bool? ?? true,
+      language: user['language'] as String? ?? 'ar',
     );
-    if (changed == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('تم تحديث الملف الشخصي')));
+    if (changed != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(changed == StaffProfileEditOutcome.deleted
+              ? 'تم حذف حساب الموظف'
+              : 'تم تحديث الملف الشخصي'),
+          backgroundColor: changed == StaffProfileEditOutcome.deleted
+              ? context.appColors.warning
+              : null,
+        ),
+      );
     }
   }
 
@@ -1426,9 +1638,11 @@ class _StaffTabState extends ConsumerState<_StaffTab> {
                     const SizedBox(height: AppSpacing.sm),
                 itemBuilder: (ctx, i) => _StaffCard(
                   user: staff[i],
-                  onEdit:     () => _editProfile(staff[i]),
+                  onEdit: () => _editProfile(staff[i]),
                   onResetPin: () => _resetPin(staff[i]),
-                  onSettle:   staff[i]['role'] == 'driver' ? () => _settleDriver(staff[i]) : null,
+                  onSettle: staff[i]['role'] == 'driver'
+                      ? () => _settleDriver(staff[i])
+                      : null,
                 ),
               ),
             ),
@@ -1455,22 +1669,23 @@ class _StaffCard extends StatelessWidget {
   });
 
   static const _roleData = {
-    'moderator': ('مشرف عام',     Icons.admin_panel_settings_rounded),
-    'manager':   ('مدير مخزون',   Icons.inventory_2_rounded),
-    'cashier':   ('أمين صندوق',   Icons.point_of_sale_rounded),
-    'driver':    ('سائق توصيل',   Icons.local_shipping_rounded),
-    'customer':  ('زبون جملة',    Icons.shopping_bag_rounded),
+    'moderator': ('مشرف عام', Icons.admin_panel_settings_rounded),
+    'manager': ('مدير مخزون', Icons.inventory_2_rounded),
+    'cashier': ('أمين صندوق', Icons.point_of_sale_rounded),
+    'driver': ('سائق توصيل', Icons.local_shipping_rounded),
+    'customer': ('زبون جملة', Icons.shopping_bag_rounded),
   };
 
   @override
   Widget build(BuildContext context) {
-    final theme  = Theme.of(context);
+    final theme = Theme.of(context);
     final colors = context.appColors;
-    final role   = user['role']   as String? ?? 'cashier';
-    final name   = user['name']   as String? ?? 'موظف';
-    final phone  = user['phone']  as String? ?? '';
-    final active = user['active'] as bool?   ?? true;
-    final (roleLabel, roleIcon) = _roleData[role] ?? ('موظف', Icons.person_rounded);
+    final role = user['role'] as String? ?? 'cashier';
+    final name = user['name'] as String? ?? 'موظف';
+    final phone = user['phone'] as String? ?? '';
+    final active = user['active'] as bool? ?? true;
+    final (roleLabel, roleIcon) =
+        _roleData[role] ?? ('موظف', Icons.person_rounded);
 
     return LuxuryCard(
       selected: active,
@@ -1479,7 +1694,8 @@ class _StaffCard extends StatelessWidget {
         children: [
           // Avatar
           Container(
-            width: 48, height: 48,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               gradient: active ? AppGradients.obsidianGold : null,
               color: active ? null : theme.colorScheme.surfaceContainerHighest,
@@ -1535,15 +1751,23 @@ class _StaffCard extends StatelessWidget {
                 if (role == 'driver')
                   Consumer(
                     builder: (context, ref, _) {
-                      final pendingList = ref.watch(pendingDriverSettlementsProvider).valueOrNull ?? [];
-                      final driverSumm = pendingList.where((d) => d.driverId == user['id']).firstOrNull;
+                      final pendingList = ref
+                              .watch(pendingDriverSettlementsProvider)
+                              .valueOrNull ??
+                          [];
+                      final driverSumm = pendingList
+                          .where((d) => d.driverId == user['id'])
+                          .firstOrNull;
                       final bal = driverSumm?.pendingCashCentimes ?? 0;
                       if (bal <= 0) {
                         return Padding(
                           padding: const EdgeInsets.only(top: 3),
                           child: Text(
                             '✓ العهدة مسواة (0 دج)',
-                            style: TextStyle(color: colors.success, fontSize: 10, fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                                color: colors.success,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold),
                           ),
                         );
                       }
@@ -1552,11 +1776,13 @@ class _StaffCard extends StatelessWidget {
                         child: Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
                                 color: colors.gold.withValues(alpha: 0.15),
                                 borderRadius: AppRadius.pillAll,
-                                border: Border.all(color: colors.gold.withValues(alpha: 0.4)),
+                                border: Border.all(
+                                    color: colors.gold.withValues(alpha: 0.4)),
                               ),
                               child: Text(
                                 'العهدة الحالية: ${DzdFormatter.formatCentimes(bal)} (${driverSumm?.unsettledOrdersCount ?? 0} طلبات)',

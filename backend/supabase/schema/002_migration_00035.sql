@@ -121,7 +121,12 @@ COMMIT;
 -- reserved_qty still computed live — order_items is small and bounded by active
 -- orders; a snapshot for it would need an UPDATE trigger on order status changes,
 -- which adds complexity for minimal gain at current scale.
-CREATE OR REPLACE VIEW view_product_stock AS
+-- The baseline view's on_hand_qty is BIGINT (SUM of stock_ledger) while the
+-- snapshot column is INT, so CREATE OR REPLACE cannot change the type. Drop
+-- first so this migration is re-runnable and works on a fresh 001 database.
+DROP VIEW IF EXISTS view_product_stock CASCADE;
+
+CREATE VIEW view_product_stock AS
 SELECT
     p.id              AS product_id,
     p.name_ar,
@@ -203,7 +208,11 @@ WHERE p.active = TRUE;
 
 -- ── view_customer_balance ─────────────────────────────────────────────────────
 -- Reads from customer_balance_snapshot instead of aggregating customer_ledger.
-CREATE OR REPLACE VIEW view_customer_balance AS
+-- Drop first: the baseline view aggregates NUMERIC ledger amounts, while the
+-- snapshot stores BIGINT centimes.
+DROP VIEW IF EXISTS view_customer_balance CASCADE;
+
+CREATE VIEW view_customer_balance AS
 SELECT
     c.id           AS customer_id,
     c.user_id,
@@ -218,7 +227,9 @@ LEFT JOIN customer_balance_snapshot s ON c.id = s.customer_id;
 
 -- ── view_driver_wallet_balance ────────────────────────────────────────────────
 -- Reads from driver_wallet_snapshot instead of aggregating wallet_entries.
-CREATE OR REPLACE VIEW view_driver_wallet_balance AS
+DROP VIEW IF EXISTS view_driver_wallet_balance CASCADE;
+
+CREATE VIEW view_driver_wallet_balance AS
 SELECT
     driver_id,
     COALESCE(current_wallet_balance, 0) AS current_wallet_balance
@@ -226,7 +237,9 @@ FROM driver_wallet_snapshot;
 
 -- ── view_supplier_balance ─────────────────────────────────────────────────────
 -- Reads from supplier_balance_snapshot instead of aggregating supplier_ledger.
-CREATE OR REPLACE VIEW view_supplier_balance AS
+DROP VIEW IF EXISTS view_supplier_balance CASCADE;
+
+CREATE VIEW view_supplier_balance AS
 SELECT
     s.id            AS supplier_id,
     s.name          AS supplier_name,

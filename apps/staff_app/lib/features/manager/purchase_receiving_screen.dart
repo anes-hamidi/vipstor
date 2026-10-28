@@ -141,7 +141,7 @@ class _PurchaseReceivingScreenState
       active: user.active,
       language: user.language,
     );
-    if (updated == true && mounted) {
+    if (updated == StaffProfileEditOutcome.updated && mounted) {
       setState(() {});
     }
   }

@@ -233,9 +233,9 @@ class _ProfileFormScreenState extends ConsumerState<ProfileFormScreen> {
                   textInputAction: TextInputAction.next,
                   validator: _validatePhone,
                   decoration: const InputDecoration(
-                    labelText: 'رقم الهاتف المؤكد *',
+                    labelText: 'رقم الهاتف المسجل *',
                     helperText:
-                        'رقم الهاتف مؤكد عبر رمز SMS ولا يمكن تغييره من هنا.',
+                        'رقم الهاتف مرتبط بحساب الدخول ولا يمكن تغييره من هنا. راجع المتجر عند الحاجة.',
                     prefixIcon: Icon(Icons.phone_rounded),
                   ),
                 ),

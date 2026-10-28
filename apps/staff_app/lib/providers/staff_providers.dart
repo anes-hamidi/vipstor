@@ -146,6 +146,8 @@ final staffMembersProvider =
   final rows = await client
       .from('users')
       .select('id, name, phone, role, active, language, created_at')
+      .neq('role', 'customer')
+      .isFilter('deleted_at', null)
       .order('created_at', ascending: false);
   return List<Map<String, dynamic>>.from(rows as List);
 });

@@ -2,11 +2,12 @@
 -- VIP WHOLESALE & POS MANAGEMENT SYSTEM
 -- OPERATIONS - INSTALLATION VERIFICATION
 -- ============================================================
--- Read-only. Run this after schema/001_fresh_schema.sql and
--- seeds/001_admin.sql to confirm the database is ready.
+-- Read-only. Run this after schema/001_fresh_schema.sql through
+-- schema/006_auth_management.sql and seeds/001_admin.sql to confirm the
+-- database is ready.
 --
 -- A healthy fresh install shows:
---   * latest_version = 00034
+--   * latest_version = 00037
 --   * no missing tables
 --   * no missing RPCs
 --   * rls_enabled = public_tables
@@ -36,7 +37,8 @@ WITH expected(name) AS (
         ('app_versions'), ('pos_shifts'),
         ('product_stock_snapshot'), ('customer_balance_snapshot'),
         ('driver_wallet_snapshot'), ('driver_location_events'),
-        ('failed_operations'), ('schema_migrations')
+        ('failed_operations'), ('schema_migrations'),
+        ('customer_recovery'), ('auth_rate_limits')
 )
 SELECT e.name AS missing_table
 FROM expected e
@@ -57,7 +59,13 @@ WITH expected(name) AS (
         ('rpc_save_user_profile'), ('rpc_create_customer_by_staff'),
         ('rpc_get_customer_order_live'), ('rpc_open_pos_shift'),
         ('rpc_close_pos_shift'), ('rpc_get_latest_app_version'),
-        ('rpc_purge_historical_data')
+        ('rpc_purge_historical_data'), ('rpc_bootstrap_my_account'),
+        ('rpc_auth_rate_limit'), ('rpc_auth_verify_moderator_pin'),
+        ('rpc_auth_customer_register_finalize'),
+        ('rpc_auth_customer_recovery_verify'),
+        ('rpc_auth_customer_recovery_rotate'),
+        ('rpc_auth_staff_create_finalize'),
+        ('rpc_auth_staff_delete_prepare')
 )
 SELECT e.name AS missing_rpc
 FROM expected e

@@ -3,12 +3,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/customer_providers.dart';
+import 'customer_forgot_password_screen.dart';
+import 'customer_register_screen.dart';
 
 /// Customer entry point: phone + password login — Algomend brand identity.
 ///
-/// Uses Supabase Auth `signInWithPassword(phone, password)`. The server
-/// resolves the customer profile from the JWT. No phone number or customer id
-/// is trusted from the client.
+/// New accounts use a deterministic synthetic email behind the scenes, so no
+/// SMS or email provider is required. The server resolves the customer profile
+/// from the JWT. No phone number or customer id is trusted from the client.
 class CustomerLoginScreen extends ConsumerStatefulWidget {
   const CustomerLoginScreen({super.key});
 
@@ -27,10 +29,10 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
   String? _error;
 
   // ── Algomend brand colors ─────────────────────────────────────────────────
-  static const _green = Color(0xFF1DAB61);    // Wrench Green
-  static const _teal = Color(0xFF034F40);     // Circuit Teal
-  static const _black = Color(0xFF111111);    // Typography Black
-  static const _gray = Color(0xFF333333);     // Tagline Gray
+  static const _green = Color(0xFF1DAB61); // Wrench Green
+  static const _teal = Color(0xFF034F40); // Circuit Teal
+  static const _black = Color(0xFF111111); // Typography Black
+  static const _gray = Color(0xFF333333); // Tagline Gray
 
   @override
   void dispose() {
@@ -97,19 +99,16 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final surfaceBg =
         isDark ? const Color(0xFF0B130F) : const Color(0xFFF6FAF7);
-    final cardBg =
-        isDark ? const Color(0xFF131B16) : Colors.white;
+    final cardBg = isDark ? const Color(0xFF131B16) : Colors.white;
     final borderColor =
         isDark ? const Color(0xFF2C352F) : const Color(0xFFD7E5DC);
     final onSurface = isDark ? const Color(0xFFDCE9E1) : _black;
-    final onSurfaceVariant =
-        isDark ? const Color(0xFFB2C9BC) : _gray;
-    final inputFill = isDark ? const Color(0xFF171F1A) : const Color(0xFFEEF5F0);
+    final onSurfaceVariant = isDark ? const Color(0xFFB2C9BC) : _gray;
+    final inputFill =
+        isDark ? const Color(0xFF171F1A) : const Color(0xFFEEF5F0);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: isDark
-          ? SystemUiOverlayStyle.light
-          : SystemUiOverlayStyle.dark,
+      value: isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
         backgroundColor: surfaceBg,
         body: SafeArea(
@@ -215,8 +214,7 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
                                 RegExp(r'[0-9+]'),
                               ),
                             ],
-                            onSubmitted: (_) =>
-                                _passwordFocus.requestFocus(),
+                            onSubmitted: (_) => _passwordFocus.requestFocus(),
                             labelText: 'رقم الهاتف',
                             hintText: '0550123456',
                             prefixIcon: Icons.phone_iphone_rounded,
@@ -281,8 +279,7 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
                                     ? null
                                     : [
                                         BoxShadow(
-                                          color: _green.withValues(
-                                              alpha: 0.38),
+                                          color: _green.withValues(alpha: 0.38),
                                           blurRadius: 14,
                                           offset: const Offset(0, 5),
                                         ),
@@ -338,8 +335,7 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
                                 color: const Color(0xFFFFDAD6),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                    color: const Color(0xFFFF6B6B),
-                                    width: 0.8),
+                                    color: const Color(0xFFFF6B6B), width: 0.8),
                               ),
                               child: Row(
                                 children: [
@@ -366,6 +362,42 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 20),
+                    // ── Account actions ──────────────────────────────────
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton.icon(
+                            onPressed: _busy
+                                ? null
+                                : () => Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) =>
+                                            const CustomerRegisterScreen(),
+                                      ),
+                                    ),
+                            icon: const Icon(Icons.person_add_alt_1_rounded,
+                                size: 18),
+                            label: const Text('إنشاء حساب جديد'),
+                          ),
+                        ),
+                        Expanded(
+                          child: TextButton.icon(
+                            onPressed: _busy
+                                ? null
+                                : () => Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) =>
+                                            const CustomerForgotPasswordScreen(),
+                                      ),
+                                    ),
+                            icon: const Icon(Icons.help_outline_rounded,
+                                size: 18),
+                            label: const Text('نسيت كلمة المرور؟'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
                     // ── Footer note ───────────────────────────────────────
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -378,7 +410,7 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
                         const SizedBox(width: 6),
                         Flexible(
                           child: Text(
-                            'كلمة المرور تُقدَّم من Algomend عند إنشاء حسابك.',
+                            'حسابك محمي بكلمة مرور. احتفظ برمز الاستعادة بعد التسجيل.',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontFamily: 'OpenSans',

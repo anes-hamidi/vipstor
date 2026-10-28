@@ -74,6 +74,7 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
     with SingleTickerProviderStateMixin {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController(text: '+213');
+  final _passwordController = TextEditingController();
   final _pinController = TextEditingController(text: '1234');
   final _adminPinController = TextEditingController();
 
@@ -82,6 +83,7 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
   bool _isSaving = false;
   bool _showAdminPin = false;
   bool _showStaffPin = false;
+  bool _showStaffPassword = false;
 
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
@@ -89,10 +91,10 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
   @override
   void initState() {
     super.initState();
+    _passwordController.text = _generateRandomPassword();
     _fadeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 280));
-    _fadeAnim =
-        CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
   }
 
@@ -100,6 +102,7 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
+    _passwordController.dispose();
     _pinController.dispose();
     _adminPinController.dispose();
     _fadeCtrl.dispose();
@@ -107,9 +110,25 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
   }
 
   void _generateRandomPin() {
-    final pin =
-        (1000 + Random().nextInt(9000)).toString();
+    final random = Random.secure();
+    final pin = (1000 + random.nextInt(9000)).toString();
     setState(() => _pinController.text = pin);
+    HapticFeedback.lightImpact();
+  }
+
+  static String _generateRandomPassword() {
+    const alphabet =
+        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    final random = Random.secure();
+    final buffer = StringBuffer();
+    for (var i = 0; i < 12; i++) {
+      buffer.write(alphabet[random.nextInt(alphabet.length)]);
+    }
+    return buffer.toString();
+  }
+
+  void _generateRandomPasswordAndSet() {
+    setState(() => _passwordController.text = _generateRandomPassword());
     HapticFeedback.lightImpact();
   }
 
@@ -129,14 +148,23 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
     return null;
   }
 
+  String? get _passwordError {
+    if (_passwordController.text.length < 8) {
+      return 'كلمة المرور يجب أن تكون 8 أحرف على الأقل';
+    }
+    return null;
+  }
+
   String? get _pinError {
-    if (_pinController.text.trim().length < 4) return 'PIN يجب أن يكون 4 أرقام';
+    if (!RegExp(r'^[0-9]{4,8}$').hasMatch(_pinController.text.trim())) {
+      return 'PIN يجب أن يكون من 4 إلى 8 أرقام';
+    }
     return null;
   }
 
   String? get _adminPinError {
-    if (_adminPinController.text.trim().length < 4) {
-      return 'PIN المشرف مطلوب للتأكيد';
+    if (!RegExp(r'^[0-9]{4,8}$').hasMatch(_adminPinController.text.trim())) {
+      return 'PIN المشرف مطلوب للتأكيد (4-8 أرقام)';
     }
     return null;
   }
@@ -147,6 +175,7 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
 
     if (_nameError != null ||
         _phoneError != null ||
+        _passwordError != null ||
         _pinError != null ||
         _adminPinError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -162,33 +191,43 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
     try {
       final supa = ref.read(supabaseServiceProvider);
       final currentAdmin = ref.read(authStateProvider);
-      final adminId = currentAdmin?.id;
-      if (adminId == null) return;
+      if (currentAdmin == null) return;
 
-      final res = await supa.createStaffMember(
-        adminId: adminId,
+      final res = await supa.createStaffAccount(
         adminPin: _adminPinController.text.trim(),
         name: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
         role: _selectedRole,
+        password: _passwordController.text,
         initialPin: _pinController.text.trim(),
         language: _selectedLang,
       );
 
       if (!mounted) return;
+      res['name'] = _nameController.text.trim();
       res['pin'] = _pinController.text.trim();
+      res['temporary_password'] = _passwordController.text;
       Navigator.pop(context, res);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('فشل إنشاء حساب الموظف: $e'),
+          content: Text('فشل إنشاء حساب الموظف: ${_friendlyError(e)}'),
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  String _friendlyError(Object error) {
+    final raw = error.toString();
+    final match = RegExp(r'message:\s*(.*?),?\s*statusCode:').firstMatch(raw);
+    if (match != null && (match.group(1) ?? '').trim().isNotEmpty) {
+      return match.group(1)!.trim();
+    }
+    return raw.replaceFirst('Exception: ', '');
   }
 
   // ─── Build ────────────────────────────────────────────────────────────────
@@ -198,69 +237,84 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return FadeTransition(
-      opacity: _fadeAnim,
-      child: Dialog(
-        shape:
-            const RoundedRectangleBorder(borderRadius: AppRadius.lgAll),
-        insetPadding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 820),
-          child: Column(
-            children: [
-              // ── Gold Header ───────────────────────────────────────
-              _buildHeader(theme, isDark),
+    return PopScope(
+      canPop: !_isSaving,
+      child: FadeTransition(
+        opacity: _fadeAnim,
+        child: Dialog(
+          shape: const RoundedRectangleBorder(borderRadius: AppRadius.lgAll),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 500, maxHeight: 820),
+            child: Column(
+              children: [
+                // ── Gold Header ───────────────────────────────────────
+                _buildHeader(theme, isDark),
 
-              // ── Scrollable Body ───────────────────────────────────
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Section 1: Identity
-                      const SectionHeader(title: 'بيانات الموظف'),
-                      AppSpacing.gapMd,
-                      _buildNameField(theme),
-                      AppSpacing.gapMd,
-                      _buildPhoneField(),
-                      AppSpacing.gapXl,
+                // ── Scrollable Body ───────────────────────────────────
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Section 1: Identity
+                        const SectionHeader(title: 'بيانات الموظف'),
+                        AppSpacing.gapMd,
+                        _buildNameField(theme),
+                        AppSpacing.gapMd,
+                        _buildPhoneField(),
+                        AppSpacing.gapXl,
 
-                      // Section 2: Role
-                      const SectionHeader(title: 'الدور والصلاحيات'),
-                      AppSpacing.gapMd,
-                      _buildRoleSelector(isDark),
-                      AppSpacing.gapXl,
+                        // Section 2: Role
+                        const SectionHeader(title: 'الدور والصلاحيات'),
+                        AppSpacing.gapMd,
+                        _buildRoleSelector(isDark),
+                        AppSpacing.gapXl,
 
-                      // Section 3: Language
-                      const SectionHeader(title: 'اللغة والواجهة'),
-                      AppSpacing.gapMd,
-                      _buildLanguageToggle(theme, isDark),
-                      AppSpacing.gapXl,
+                        // Section 3: Language
+                        const SectionHeader(title: 'اللغة والواجهة'),
+                        AppSpacing.gapMd,
+                        _buildLanguageToggle(theme, isDark),
+                        AppSpacing.gapXl,
 
-                      // Section 4: Initial PIN
-                      const SectionHeader(title: 'رمز الدخول الأولي (PIN)'),
-                      AppSpacing.gapSm,
-                      Text(
-                        'سيستخدمه الموظف للدخول السريع — يمكن تغييره لاحقاً',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant),
-                      ),
-                      AppSpacing.gapMd,
-                      _buildPinField(theme, isDark),
-                      AppSpacing.gapXl,
+                        // Section 4: Temporary password
+                        const SectionHeader(title: 'كلمة المرور المؤقتة'),
+                        AppSpacing.gapSm,
+                        Text(
+                          'تُستخدم لتسجيل الدخول مع رقم الهاتف. لا تُرسل رسائل SMS — '
+                          'سلّمها للموظف بطريقة آمنة، ويمكنك تغييرها لاحقاً من شاشة تعديل الموظف.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                        AppSpacing.gapMd,
+                        _buildPasswordField(),
+                        AppSpacing.gapXl,
 
-                      // Section 5: Admin confirmation
-                      _buildAdminConfirmZone(theme, isDark),
-                    ],
+                        // Section 5: Initial PIN
+                        const SectionHeader(title: 'رمز تأكيد العمليات (PIN)'),
+                        AppSpacing.gapSm,
+                        Text(
+                          'يُطلب فقط لتأكيد العمليات الحساسة — يجب تغييره عند أول استخدام',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                        AppSpacing.gapMd,
+                        _buildPinField(theme, isDark),
+                        AppSpacing.gapXl,
+
+                        // Section 6: Admin confirmation
+                        _buildAdminConfirmZone(theme, isDark),
+                      ],
+                    ),
                   ),
                 ),
-              ),
 
-              // ── Footer ────────────────────────────────────────────
-              _buildFooter(isDark),
-            ],
+                // ── Footer ────────────────────────────────────────────
+                _buildFooter(isDark),
+              ],
+            ),
           ),
         ),
       ),
@@ -315,15 +369,15 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
                 ),
                 Text(
                   'Nouveau membre du personnel',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
           ),
           IconButton(
             icon: const Icon(Icons.close_rounded),
-            onPressed: () => Navigator.pop(context),
+            onPressed: _isSaving ? null : () => Navigator.pop(context),
             style: IconButton.styleFrom(
                 foregroundColor: theme.colorScheme.onSurfaceVariant),
           ),
@@ -357,10 +411,10 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
         labelText: 'رقم الهاتف (لتسجيل الدخول) *',
         hintText: '+213 5XX XX XX XX',
         prefixIcon: const Icon(Icons.phone_outlined),
-        errorText: _phoneController.text.isNotEmpty &&
-                _phoneController.text != '+213'
-            ? _phoneError
-            : null,
+        errorText:
+            _phoneController.text.isNotEmpty && _phoneController.text != '+213'
+                ? _phoneError
+                : null,
         helperText: 'سيُستخدم كمعرف لتسجيل الدخول',
       ),
     );
@@ -379,8 +433,7 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
                     role: role,
                     selected: _selectedRole == role.value,
                     isDark: isDark,
-                    onTap: () =>
-                        setState(() => _selectedRole = role.value),
+                    onTap: () => setState(() => _selectedRole = role.value),
                   ))
               .toList(),
         ),
@@ -399,8 +452,7 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
           ),
           child: Row(
             children: [
-              Icon(_currentRole.icon,
-                  size: 16, color: _currentRole.color),
+              Icon(_currentRole.icon, size: 16, color: _currentRole.color),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
@@ -443,9 +495,48 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
     );
   }
 
+  Widget _buildPasswordField() {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _passwordController,
+            textDirection: TextDirection.ltr,
+            obscureText: !_showStaffPassword,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'كلمة المرور المؤقتة *',
+              helperText: '8 أحرف على الأقل',
+              prefixIcon: const Icon(Icons.password_rounded),
+              errorText:
+                  _passwordController.text.isNotEmpty ? _passwordError : null,
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _showStaffPassword
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  size: 18,
+                ),
+                onPressed: () =>
+                    setState(() => _showStaffPassword = !_showStaffPassword),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        GoldIconButton(
+          icon: Icons.casino_outlined,
+          tooltip: 'توليد كلمة مرور عشوائية',
+          onPressed: _generateRandomPasswordAndSet,
+        ),
+      ],
+    );
+  }
+
   Widget _buildPinField(ThemeData theme, bool isDark) {
     final pin = _pinController.text;
-    final isFull = pin.length == 4;
+    final isFull = pin.length >= 4;
+    final dotCount = pin.length < 4 ? 4 : (pin.length > 8 ? 8 : pin.length);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -458,12 +549,12 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
                 keyboardType: TextInputType.number,
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(4),
+                  LengthLimitingTextInputFormatter(8),
                 ],
                 obscureText: !_showStaffPin,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
-                  labelText: 'رمز PIN الأولي (4 أرقام) *',
+                  labelText: 'رمز PIN الأولي (4-8 أرقام) *',
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
                   counterText: '',
                   suffixIcon: IconButton(
@@ -491,11 +582,11 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
 
         // PIN strength dots
         Row(
-          children: List.generate(4, (i) {
+          children: List.generate(dotCount, (i) {
             final filled = i < pin.length;
             return Padding(
               padding: EdgeInsetsDirectional.only(
-                  end: i < 3 ? AppSpacing.xs : 0),
+                  end: i < dotCount - 1 ? AppSpacing.xs : 0),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
                 width: 10,
@@ -511,8 +602,8 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
                   boxShadow: filled && isFull
                       ? [
                           BoxShadow(
-                            color: const Color(0xFFD4AF37)
-                                .withValues(alpha: 0.40),
+                            color:
+                                const Color(0xFFD4AF37).withValues(alpha: 0.40),
                             blurRadius: 6,
                           )
                         ]
@@ -561,8 +652,8 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
           const SizedBox(height: AppSpacing.xs),
           Text(
             'أدخل رمز PIN الخاص بك لتفويض إنشاء هذا الحساب',
-            style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant),
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
           AppSpacing.gapMd,
           TextField(
@@ -571,16 +662,15 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
             keyboardType: TextInputType.number,
             inputFormatters: [
               FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(4),
+              LengthLimitingTextInputFormatter(8),
             ],
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
-              labelText: 'PIN المشرف *',
+              labelText: 'PIN المشرف (4-8 أرقام) *',
               prefixIcon: const Icon(Icons.key_rounded),
               counterText: '',
-              errorText: _adminPinController.text.isNotEmpty
-                  ? _adminPinError
-                  : null,
+              errorText:
+                  _adminPinController.text.isNotEmpty ? _adminPinError : null,
               suffixIcon: IconButton(
                 icon: Icon(
                   _showAdminPin
@@ -588,8 +678,7 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
                       : Icons.visibility_outlined,
                   size: 18,
                 ),
-                onPressed: () =>
-                    setState(() => _showAdminPin = !_showAdminPin),
+                onPressed: () => setState(() => _showAdminPin = !_showAdminPin),
               ),
             ),
           ),
@@ -601,18 +690,17 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
   Widget _buildFooter(bool isDark) {
     final isValid = _nameError == null &&
         _phoneError == null &&
+        _passwordError == null &&
         _pinError == null &&
         _adminPinError == null &&
         _nameController.text.isNotEmpty &&
-        _pinController.text.length == 4 &&
-        _adminPinController.text.length == 4;
+        _passwordController.text.length >= 8;
 
     return Container(
       padding: const EdgeInsetsDirectional.fromSTEB(
           AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.lg),
       decoration: BoxDecoration(
-        color:
-            isDark ? const Color(0xFF141210) : const Color(0xFFFAF7F0),
+        color: isDark ? const Color(0xFF141210) : const Color(0xFFFAF7F0),
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(AppRadius.lg),
           bottomRight: Radius.circular(AppRadius.lg),
@@ -644,8 +732,7 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(_currentRole.icon,
-                      size: 12, color: _currentRole.color),
+                  Icon(_currentRole.icon, size: 12, color: _currentRole.color),
                   const SizedBox(width: 4),
                   Text(
                     _currentRole.labelAr,
@@ -697,16 +784,12 @@ class _RoleChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected
               ? role.color.withValues(alpha: isDark ? 0.18 : 0.10)
-              : (isDark
-                  ? const Color(0xFF1A1814)
-                  : const Color(0xFFF5F3EE)),
+              : (isDark ? const Color(0xFF1A1814) : const Color(0xFFF5F3EE)),
           borderRadius: AppRadius.mdAll,
           border: Border.all(
             color: selected
                 ? role.color.withValues(alpha: 0.55)
-                : (isDark
-                    ? const Color(0xFF2A2520)
-                    : const Color(0xFFE0DBD0)),
+                : (isDark ? const Color(0xFF2A2520) : const Color(0xFFE0DBD0)),
             width: selected ? 1.5 : 1,
           ),
           boxShadow: selected
@@ -736,8 +819,7 @@ class _RoleChip extends StatelessWidget {
               role.labelAr,
               style: TextStyle(
                 fontSize: 13,
-                fontWeight:
-                    selected ? FontWeight.bold : FontWeight.normal,
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
                 color: selected
                     ? role.color
                     : (isDark
@@ -747,8 +829,7 @@ class _RoleChip extends StatelessWidget {
             ),
             if (selected) ...[
               const SizedBox(width: AppSpacing.xs),
-              Icon(Icons.check_circle_rounded,
-                  size: 12, color: role.color),
+              Icon(Icons.check_circle_rounded, size: 12, color: role.color),
             ],
           ],
         ),
@@ -788,16 +869,12 @@ class _LangChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected
               ? theme.colorScheme.primaryContainer
-              : (isDark
-                  ? const Color(0xFF1A1814)
-                  : const Color(0xFFF5F3EE)),
+              : (isDark ? const Color(0xFF1A1814) : const Color(0xFFF5F3EE)),
           borderRadius: AppRadius.mdAll,
           border: Border.all(
             color: selected
                 ? theme.colorScheme.primary.withValues(alpha: 0.55)
-                : (isDark
-                    ? const Color(0xFF2A2520)
-                    : const Color(0xFFE0DBD0)),
+                : (isDark ? const Color(0xFF2A2520) : const Color(0xFFE0DBD0)),
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -810,8 +887,7 @@ class _LangChip extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 13,
-                fontWeight:
-                    selected ? FontWeight.bold : FontWeight.normal,
+                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
                 color: selected
                     ? theme.colorScheme.onPrimaryContainer
                     : (isDark

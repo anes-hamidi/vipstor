@@ -6,11 +6,16 @@
 -- Apply ONCE after 004_migration_00036.sql, as the project owner (postgres).
 --
 -- Operational prerequisites (not SQL):
---   1. Enable Phone auth in Supabase Auth.
---   2. Configure an SMS provider for customer/staff OTP.
---   3. Provision staff auth users with phone + password, and put the app role
---      in app_metadata: { "role": "moderator" | "manager" | "cashier" | "driver" }.
---      Existing public.users rows are linked by phone by the trigger/backfill.
+--   1. No SMS provider is required. The app uses password-only Supabase Auth;
+--      006_auth_management.sql maps each phone to a deterministic synthetic
+--      email and adds the auth-admin Edge Function lifecycle.
+--   2. Authenticated staff accounts must carry a public.users role. New
+--      accounts are provisioned by 006's auth-admin Edge Function with
+--      app_metadata: { "role": "moderator" | "manager" | "cashier" | "driver" }.
+--   3. Existing phone-auth users remain supported by 006's login fallback
+--      while the Phone provider is enabled; otherwise migrate their Auth email
+--      to the synthetic address. Existing public.users rows are linked by the
+--      trigger/backfill.
 -- ============================================================================
 
 BEGIN;
@@ -1908,7 +1913,7 @@ BEGIN
         RETURN jsonb_build_object(
             'success', FALSE,
             'bound_to_other_device', TRUE,
-            'error', 'هذا الحساب مرتبط بجهاز آخر. سجّل الدخول برمز التحقق لإعادة الربط.'
+            'error', 'هذا الحساب مرتبط بجهاز آخر. سجّل الدخول برقم الهاتف وكلمة المرور لإعادة الربط.'
         );
     END IF;
 

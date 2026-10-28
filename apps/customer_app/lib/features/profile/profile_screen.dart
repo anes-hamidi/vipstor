@@ -142,7 +142,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('تسجيل الخروج'),
         content: const Text(
-          'سيتم إنهاء جلسة Supabase على هذا الجهاز. ستحتاج إلى رمز SMS جديد للدخول.',
+          'سيتم إنهاء جلسة Supabase على هذا الجهاز. ستحتاج إلى رقم هاتفك وكلمة المرور للدخول مجدداً.',
         ),
         actions: [
           TextButton(

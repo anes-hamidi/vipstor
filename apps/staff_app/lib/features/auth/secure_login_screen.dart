@@ -6,9 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
 
-enum _LoginMode { password, otp }
-
-/// Real staff login. Identity comes from a Supabase Auth session only.
+/// Staff login. Identity comes from a password-only Supabase Auth session.
 /// PIN is never accepted here; it is a step-up confirmation after login.
 class SecureLoginScreen extends ConsumerStatefulWidget {
   const SecureLoginScreen({super.key});
@@ -20,11 +18,8 @@ class SecureLoginScreen extends ConsumerStatefulWidget {
 class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _otpController = TextEditingController();
 
-  _LoginMode _mode = _LoginMode.password;
   bool _busy = false;
-  bool _otpSent = false;
   bool _obscurePassword = true;
   String? _error;
 
@@ -32,7 +27,6 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
   void dispose() {
     _phoneController.dispose();
     _passwordController.dispose();
-    _otpController.dispose();
     super.dispose();
   }
 
@@ -52,61 +46,6 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
     try {
       final repo = ref.read(authRepositoryProvider);
       final user = await repo.signInWithPhoneAndPassword(phone, password);
-      await _completeLogin(user);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = _friendlyError(e);
-      });
-    }
-  }
-
-  Future<void> _sendOtp() async {
-    if (_busy) return;
-    final phone = _phoneController.text.trim();
-    if (phone.isEmpty) {
-      setState(() => _error = 'أدخل رقم الهاتف أولاً.');
-      return;
-    }
-
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final repo = ref.read(authRepositoryProvider);
-      await repo.sendPhoneOtp(phone, shouldCreateUser: false);
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _otpSent = true;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = _friendlyError(e);
-      });
-    }
-  }
-
-  Future<void> _verifyOtp() async {
-    if (_busy) return;
-    final phone = _phoneController.text.trim();
-    final token = _otpController.text.trim();
-    if (phone.isEmpty || token.length < 4) {
-      setState(() => _error = 'أدخل رقم الهاتف ورمز التحقق.');
-      return;
-    }
-
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      final repo = ref.read(authRepositoryProvider);
-      final user = await repo.verifyPhoneOtp(phone: phone, token: token);
       await _completeLogin(user);
     } catch (e) {
       if (!mounted) return;
@@ -152,14 +91,18 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
     if (message.contains('Invalid login credentials')) {
       return 'رقم الهاتف أو كلمة المرور غير صحيحة.';
     }
-    if (message.contains('Phone not confirmed')) {
-      return 'رقم الهاتف غير مؤكد. راجع الإدارة.';
+    if (message.contains('Email not confirmed') ||
+        message.contains('Phone not confirmed')) {
+      return 'بيانات الدخول غير مؤكدة. راجع الإدارة.';
     }
     if (message.contains('Signups not allowed')) {
       return 'لا يوجد حساب موظف بهذا الرقم. راجع الإدارة.';
     }
     if (message.contains('AuthException')) {
-      return message.replaceFirst('AuthException(message: ', '').split(',').first;
+      return message
+          .replaceFirst('AuthException(message: ', '')
+          .split(',')
+          .first;
     }
     return message.replaceFirst('Exception: ', '');
   }
@@ -187,14 +130,16 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Icon(Icons.shield_outlined, size: 44, color: colors.primary),
+                      Icon(Icons.shield_outlined,
+                          size: 44, color: colors.primary),
                       const SizedBox(height: 12),
                       Text(
                         'دخول الموظفين',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
                       ),
                       const SizedBox(height: 6),
                       Text(
@@ -204,30 +149,7 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
                               color: colors.onSurfaceVariant,
                             ),
                       ),
-                      const SizedBox(height: 20),
-                      SegmentedButton<_LoginMode>(
-                        segments: const [
-                          ButtonSegment(
-                            value: _LoginMode.password,
-                            icon: Icon(Icons.lock_outline),
-                            label: Text('كلمة المرور'),
-                          ),
-                          ButtonSegment(
-                            value: _LoginMode.otp,
-                            icon: Icon(Icons.sms_outlined),
-                            label: Text('رمز SMS'),
-                          ),
-                        ],
-                        selected: {_mode},
-                        onSelectionChanged: _busy
-                            ? null
-                            : (value) => setState(() {
-                                  _mode = value.first;
-                                  _error = null;
-                                  _otpSent = false;
-                                }),
-                      ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 24),
                       TextField(
                         controller: _phoneController,
                         keyboardType: TextInputType.phone,
@@ -243,73 +165,38 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      if (_mode == _LoginMode.password) ...[
-                        TextField(
-                          controller: _passwordController,
-                          obscureText: _obscurePassword,
-                          textDirection: TextDirection.ltr,
-                          onSubmitted: (_) => _signInWithPassword(),
-                          decoration: InputDecoration(
-                            labelText: 'كلمة المرور',
-                            prefixIcon: const Icon(Icons.key_outlined),
-                            border: const OutlineInputBorder(),
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscurePassword
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined),
-                              onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword,
-                              ),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: _obscurePassword,
+                        textDirection: TextDirection.ltr,
+                        onSubmitted: (_) => _signInWithPassword(),
+                        decoration: InputDecoration(
+                          labelText: 'كلمة المرور',
+                          prefixIcon: const Icon(Icons.key_outlined),
+                          border: const OutlineInputBorder(),
+                          suffixIcon: IconButton(
+                            icon: Icon(_obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined),
+                            onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword,
                             ),
                           ),
                         ),
-                        const SizedBox(height: 18),
-                        FilledButton.icon(
-                          onPressed: _busy ? null : _signInWithPassword,
-                          icon: _busy
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.login),
-                          label: const Text('تسجيل الدخول'),
-                        ),
-                      ] else ...[
-                        if (_otpSent)
-                          TextField(
-                            controller: _otpController,
-                            keyboardType: TextInputType.number,
-                            textDirection: TextDirection.ltr,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                            ],
-                            decoration: const InputDecoration(
-                              labelText: 'رمز التحقق',
-                              prefixIcon: Icon(Icons.password_outlined),
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        const SizedBox(height: 18),
-                        FilledButton.icon(
-                          onPressed: _busy
-                              ? null
-                              : (_otpSent ? _verifyOtp : _sendOtp),
-                          icon: _busy
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : Icon(_otpSent ? Icons.verified_outlined : Icons.sms),
-                          label: Text(_otpSent ? 'تأكيد الرمز' : 'إرسال رمز SMS'),
-                        ),
-                        if (_otpSent)
-                          TextButton(
-                            onPressed: _busy ? null : _sendOtp,
-                            child: const Text('إعادة إرسال الرمز'),
-                          ),
-                      ],
+                      ),
+                      const SizedBox(height: 18),
+                      FilledButton.icon(
+                        onPressed: _busy ? null : _signInWithPassword,
+                        icon: _busy
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.login),
+                        label: const Text('تسجيل الدخول'),
+                      ),
                       if (_error != null) ...[
                         const SizedBox(height: 14),
                         Container(
@@ -326,7 +213,7 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
                       ],
                       const SizedBox(height: 16),
                       Text(
-                        'لا تملك حساباً؟ اطلب من المدير إنشاء حساب موظف وربطه برقم هاتفك في Supabase Auth.',
+                        'لا تملك حساباً؟ اطلب من المشرف إنشاء حساب موظف وتعيين كلمة مرور مؤقتة. لا تُستخدم رسائل SMS.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: colors.onSurfaceVariant,

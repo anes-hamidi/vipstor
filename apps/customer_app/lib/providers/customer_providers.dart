@@ -53,7 +53,8 @@ final customerAuthRepositoryProvider = Provider<IAuthRepository>((ref) {
 });
 
 /// The server explicitly rejected this device. Unlike a transient network
-/// error, this must invalidate the restored session and return to OTP login.
+/// error, this must invalidate the restored session and return to password
+/// login.
 class _DeviceBindingMismatch implements Exception {
   final String message;
 
@@ -120,8 +121,8 @@ class CustomerAuthController extends AsyncNotifier<UserEntity?> {
         await _afterLogin(user, rotateDevice: false);
       } catch (e) {
         // A restored session that no longer matches the device binding must
-        // not grant access to cached customer data. Clear it and show the OTP
-        // login instead of leaving the gate stuck on an error screen.
+        // not grant access to cached customer data. Clear it and show the
+        // password login instead of leaving the gate stuck on an error screen.
         debugPrint('[CustomerAuth] session restore rejected: $e');
         await ref.read(customerAuthRepositoryProvider).signOut();
         if (_disposed) return null;
@@ -154,37 +155,33 @@ class CustomerAuthController extends AsyncNotifier<UserEntity?> {
     return user;
   }
 
-  Future<void> sendOtp(String phone) async {
-    await ref
-        .read(customerAuthRepositoryProvider)
-        .sendPhoneOtp(phone, shouldCreateUser: true);
+  Future<CustomerRegistrationResult> registerCustomer({
+    required String name,
+    required String phone,
+    required String password,
+  }) {
+    return ref.read(customerAuthRepositoryProvider).registerCustomer(
+          name: name,
+          phone: phone,
+          password: password,
+        );
   }
 
-  Future<UserEntity> verifyOtp({
+  Future<CustomerPasswordResetResult> resetCustomerPassword({
     required String phone,
-    required String token,
-  }) async {
-    final user = await ref
-        .read(customerAuthRepositoryProvider)
-        .verifyPhoneOtp(phone: phone, token: token);
-    if (user.role != UserRole.customer) {
-      await ref.read(customerAuthRepositoryProvider).signOut();
-      throw Exception('هذا الحساب ليس حساب زبون.');
-    }
-    try {
-      await _afterLogin(user, rotateDevice: true);
-    } catch (e) {
-      await ref.read(customerAuthRepositoryProvider).signOut();
-      if (!_disposed) state = const AsyncData(null);
-      rethrow;
-    }
-    if (!_disposed) state = AsyncData(user);
-    return user;
+    required String recoveryCode,
+    required String newPassword,
+  }) {
+    return ref.read(customerAuthRepositoryProvider).resetCustomerPassword(
+          phone: phone,
+          recoveryCode: recoveryCode,
+          newPassword: newPassword,
+        );
   }
 
   Future<void> signOut() async {
     // Revoke the server-side device binding while the JWT is still valid.
-    // Offline logout still clears the local session; the next OTP login rotates
+    // Offline logout still clears the local session; the next password login rotates
     // the token and replaces any stale binding.
     try {
       await ref
@@ -215,7 +212,7 @@ class CustomerAuthController extends AsyncNotifier<UserEntity?> {
     } catch (e) {
       // `getCurrentUser` may fail on a dead network, and a device-binding
       // mismatch must not be retried with the same stale session. Sign out so
-      // the OTP screen can recover; the server still requires a device token
+      // the login screen can recover; the server still requires a device token
       // for order submission and live tracking.
       debugPrint('[CustomerAuth] refresh rejected: $e');
       try {
@@ -263,7 +260,7 @@ class CustomerAuthController extends AsyncNotifier<UserEntity?> {
       } catch (e) {
         // A restored session may be opened without connectivity. Server-side
         // device checks still protect tracking and checkout, so only an
-        // explicit mismatch blocks the restored session. A fresh OTP login is
+        // explicit mismatch blocks the restored session. A fresh password login is
         // online and must bind successfully before it is accepted.
         if (rotateDevice || e is _DeviceBindingMismatch) rethrow;
         debugPrint('[CustomerAuth] device binding deferred: $e');
@@ -545,7 +542,7 @@ class CustomerProfileNotifier extends StateNotifier<CustomerProfileInfo> {
   }
 
   /// Replaces local profile state with the server's JWT-bound profile after
-  /// OTP login. This is authoritative: it prevents a previous device owner's
+  /// password login. This is authoritative: it prevents a previous device owner's
   /// cached name/phone/address from being shown to the next signed-in customer.
   void applyServerProfile(CustomerProfileEntity e) {
     _set(CustomerProfileInfo(

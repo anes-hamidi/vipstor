@@ -5,9 +5,16 @@ import 'package:domain/domain.dart';
 import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
 
+/// Result of editing a staff member's profile.
+enum StaffProfileEditOutcome { updated, deleted }
+
 /// A bottom sheet / dialog for editing any staff member's profile.
 /// Usable from any screen: moderator dashboard, cashier settings,
 /// driver profile, manager profile, etc.
+///
+/// Moderators can also change the login phone, set a new password, and
+/// soft-delete another staff account. Those operations go through the
+/// auth-admin Edge Function so the Supabase Auth identity stays in sync.
 ///
 /// Usage:
 /// ```dart
@@ -32,7 +39,7 @@ class StaffProfileEditSheet extends ConsumerStatefulWidget {
   });
 
   /// Convenience factory to show as a modal bottom sheet.
-  static Future<bool?> show(
+  static Future<StaffProfileEditOutcome?> show(
     BuildContext context,
     WidgetRef ref, {
     required String userId,
@@ -42,7 +49,7 @@ class StaffProfileEditSheet extends ConsumerStatefulWidget {
     required bool active,
     required String language,
   }) {
-    return showModalBottomSheet<bool>(
+    return showModalBottomSheet<StaffProfileEditOutcome>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -66,17 +73,20 @@ class StaffProfileEditSheet extends ConsumerStatefulWidget {
       _StaffProfileEditSheetState();
 }
 
-class _StaffProfileEditSheetState
-    extends ConsumerState<StaffProfileEditSheet> {
+class _StaffProfileEditSheetState extends ConsumerState<StaffProfileEditSheet> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _phone;
   late final TextEditingController _callerPinCtrl;
   late final TextEditingController _newPinCtrl;
+  late final TextEditingController _newPasswordCtrl;
   late String _role;
   late bool _active;
   late String _language;
   bool _changePin = false;
+  bool _changePassword = false;
+  bool _showNewPassword = false;
+  bool _deleting = false;
   bool _saving = false;
   String? _error;
 
@@ -94,6 +104,7 @@ class _StaffProfileEditSheetState
     _phone = TextEditingController(text: widget.initialPhone);
     _callerPinCtrl = TextEditingController();
     _newPinCtrl = TextEditingController();
+    _newPasswordCtrl = TextEditingController();
     _role = widget.initialRole;
     _active = widget.initialActive;
     _language = widget.initialLanguage;
@@ -105,7 +116,24 @@ class _StaffProfileEditSheetState
     _phone.dispose();
     _callerPinCtrl.dispose();
     _newPinCtrl.dispose();
+    _newPasswordCtrl.dispose();
     super.dispose();
+  }
+
+  String _friendlyError(Object error) {
+    final raw = error.toString();
+    if (raw.contains('message: ')) {
+      final message = raw
+          .split('message: ')
+          .last
+          .split(RegExp(r',\s*(statusCode|code|details):'))
+          .first
+          .trim();
+      if (message.isNotEmpty) {
+        return message.replaceFirst(RegExp(r'\)$'), '');
+      }
+    }
+    return raw.replaceFirst('Exception: ', '');
   }
 
   Future<void> _save() async {
@@ -122,36 +150,60 @@ class _StaffProfileEditSheetState
 
       final isModerator = currentUser.role == UserRole.moderator;
       final callerPin = _callerPinCtrl.text.trim();
-      if (callerPin.length < 4) {
-        throw Exception('يرجى إدخال رمز PIN الخاص بك لتأكيد الحفظ');
+      if (!RegExp(r'^[0-9]{4,8}$').hasMatch(callerPin)) {
+        throw Exception('يرجى إدخال رمز PIN الخاص بك (4-8 أرقام)');
       }
 
       final newPin = _changePin ? _newPinCtrl.text.trim() : null;
-      if (_changePin && (newPin == null || newPin.length < 4)) {
-        throw Exception('رمز PIN الجديد يجب أن يتكون من 4 أرقام على الأقل');
+      if (_changePin && !RegExp(r'^[0-9]{4,8}$').hasMatch(newPin ?? '')) {
+        throw Exception('رمز PIN الجديد يجب أن يكون من 4 إلى 8 أرقام');
       }
 
-      // One RPC verifies the caller, enforces the moderator/self rule,
-      // protects the last active moderator, and optionally resets the
-      // target's PIN. No direct table update is attempted.
-      final client = ref.read(supabaseClientProvider);
-      final res = await client.rpc('rpc_save_user_profile', params: {
-        'p_caller_id': currentUser.id,
-        'p_caller_pin': callerPin,
-        'p_target_user_id': widget.userId,
-        'p_name': _name.text.trim(),
-        'p_phone': _phone.text.trim(),
-        'p_language': _language,
-        'p_role': isModerator ? _role : null,
-        'p_active': isModerator ? _active : null,
-        'p_new_pin': newPin,
-      });
+      final newPassword = _changePassword ? _newPasswordCtrl.text : null;
+      if (_changePassword && (newPassword ?? '').length < 8) {
+        throw Exception('كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل');
+      }
 
-      if (res is! Map || res['status'] != 'success') {
-        throw Exception(
-          (res is Map ? res['message'] : null)?.toString() ??
-              'تعذر حفظ التعديلات',
-        );
+      Map<String, dynamic> res;
+      if (isModerator) {
+        // The Edge Function verifies the moderator JWT and PIN, updates the
+        // public profile through rpc_save_user_profile, and keeps the
+        // Supabase Auth email/password in sync. A changed phone also rotates
+        // the synthetic login email, so the account cannot get out of sync.
+        res = await ref.read(supabaseServiceProvider).updateStaffAccount(
+              adminPin: callerPin,
+              targetUserId: widget.userId,
+              name: _name.text.trim(),
+              phone: _phone.text.trim(),
+              role: _role,
+              active: _active,
+              language: _language,
+              newPin: newPin,
+              newPassword: newPassword,
+            );
+      } else {
+        // Non-moderators may only edit their own display profile. The RPC
+        // locks the phone number for linked accounts.
+        final client = ref.read(supabaseClientProvider);
+        final rpcRes = await client.rpc('rpc_save_user_profile', params: {
+          'p_caller_id': currentUser.id,
+          'p_caller_pin': callerPin,
+          'p_target_user_id': widget.userId,
+          'p_name': _name.text.trim(),
+          'p_phone': _phone.text.trim(),
+          'p_language': _language,
+          'p_role': null,
+          'p_active': null,
+          'p_new_pin': newPin,
+        });
+
+        if (rpcRes is! Map || rpcRes['status'] != 'success') {
+          throw Exception(
+            (rpcRes is Map ? rpcRes['message'] : null)?.toString() ??
+                'تعذر حفظ التعديلات',
+          );
+        }
+        res = Map<String, dynamic>.from(rpcRes);
       }
 
       // Immediately update in-memory auth state if editing self.
@@ -167,11 +219,93 @@ class _StaffProfileEditSheetState
 
       ref.invalidate(staffMembersProvider);
       ref.invalidate(liveStaffUsersProvider);
-      if (mounted) Navigator.pop(context, true);
+      if (mounted) {
+        Navigator.pop(context, StaffProfileEditOutcome.updated);
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = 'تعذر حفظ التعديلات: ${e.toString().replaceFirst('Exception: ', '')}';
+        _error = 'تعذر حفظ التعديلات: ${_friendlyError(e)}';
+      });
+    }
+  }
+
+  Future<void> _delete() async {
+    final currentUser = ref.read(authStateProvider);
+    if (currentUser == null || _deleting) return;
+    if (currentUser.id == widget.userId) {
+      setState(() => _error = 'لا يمكنك حذف حسابك الحالي.');
+      return;
+    }
+
+    final callerPin = _callerPinCtrl.text.trim();
+    if (!RegExp(r'^[0-9]{4,8}$').hasMatch(callerPin)) {
+      setState(() {
+        _error = 'أدخل رمز PIN الخاص بك (4-8 أرقام) لتأكيد الحذف.';
+      });
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: Icon(
+          Icons.delete_forever_rounded,
+          color: Theme.of(dialogContext).colorScheme.error,
+        ),
+        title: const Text('حذف حساب الموظف'),
+        content: Text(
+          'سيتم تعطيل حساب "${widget.initialName}" وحذف هوية الدخول الخاصة به. '
+          'لن يتمكن من تسجيل الدخول بعد الآن، ويمكن إعادة استخدام رقم هاتفه '
+          'لحساب جديد. هل أنت متأكد؟',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('حذف الحساب'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _deleting = true;
+      _error = null;
+    });
+    try {
+      final res = await ref.read(supabaseServiceProvider).deleteStaffAccount(
+            adminPin: callerPin,
+            targetUserId: widget.userId,
+          );
+      ref.invalidate(staffMembersProvider);
+      ref.invalidate(liveStaffUsersProvider);
+      final warning = res['warning']?.toString();
+      if (mounted && warning != null && warning.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(warning),
+            duration: const Duration(seconds: 9),
+            backgroundColor: context.appColors.warning,
+          ),
+        );
+      }
+      if (mounted) {
+        Navigator.pop(context, StaffProfileEditOutcome.deleted);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _deleting = false;
+        _error = 'تعذر حذف الحساب: ${_friendlyError(e)}';
       });
     }
   }
@@ -252,7 +386,9 @@ class _StaffProfileEditSheetState
                   ),
                   IconButton(
                     icon: const Icon(Icons.close_rounded),
-                    onPressed: () => Navigator.pop(context, false),
+                    onPressed: _saving || _deleting
+                        ? null
+                        : () => Navigator.pop(context),
                   ),
                 ],
               ),
@@ -270,8 +406,9 @@ class _StaffProfileEditSheetState
                     TextFormField(
                       controller: _name,
                       textInputAction: TextInputAction.next,
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'الاسم مطلوب' : null,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'الاسم مطلوب'
+                          : null,
                       decoration: const InputDecoration(
                         labelText: 'الاسم الكامل *',
                         prefixIcon: Icon(Icons.person_rounded),
@@ -283,11 +420,16 @@ class _StaffProfileEditSheetState
                       controller: _phone,
                       keyboardType: TextInputType.phone,
                       textInputAction: TextInputAction.done,
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'رقم الهاتف مطلوب' : null,
-                      decoration: const InputDecoration(
+                      readOnly: !isModerator,
+                      validator: (v) => (v == null || v.trim().isEmpty)
+                          ? 'رقم الهاتف مطلوب'
+                          : null,
+                      decoration: InputDecoration(
                         labelText: 'رقم الهاتف *',
-                        prefixIcon: Icon(Icons.phone_rounded),
+                        prefixIcon: const Icon(Icons.phone_rounded),
+                        helperText: isModerator
+                            ? 'تغيير الرقم يحدّث بيانات دخول الموظف أيضاً.'
+                            : 'مرتبط ببيانات الدخول ولا يمكن تغييره من هنا.',
                       ),
                     ),
                     const SizedBox(height: AppSpacing.lg),
@@ -309,21 +451,24 @@ class _StaffProfileEditSheetState
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
                               padding: const EdgeInsetsDirectional.symmetric(
-                                  horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                                  horizontal: AppSpacing.md,
+                                  vertical: AppSpacing.sm),
                               decoration: BoxDecoration(
                                 gradient: selected ? AppGradients.gold : null,
                                 color: selected
                                     ? null
                                     : (isDark
                                         ? colors.obsidianSurface
-                                        : theme.colorScheme.surfaceContainerHighest),
+                                        : theme.colorScheme
+                                            .surfaceContainerHighest),
                                 borderRadius: AppRadius.mdAll,
                                 border: Border.all(
                                   color: selected
                                       ? const Color(0xFFD4AF37)
                                       : theme.colorScheme.outlineVariant,
                                 ),
-                                boxShadow: selected ? [AppShadows.goldGlowSm] : null,
+                                boxShadow:
+                                    selected ? [AppShadows.goldGlowSm] : null,
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -353,24 +498,40 @@ class _StaffProfileEditSheetState
                       const SizedBox(height: AppSpacing.lg),
                     ] else ...[
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
-                          color: isDark ? colors.obsidianSurface : theme.colorScheme.surfaceContainerHighest,
+                          color: isDark
+                              ? colors.obsidianSurface
+                              : theme.colorScheme.surfaceContainerHighest,
                           borderRadius: AppRadius.mdAll,
-                          border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.3)),
+                          border: Border.all(
+                              color: const Color(0xFFD4AF37)
+                                  .withValues(alpha: 0.3)),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.badge_outlined, size: 20, color: Color(0xFFD4AF37)),
+                            const Icon(Icons.badge_outlined,
+                                size: 20, color: Color(0xFFD4AF37)),
                             const SizedBox(width: AppSpacing.sm),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('الدور الوظيفي الحالي', style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+                                Text('الدور الوظيفي الحالي',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: theme
+                                            .colorScheme.onSurfaceVariant)),
                                 const SizedBox(height: 2),
                                 Text(
-                                  _roles.firstWhere((r) => r.$1 == _role, orElse: () => ('', _role, Icons.person)).$2,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  _roles
+                                      .firstWhere((r) => r.$1 == _role,
+                                          orElse: () =>
+                                              ('', _role, Icons.person))
+                                      .$2,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
                                 ),
                               ],
                             ),
@@ -403,6 +564,75 @@ class _StaffProfileEditSheetState
                       ],
                     ),
                     const SizedBox(height: AppSpacing.lg),
+
+                    // Login password (moderator only)
+                    if (isModerator) ...[
+                      LuxuryCard(
+                        padding: const EdgeInsets.all(AppSpacing.md),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.password_rounded,
+                                    size: 20, color: Color(0xFFD4AF37)),
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    'كلمة مرور الدخول',
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13),
+                                  ),
+                                ),
+                                Switch.adaptive(
+                                  value: _changePassword,
+                                  onChanged: (v) => setState(() {
+                                    _changePassword = v;
+                                    if (!v) _newPasswordCtrl.clear();
+                                  }),
+                                ),
+                              ],
+                            ),
+                            if (_changePassword) ...[
+                              const SizedBox(height: AppSpacing.sm),
+                              Text(
+                                'تُحدّث كلمة المرور فوراً. سلّمها للموظف بطريقة آمنة.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              TextFormField(
+                                controller: _newPasswordCtrl,
+                                obscureText: !_showNewPassword,
+                                textDirection: TextDirection.ltr,
+                                decoration: InputDecoration(
+                                  labelText: 'كلمة المرور الجديدة *',
+                                  helperText: '8 أحرف على الأقل',
+                                  prefixIcon: const Icon(Icons.key_rounded),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(_showNewPassword
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.visibility_outlined),
+                                    onPressed: () => setState(() =>
+                                        _showNewPassword = !_showNewPassword),
+                                  ),
+                                ),
+                                validator: (v) {
+                                  if (!_changePassword) return null;
+                                  if ((v ?? '').length < 8) {
+                                    return 'كلمة المرور يجب أن تكون 8 أحرف على الأقل';
+                                  }
+                                  return null;
+                                },
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
 
                     // Active account toggle (only moderator can enable/disable staff)
                     if (isModerator) ...[
@@ -450,7 +680,8 @@ class _StaffProfileEditSheetState
                                 child: Text(
                                   'تأكيد هويتك',
                                   style: TextStyle(
-                                      fontWeight: FontWeight.bold, fontSize: 13),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
                                 ),
                               ),
                             ],
@@ -476,8 +707,9 @@ class _StaffProfileEditSheetState
                               counterText: '',
                             ),
                             validator: (v) {
-                              if (v == null || v.trim().length < 4) {
-                                return 'يرجى إدخال رمز PIN الخاص بك (4 أرقام على الأقل)';
+                              if (!RegExp(r'^[0-9]{4,8}$')
+                                  .hasMatch(v?.trim() ?? '')) {
+                                return 'يرجى إدخال رمز PIN الخاص بك (4-8 أرقام)';
                               }
                               return null;
                             },
@@ -502,7 +734,8 @@ class _StaffProfileEditSheetState
                                 child: Text(
                                   'تعيين رمز PIN جديد للموظف',
                                   style: TextStyle(
-                                      fontWeight: FontWeight.bold, fontSize: 13),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
                                 ),
                               ),
                               Switch.adaptive(
@@ -529,8 +762,9 @@ class _StaffProfileEditSheetState
                               ),
                               validator: (v) {
                                 if (!_changePin) return null;
-                                if (v == null || v.trim().length < 4) {
-                                  return 'يجب أن يكون الرمز 4 أرقام على الأقل';
+                                if (!RegExp(r'^[0-9]{4,8}$')
+                                    .hasMatch(v?.trim() ?? '')) {
+                                  return 'يجب أن يكون الرمز من 4 إلى 8 أرقام';
                                 }
                                 return null;
                               },
@@ -539,6 +773,31 @@ class _StaffProfileEditSheetState
                         ],
                       ),
                     ),
+
+                    if (isModerator && currentUser?.id != widget.userId) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      OutlinedButton.icon(
+                        onPressed: (_saving || _deleting) ? null : _delete,
+                        icon: _deleting
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.delete_forever_rounded),
+                        label: Text(_deleting
+                            ? 'جاري حذف الحساب...'
+                            : 'حذف حساب الموظف'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colors.error,
+                          side: BorderSide(
+                            color: colors.error.withValues(alpha: 0.5),
+                          ),
+                          minimumSize: const Size.fromHeight(46),
+                        ),
+                      ),
+                    ],
 
                     if (_error != null) ...[
                       const SizedBox(height: AppSpacing.md),
@@ -580,7 +839,7 @@ class _StaffProfileEditSheetState
               child: GoldButton.icon(
                 icon: Icons.save_rounded,
                 label: _saving ? 'جاري الحفظ...' : 'حفظ التعديلات',
-                onPressed: _saving ? null : _save,
+                onPressed: (_saving || _deleting) ? null : _save,
                 loading: _saving,
                 width: double.infinity,
                 height: 52,
@@ -630,7 +889,9 @@ class _LangChip extends StatelessWidget {
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 13,
-            color: selected ? const Color(0xFF1A1400) : theme.colorScheme.onSurface,
+            color: selected
+                ? const Color(0xFF1A1400)
+                : theme.colorScheme.onSurface,
           ),
         ),
       ),

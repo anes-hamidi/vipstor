@@ -27,9 +27,11 @@ void main() {
     // The default staff sign-in state uses the neutral customer palette, and
     // shared widgets must paint themselves from that scheme, not from a fixed
     // gold palette.
-    final expected = AppTheme.createTheme(AppRole.customer, Brightness.light)
-        .colorScheme
-        .primaryContainer;
+    final expectedTheme =
+        AppTheme.createTheme(AppRole.customer, Brightness.light);
+    final expected = expectedTheme.colorScheme.primaryContainer;
+    final expectedLabel =
+        expectedTheme.extension<RoleThemeExtension>()!.roleLabel;
     final badge = tester.widget<DecoratedBox>(
       find.descendant(
         of: find.byType(GoldBadge),
@@ -37,6 +39,6 @@ void main() {
       ),
     );
     expect((badge.decoration as BoxDecoration).color, expected);
-    expect(find.text('Customer Storefront'), findsOneWidget);
+    expect(find.text(expectedLabel), findsOneWidget);
   });
 }

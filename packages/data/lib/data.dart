@@ -8,6 +8,7 @@ export 'datasources/local/staff_local_auth_store.dart';
 export 'datasources/local/connectivity_service.dart';
 export 'datasources/offline_sync_service.dart';
 export 'datasources/remote/supabase_service.dart';
+export 'datasources/remote/auth_admin_gateway.dart';
 
 export 'repositories/product_repository_impl.dart';
 export 'repositories/order_repository_impl.dart';

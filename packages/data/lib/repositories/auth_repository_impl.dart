@@ -2,6 +2,7 @@ import 'package:core/core.dart';
 import 'package:domain/domain.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../datasources/local/staff_local_auth_store.dart';
+import '../datasources/remote/auth_admin_gateway.dart';
 
 /// Real Supabase Auth repository.
 ///
@@ -44,15 +45,18 @@ class AuthRepositoryImpl implements IAuthRepository {
     }
     final rows = await client
         .from('users')
-        .select('id, phone, name, role, active, language, must_change_pin')
+        .select(
+          'id, phone, name, role, active, language, must_change_pin, deleted_at',
+        )
         .eq('active', true)
         .neq('role', 'customer')
+        .isFilter('deleted_at', null)
         .order('name');
 
     return (rows as List).map((row) => _rowToEntity(row)).toList();
   }
 
-  // ── Staff phone + password ─────────────────────────────────────────────────
+  // ── Phone + password (synthetic email under the hood) ───────────────────────
 
   @override
   Future<UserEntity> signInWithPhoneAndPassword(
@@ -60,10 +64,27 @@ class AuthRepositoryImpl implements IAuthRepository {
     String password,
   ) async {
     final normalized = normalizePhone(phone);
-    final response = await client.auth.signInWithPassword(
-      phone: normalized,
-      password: password,
-    );
+
+    // New accounts are created with a deterministic synthetic email. Legacy
+    // phone-auth identities remain supported through a password-only fallback;
+    // neither path ever sends an SMS or an email.
+    AuthResponse response;
+    try {
+      response = await client.auth.signInWithPassword(
+        email: authEmailForPhone(normalized),
+        password: password,
+      );
+    } on AuthException catch (emailError) {
+      try {
+        response = await client.auth.signInWithPassword(
+          phone: normalized,
+          password: password,
+        );
+      } on AuthException {
+        throw AuthException(emailError.message);
+      }
+    }
+
     final user = await _resolveAuthedUser(response.user?.id);
     if (!user.active) {
       await signOut();
@@ -72,36 +93,55 @@ class AuthRepositoryImpl implements IAuthRepository {
     return user;
   }
 
-  // ── Phone OTP (customers and staff step-up) ────────────────────────────────
+  // ── Customer registration and recovery ─────────────────────────────────────
 
   @override
-  Future<void> sendPhoneOtp(
-    String phone, {
-    bool shouldCreateUser = true,
-  }) async {
-    await client.auth.signInWithOtp(
-      phone: normalizePhone(phone),
-      shouldCreateUser: shouldCreateUser,
-    );
-  }
-
-  @override
-  Future<UserEntity> verifyPhoneOtp({
+  Future<CustomerRegistrationResult> registerCustomer({
+    required String name,
     required String phone,
-    required String token,
+    required String password,
   }) async {
-    final normalized = normalizePhone(phone);
-    final response = await client.auth.verifyOTP(
-      phone: normalized,
-      token: token.trim(),
-      type: OtpType.sms,
+    final data = await AuthAdminGateway(client).invoke(
+      'customer_register',
+      <String, dynamic>{
+        'name': name.trim(),
+        'phone': phone.trim(),
+        'password': password,
+      },
     );
-    final user = await _resolveAuthedUser(response.user?.id);
-    if (!user.active) {
-      await signOut();
-      throw const AuthException('هذا الحساب معطّل. راجع الإدارة.');
+
+    final recoveryCode = data['recovery_code']?.toString().trim() ?? '';
+    if (recoveryCode.isEmpty) {
+      throw const AuthException(
+        'تم إنشاء الحساب لكن لم يصل رمز الاستعادة. راجع الإدارة.',
+      );
     }
-    return user;
+
+    return CustomerRegistrationResult(
+      phone: data['phone']?.toString() ?? normalizePhone(phone),
+      recoveryCode: recoveryCode,
+    );
+  }
+
+  @override
+  Future<CustomerPasswordResetResult> resetCustomerPassword({
+    required String phone,
+    required String recoveryCode,
+    required String newPassword,
+  }) async {
+    final data = await AuthAdminGateway(client).invoke(
+      'customer_reset_password',
+      <String, dynamic>{
+        'phone': phone.trim(),
+        'recovery_code': recoveryCode.trim(),
+        'new_password': newPassword,
+      },
+    );
+
+    return CustomerPasswordResetResult(
+      recoveryCode: data['recovery_code']?.toString(),
+      warning: data['warning']?.toString(),
+    );
   }
 
   // ── PIN step-up (never a login method) ─────────────────────────────────────
@@ -203,7 +243,7 @@ class AuthRepositoryImpl implements IAuthRepository {
     if (user == null) {
       await signOut();
       throw const AuthException(
-        'تم إنشاء جلسة الدخول لكن لا يوجد حساب موظف/زبون مرتبط بهذا الهاتف. '
+        'تم إنشاء جلسة الدخول لكن لا يوجد حساب موظف/زبون مرتبط ببيانات الدخول. '
         'اطلب من الإدارة ربط الحساب.',
       );
     }
@@ -224,6 +264,7 @@ class AuthRepositoryImpl implements IAuthRepository {
         .from('users')
         .select('id, phone, name, role, active, language, must_change_pin')
         .eq('auth_user_id', authId)
+        .isFilter('deleted_at', null)
         .limit(1);
 
     if ((rows as List).isEmpty) return null;
@@ -243,8 +284,23 @@ class AuthRepositoryImpl implements IAuthRepository {
   }
 }
 
-/// Normalizes Algerian phone numbers to E.164. Supabase Auth expects a stable
-/// international format for both password login and OTP delivery.
+/// Domain used for the deterministic phone -> email mapping.
+///
+/// It must match `public.auth_email_for_phone(...)` in
+/// `006_auth_management.sql` and `AUTH_EMAIL_DOMAIN` in the auth-admin Edge
+/// Function. No mail is ever sent to this domain.
+const String authEmailDomain = 'vip.algomend.app';
+
+/// Maps a phone number to the synthetic email used by Supabase Auth.
+String authEmailForPhone(String phone) {
+  final digits = normalizePhone(phone).replaceAll(RegExp(r'[^0-9]'), '');
+  return '$digits@$authEmailDomain';
+}
+
+/// Normalizes Algerian phone numbers to E.164.
+///
+/// Supabase Auth receives the synthetic email, while the UI and public users
+/// table keep the familiar local phone format.
 String normalizePhone(String input) {
   var value = input.trim().replaceAll(RegExp(r'[^0-9+]'), '');
   if (value.startsWith('00')) {

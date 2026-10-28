@@ -1,6 +1,7 @@
 library;
 
 export 'entities/user_entity.dart';
+export 'entities/customer_auth_result.dart';
 export 'entities/product_entity.dart';
 export 'entities/product_unit.dart';
 export 'entities/order_entity.dart';

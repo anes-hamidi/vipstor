@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'auth_admin_gateway.dart';
 
 class SupabaseService {
   final SupabaseClient client;
@@ -119,27 +120,62 @@ class SupabaseService {
     return Map<String, dynamic>.from(response as Map);
   }
 
-  /// Create Staff Member
-  /// Create Staff Member (Requires Moderator Authentication)
-  Future<Map<String, dynamic>> createStaffMember({
-    required String adminId,
+  /// Create a staff Auth identity + public profile through auth-admin.
+  Future<Map<String, dynamic>> createStaffAccount({
     required String adminPin,
     required String name,
     required String phone,
     required String role,
+    required String password,
     required String initialPin,
     String language = 'ar',
-  }) async {
-    final response = await client.rpc('rpc_create_staff_member', params: {
-      'p_admin_id': adminId,
-      'p_admin_pin': adminPin,
-      'p_name': name,
-      'p_phone': phone,
-      'p_role': role,
-      'p_initial_pin': initialPin,
-      'p_language': language,
+  }) {
+    return AuthAdminGateway(client).invoke('staff_create', {
+      'admin_pin': adminPin,
+      'name': name,
+      'phone': phone,
+      'role': role,
+      'password': password,
+      'initial_pin': initialPin,
+      'language': language,
     });
-    return Map<String, dynamic>.from(response as Map);
+  }
+
+  /// Update a staff profile and, optionally, Auth phone/password.
+  Future<Map<String, dynamic>> updateStaffAccount({
+    required String adminPin,
+    required String targetUserId,
+    required String name,
+    required String phone,
+    required String role,
+    required bool active,
+    required String language,
+    String? newPin,
+    String? newPassword,
+  }) {
+    return AuthAdminGateway(client).invoke('staff_update', {
+      'admin_pin': adminPin,
+      'target_user_id': targetUserId,
+      'name': name,
+      'phone': phone,
+      'role': role,
+      'active': active,
+      'language': language,
+      if (newPin != null && newPin.trim().isNotEmpty) 'new_pin': newPin.trim(),
+      if (newPassword != null && newPassword.isNotEmpty)
+        'new_password': newPassword,
+    });
+  }
+
+  /// Soft-delete a staff profile and delete its Supabase Auth identity.
+  Future<Map<String, dynamic>> deleteStaffAccount({
+    required String adminPin,
+    required String targetUserId,
+  }) {
+    return AuthAdminGateway(client).invoke('staff_delete', {
+      'admin_pin': adminPin,
+      'target_user_id': targetUserId,
+    });
   }
 
   /// Verify User PIN
@@ -217,4 +253,3 @@ class SupabaseService {
     });
   }
 }
-

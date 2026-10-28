@@ -3,7 +3,7 @@ import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Manages the opaque device token used to bind an OTP-verified customer
+/// Manages the opaque device token used to bind an authenticated customer
 /// session to this installation.
 ///
 /// The token is generated with a cryptographically secure RNG and stored via
@@ -27,14 +27,14 @@ class CustomerDeviceAuthService {
     return _generateAndStore(prefs);
   }
 
-  /// Explicit rotation after an OTP login or when the server reports a
+  /// Explicit rotation after a password login or when the server reports a
   /// device mismatch.
   Future<String> rotate() async {
     final prefs = await SharedPreferences.getInstance();
     return _generateAndStore(prefs);
   }
 
-  /// Removes the locally stored token after logout. The next OTP login rotates
+  /// Removes the locally stored token after logout. The next password login rotates
   /// and rebinds a fresh token instead of reusing the logged-out device secret.
   Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
