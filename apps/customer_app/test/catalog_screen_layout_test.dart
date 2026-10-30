@@ -168,7 +168,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byType(CatalogStickyCartBar), findsOneWidget);
-    expect(find.byType(CatalogQuantityStepper), findsOneWidget);
+    expect(find.byType(CatalogQuantityStepper), findsNothing);
+    expect(find.byKey(const ValueKey('catalog-qty-p1')), findsOneWidget);
     expect(find.text('آخر 3'), findsOneWidget);
     expect(find.text('نفذ من المخزون'), findsOneWidget);
   });
@@ -194,7 +195,7 @@ void main() {
       size: const Size(320, 720),
     );
 
-    await tester.tap(find.text('زيت المائدة 5 لتر').first);
+    await tester.longPress(find.text('زيت المائدة 5 لتر').first);
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -211,8 +212,29 @@ void main() {
     expect(find.text('تطبيق'), findsOneWidget);
   });
 
-  testWidgets('details sheet adds a product that is not in the cart',
-      (tester) async {
+  testWidgets('tapping a product card adds it to the cart', (tester) async {
+    await _pumpStorefront(
+      tester,
+      brightness: Brightness.light,
+      size: const Size(390, 844),
+    );
+
+    expect(find.byKey(const ValueKey('catalog-qty-p3')), findsNothing);
+
+    await tester.scrollUntilVisible(
+      find.text('سكر أبيض'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('سكر أبيض'));
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('أضف للطلبية'), findsNothing);
+    expect(find.byKey(const ValueKey('catalog-qty-p3')), findsOneWidget);
+  });
+
+  testWidgets('long-pressing a card opens the details sheet', (tester) async {
     await _pumpStorefront(
       tester,
       brightness: Brightness.light,
@@ -224,7 +246,7 @@ void main() {
       200,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.text('سكر أبيض'));
+    await tester.longPress(find.text('سكر أبيض'));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);

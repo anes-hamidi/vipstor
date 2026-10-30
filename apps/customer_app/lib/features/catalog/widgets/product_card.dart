@@ -6,22 +6,34 @@ import 'package:ui_kit/ui_kit.dart';
 import '../../../providers/customer_providers.dart';
 import 'product_details_sheet.dart';
 import 'product_image.dart';
-import 'quantity_stepper.dart';
 
-/// Storefront product tile.
+/// Storefront product tile (compact, responsive).
 ///
-/// One image, one name, one price. Availability is expressed once, on the
-/// image, and the cart control lives in the same place for every tile.
+/// Layout: an inset rounded image that flexes to fill the available height,
+/// with floating status + cart controls, followed by a tight info block
+/// (name, unit, price). Because the image is `Expanded`, the card never
+/// overflows whatever `mainAxisExtent` / column width the grid gives it —
+/// phone, tablet or desktop.
+///
+/// Tap adds the product to the cart; long-press opens the details sheet.
 class CatalogProductCard extends ConsumerWidget {
   final ProductEntity product;
 
   const CatalogProductCard({super.key, required this.product});
+
+  static const _grayscale = ColorFilter.matrix(<double>[
+    0.2126, 0.7152, 0.0722, 0, 0, //
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0, 0, 0, 1, 0,
+  ]);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
+
     final qty = ref.watch(
       customerCartProvider.select((items) {
         for (final item in items) {
@@ -41,136 +53,170 @@ class CatalogProductCard extends ConsumerWidget {
       container: true,
       button: true,
       label: '${product.nameAr}، ${available ? 'متوفر' : 'نفذ من المخزون'}',
-      child: Material(
-        color:
-            isDark ? scheme.surfaceContainerLow : scheme.surfaceContainerLowest,
-        clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(
+      hint: 'اضغط للإضافة إلى السلة، واضغط مطولاً لعرض التفاصيل',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: isDark
+              ? scheme.surfaceContainerLow
+              : scheme.surfaceContainerLowest,
           borderRadius: AppRadius.xlAll,
-          side: BorderSide(
+          border: Border.all(
             color: inCart
-                ? scheme.secondary.withValues(alpha: 0.55)
-                : scheme.outlineVariant.withValues(alpha: 0.72),
-            width: inCart ? 1.4 : 1,
+                ? scheme.secondary.withValues(alpha: 0.7)
+                : scheme.outlineVariant.withValues(alpha: 0.55),
+            width: inCart ? 1.5 : 1,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: (inCart ? scheme.secondary : scheme.shadow)
+                  .withValues(alpha: inCart ? 0.16 : 0.06),
+              blurRadius: inCart ? 14 : 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
         ),
-        child: InkWell(
-          onTap: () => showProductDetailsSheet(context, product),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                height: 96,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    CatalogProductImage(product: product),
-                    if (!available)
-                      ColoredBox(
-                        color: scheme.scrim.withValues(alpha: 0.40),
+        child: Material(
+          type: MaterialType.transparency,
+          borderRadius: AppRadius.xlAll,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () =>
+                ref.read(customerCartProvider.notifier).addProduct(product),
+            onLongPress: () => showProductDetailsSheet(context, product),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // ───────── Image + floating controls ─────────
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          available
+                              ? CatalogProductImage(product: product)
+                              : ColorFiltered(
+                                  colorFilter: _grayscale,
+                                  child: CatalogProductImage(product: product),
+                                ),
+                          if (available)
+                            // Soft bottom fade so the controls stay legible
+                            // on any photo.
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    stops: const [0.55, 1],
+                                    colors: [
+                                      Colors.transparent,
+                                      scheme.scrim.withValues(alpha: 0.22),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            ColoredBox(
+                              color: scheme.scrim.withValues(alpha: 0.42),
+                              child: Center(
+                                child: _Pill(
+                                  label: 'نفذ من المخزون',
+                                  background: context.appColors.errorContainer,
+                                  foreground:
+                                      context.appColors.onErrorContainer,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ),
+                          if (lowStock)
+                            PositionedDirectional(
+                              top: 6,
+                              start: 6,
+                              child: _Pill(
+                                label: 'آخر ${product.availableQty}',
+                                background: context.appColors.warningContainer,
+                                foreground:
+                                    context.appColors.onWarningContainer,
+                              ),
+                            ),
+                          if (inCart)
+                            PositionedDirectional(
+                              top: 6,
+                              end: 6,
+                              child: Semantics(
+                                label: 'الكمية في السلة: $qty',
+                                excludeSemantics: true,
+                                child: _Pill(
+                                  key: ValueKey('catalog-qty-${product.id}'),
+                                  label: '$qty',
+                                  background: scheme.secondaryContainer,
+                                  foreground: scheme.onSecondaryContainer,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                    if (!available)
-                      Center(
-                        child: Container(
-                          padding: const EdgeInsetsDirectional.symmetric(
-                            horizontal: AppSpacing.md,
-                            vertical: AppSpacing.xs,
+                    ),
+                  ),
+
+                  // ───────── Info block ─────────
+                  Padding(
+                    padding: const EdgeInsetsDirectional.fromSTEB(4, 7, 4, 2),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          product.nameAr,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontSize: 12.5,
+                            height: 1.22,
+                            fontWeight: FontWeight.w700,
+                            color: available
+                                ? scheme.onSurface
+                                : scheme.onSurface.withValues(alpha: 0.48),
                           ),
-                          decoration: BoxDecoration(
-                            color: context.appColors.errorContainer,
-                            borderRadius: AppRadius.pillAll,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _metaLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 10,
+                            height: 1.2,
+                            color: scheme.onSurfaceVariant,
                           ),
-                          child: Text(
-                            'نفذ من المخزون',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: context.appColors.onErrorContainer,
+                        ),
+                        const SizedBox(height: 4),
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: AlignmentDirectional.centerStart,
+                          child: DzdPriceTag(
+                            centimes: price,
+                            color: available
+                                ? scheme.secondary
+                                : scheme.onSurface.withValues(alpha: 0.4),
+                            style: const TextStyle(
+                              fontSize: 14.5,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
-                      ),
-                    if (lowStock)
-                      PositionedDirectional(
-                        top: AppSpacing.sm,
-                        start: AppSpacing.sm,
-                        child: _StockPill(
-                          label: 'آخر ${product.availableQty}',
-                          background: context.appColors.warningContainer,
-                          foreground: context.appColors.onWarningContainer,
-                        ),
-                      ),
-                    if (available)
-                      PositionedDirectional(
-                        bottom: AppSpacing.sm,
-                        end: AppSpacing.sm,
-                        child: qty == 0
-                            ? _AddButton(product: product)
-                            : CatalogQuantityStepper(
-                                compact: true,
-                                quantity: qty,
-                                maxQuantity: product.availableQty,
-                                backgroundColor: scheme.secondary,
-                                foregroundColor: scheme.onSecondary,
-                                onChanged: (next) => ref
-                                    .read(customerCartProvider.notifier)
-                                    .updateQuantity(product.id, next),
-                              ),
-                      ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsetsDirectional.fromSTEB(
-                    AppSpacing.sm,
-                    AppSpacing.sm,
-                    AppSpacing.sm,
-                    AppSpacing.sm,
+                      ],
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        product.nameAr,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontSize: 13,
-                          height: 1.2,
-                          fontWeight: FontWeight.w700,
-                          color: available
-                              ? scheme.onSurface
-                              : scheme.onSurface.withValues(alpha: 0.48),
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        _metaLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontSize: 10.5,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: AlignmentDirectional.centerStart,
-                        child: DzdPriceTag(
-                          centimes: price,
-                          color: scheme.secondary,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -184,50 +230,18 @@ class CatalogProductCard extends ConsumerWidget {
   }
 }
 
-class _AddButton extends ConsumerWidget {
-  final ProductEntity product;
-
-  const _AddButton({required this.product});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final scheme = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: 'أضف ${product.nameAr} إلى السلة',
-      child: Material(
-        color: scheme.secondary,
-        elevation: 2,
-        shadowColor: scheme.shadow.withValues(alpha: 0.28),
-        shape: const CircleBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () =>
-              ref.read(customerCartProvider.notifier).addProduct(product),
-          customBorder: const CircleBorder(),
-          child: SizedBox(
-            width: 44,
-            height: 44,
-            child: Icon(
-              Icons.add_rounded,
-              size: 23,
-              color: scheme.onSecondary,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StockPill extends StatelessWidget {
+class _Pill extends StatelessWidget {
   final String label;
   final Color background;
   final Color foreground;
+  final double fontSize;
 
-  const _StockPill({
+  const _Pill({
+    super.key,
     required this.label,
     required this.background,
     required this.foreground,
+    this.fontSize = 9.5,
   });
 
   @override
@@ -235,7 +249,7 @@ class _StockPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsetsDirectional.symmetric(
         horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xxs,
+        vertical: 3,
       ),
       decoration: BoxDecoration(
         color: background,
@@ -244,7 +258,7 @@ class _StockPill extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 9.5,
+          fontSize: fontSize,
           fontWeight: FontWeight.w800,
           color: foreground,
         ),

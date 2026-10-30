@@ -286,8 +286,8 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen> {
                 ),
                 sliver: SliverGrid(
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 200,
-                    mainAxisExtent: 220,
+                    maxCrossAxisExtent: 180,
+                    mainAxisExtent: 200,
                     crossAxisSpacing: 10,
                     mainAxisSpacing: 10,
                   ),
