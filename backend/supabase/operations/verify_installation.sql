@@ -3,11 +3,11 @@
 -- OPERATIONS - INSTALLATION VERIFICATION
 -- ============================================================
 -- Read-only. Run this after schema/001_fresh_schema.sql through
--- schema/007_storage_policy_hardening.sql and seeds/001_admin.sql to confirm
+-- schema/008_fix_audit_log_actor.sql and seeds/001_admin.sql to confirm
 -- the database is ready.
 --
 -- A healthy fresh install shows:
---   * latest_version = 00038
+--   * latest_version = 00039
 --   * no missing tables
 --   * no missing RPCs
 --   * rls_enabled = public_tables
@@ -120,6 +120,13 @@ WHERE schemaname = 'storage'
   AND 'public'::name = ANY (roles)
   AND (coalesce(qual, '') LIKE '%product-images%'
        OR coalesce(with_check, '') LIKE '%product-images%');
+
+
+-- 7c. Audit trigger maps Auth identities to public.users --------------------
+-- Expected: true. audit_log.user_id references public.users(id), so the
+-- trigger must translate auth.uid() through users.auth_user_id (00039).
+SELECT pg_get_functiondef('public.trigger_audit_log_func()'::regprocedure)
+       LIKE '%auth_user_id = auth.uid()%' AS audit_actor_mapped;
 
 
 -- 8. Demo data check (expected 0 for an admin-only seed) --------------------

@@ -17,6 +17,9 @@
 .swiftpm/
 migrate_working_dir/
 
+# Supabase CLI local state
+backend/supabase/.temp/
+
 # IntelliJ related
 *.iml
 *.ipr

@@ -55,7 +55,10 @@ Use a brand-new Supabase project. In the Supabase Dashboard, open **SQL Editor**
 7. **`schema/007_storage_policy_hardening.sql`**
    - Restricts `product-images` INSERT/UPDATE/DELETE to authenticated staff with `products.manage`.
    - Closes an anon-key upload path that could consume the project storage quota.
-8. **`seeds/001_admin.sql`**
+8. **`schema/008_fix_audit_log_actor.sql`**
+   - Maps the Supabase Auth identity to `public.users.id` before writing `audit_log.user_id`.
+   - Fixes `audit_log_user_id_fkey` violations on moderator PIN resets and other audited writes.
+9. **`seeds/001_admin.sql`**
    - Creates the single master moderator row.
    - No demo staff, customers, suppliers, products, prices, or stock are created.
    - `app_versions` starts empty; releases are added by `scripts/publish_release.ps1` after the artifact is uploaded.
@@ -75,7 +78,7 @@ and PINs itself; see [`functions/README.md`](functions/README.md).
 
 Optional:
 
-8. **`operations/verify_installation.sql`**
+10. **`operations/verify_installation.sql`**
    - Read-only checks for tables, RPCs, RLS coverage, the admin account, RBAC reference data, and storage buckets.
 
 ### Default moderator
@@ -151,6 +154,7 @@ After running the reset, run **`schema/001_fresh_schema.sql`**,
 **`schema/002_migration_00035.sql`**, **`schema/003_migration_00035b.sql`**,
 **`schema/004_migration_00036.sql`**, **`schema/005_phase0_security.sql`**,
 **`schema/006_auth_management.sql`**, **`schema/007_storage_policy_hardening.sql`**,
+**`schema/008_fix_audit_log_actor.sql`**,
 and **`seeds/001_admin.sql`** again.
 Existing Auth users are left untouched; if you want a completely clean identity
 store, delete the old Auth users manually before re-seeding.

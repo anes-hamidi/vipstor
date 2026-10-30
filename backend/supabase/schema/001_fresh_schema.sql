@@ -4864,9 +4864,15 @@ BEGIN
         RETURN COALESCE(NEW, OLD);
     END IF;
 
-    -- Resolve actor from auth.uid() when a JWT exists.
+    -- auth.uid() identifies auth.users, while audit_log.user_id references
+    -- public.users. Translate the JWT identity to the application user id.
     BEGIN
-        v_user_id := auth.uid();
+        IF auth.uid() IS NOT NULL THEN
+            SELECT u.id INTO v_user_id
+            FROM public.users u
+            WHERE u.auth_user_id = auth.uid()
+            LIMIT 1;
+        END IF;
     EXCEPTION WHEN OTHERS THEN
         v_user_id := NULL;
     END;
@@ -4902,6 +4908,14 @@ BEGIN
         EXCEPTION WHEN OTHERS THEN
             v_user_id := NULL;
         END;
+    END IF;
+
+    -- The FK must never abort the business write just because the actor
+    -- could not be resolved. Log the row with a NULL actor instead.
+    IF v_user_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM public.users u WHERE u.id = v_user_id)
+    THEN
+        v_user_id := NULL;
     END IF;
 
     -- Keep full before/after only for critical tables.
