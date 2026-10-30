@@ -14,6 +14,13 @@
 # the same Supabase project. The publisher also rejects a cross-project
 # URL/key pair.
 #
+# Artifact hosting:
+#   Release binaries are published to GitHub Releases by default, using the
+#   workflow's built-in GITHUB_TOKEN (requires "contents: write"). No extra
+#   secret is needed. This avoids the Supabase Free-tier 50 MB per-file limit
+#   and egress charges; Supabase still stores the app_versions row.
+#   Pass release_host = supabase to use the legacy bucket instead.
+#
 # Optional Android release-signing secrets. Without them, Android jobs fail
 # unless you run with allow_debug_signing = true (unsafe, testing only):
 #   ANDROID_KEYSTORE_BASE64      base64 of the .jks file
@@ -58,7 +65,7 @@ on:
         default: '0'
         type: string
       android_abi:
-        description: 'Android ABI (universal is larger and may exceed the 50 MB limit)'
+        description: 'Android ABI (full APKs)'
         required: true
         default: 'arm64-v8a'
         type: choice
@@ -67,15 +74,23 @@ on:
           - armeabi-v7a
           - x86_64
           - universal
+      release_host:
+        description: 'Artifact host (github = no size/egress limits)'
+        required: true
+        default: 'github'
+        type: choice
+        options:
+          - github
+          - supabase
       min_supported_build:
         description: 'Minimum supported build number (default 1)'
         required: false
         default: '1'
         type: string
       max_upload_mb:
-        description: 'Supabase per-file limit in MB (Free 50, Pro 500)'
+        description: 'Per-file limit in MB (GitHub 2048, Supabase Free 50)'
         required: false
-        default: '50'
+        default: '2048'
         type: string
       is_mandatory:
         description: 'Force all users to update immediately'
@@ -102,7 +117,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: release-${{ github.repository }}
@@ -261,10 +276,12 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.plan.outputs.version }}
           BUILD_NUMBER: ${{ inputs.build_number }}
           PLATFORM: ${{ matrix.platform }}
           ANDROID_ABI: ${{ inputs.android_abi }}
+          RELEASE_HOST: ${{ inputs.release_host }}
           MIN_SUPPORTED_BUILD: ${{ inputs.min_supported_build }}
           MAX_UPLOAD_MB: ${{ inputs.max_upload_mb }}
           IS_MANDATORY: ${{ inputs.is_mandatory }}
@@ -289,6 +306,9 @@ jobs:
           }
           if (-not [string]::IsNullOrWhiteSpace($env:MAX_UPLOAD_MB)) {
             $scriptArgs += @('-MaxUploadMB', $env:MAX_UPLOAD_MB)
+          }
+          if (-not [string]::IsNullOrWhiteSpace($env:RELEASE_HOST)) {
+            $scriptArgs += @('-ReleaseHost', $env:RELEASE_HOST)
           }
           if ($env:IS_MANDATORY -eq 'true') {
             $scriptArgs += '-IsMandatory'

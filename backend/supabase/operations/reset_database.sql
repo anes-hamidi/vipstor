@@ -11,9 +11,19 @@
 --   * uploaded files in Supabase Storage
 --
 -- Use this only when you want to rebuild the database from scratch.
--- After running it, run these two files IN ORDER:
+-- After running it, run these files IN ORDER:
 --   1. schema/001_fresh_schema.sql
---   2. seeds/001_admin.sql
+--   2. schema/002_migration_00035.sql
+--   3. schema/003_migration_00035b.sql
+--   4. schema/004_migration_00036.sql
+--   5. schema/005_phase0_security.sql
+--   6. schema/006_auth_management.sql
+--   7. schema/007_storage_policy_hardening.sql
+--   8. seeds/001_admin.sql
+--
+-- Skipping 002-007 leaves the database without the Phase 0 security fixes
+-- (JWT identity mapping, RPC/RLS lockdown) and re-opens the product-images
+-- upload policy to the anon key.
 -- ============================================================
 
 BEGIN;

@@ -3,11 +3,11 @@
 -- OPERATIONS - INSTALLATION VERIFICATION
 -- ============================================================
 -- Read-only. Run this after schema/001_fresh_schema.sql through
--- schema/006_auth_management.sql and seeds/001_admin.sql to confirm the
--- database is ready.
+-- schema/007_storage_policy_hardening.sql and seeds/001_admin.sql to confirm
+-- the database is ready.
 --
 -- A healthy fresh install shows:
---   * latest_version = 00037
+--   * latest_version = 00038
 --   * no missing tables
 --   * no missing RPCs
 --   * rls_enabled = public_tables
@@ -107,6 +107,19 @@ SELECT id, public, file_size_limit
 FROM storage.buckets
 WHERE id IN ('product-images', 'app-releases')
 ORDER BY id;
+
+
+-- 7b. Storage write policies must never be open to anon ---------------------
+-- Expected: 0. The product-images bucket is public for reads only; writes are
+-- restricted to authenticated staff with 'products.manage' (00038).
+SELECT count(*) AS open_write_policies
+FROM pg_policies
+WHERE schemaname = 'storage'
+  AND tablename = 'objects'
+  AND cmd IN ('INSERT', 'UPDATE', 'DELETE', 'ALL')
+  AND 'public'::name = ANY (roles)
+  AND (coalesce(qual, '') LIKE '%product-images%'
+       OR coalesce(with_check, '') LIKE '%product-images%');
 
 
 -- 8. Demo data check (expected 0 for an admin-only seed) --------------------

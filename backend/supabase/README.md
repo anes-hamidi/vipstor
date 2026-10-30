@@ -11,7 +11,8 @@ backend/supabase/
 ├── schema/
 │   ├── 001_fresh_schema.sql      # Complete baseline schema (through 00034)
 │   ├── 005_phase0_security.sql   # Phase 0 hardening, JWT identity, PIN/RLS/RPC lockdown
-│   └── 006_auth_management.sql   # Password-only auth, recovery codes, staff lifecycle
+│   ├── 006_auth_management.sql   # Password-only auth, recovery codes, staff lifecycle
+│   └── 007_storage_policy_hardening.sql  # product-images writes restricted to staff
 ├── functions/
 │   ├── auth-admin/index.ts       # Service-role Auth lifecycle Edge Function
 │   └── README.md                 # Deployment and secret notes
@@ -51,7 +52,10 @@ Use a brand-new Supabase project. In the Supabase Dashboard, open **SQL Editor**
    - Hardens identity and authorization: JWT-derived user identity, PIN step-up, device binding, RPC/RLS lockdown, and audit protections.
 6. **`schema/006_auth_management.sql`**
    - Adds password-only auth helpers, deterministic phone-to-email mapping, customer recovery codes, soft deletion, and moderator-managed staff lifecycle RPCs.
-7. **`seeds/001_admin.sql`**
+7. **`schema/007_storage_policy_hardening.sql`**
+   - Restricts `product-images` INSERT/UPDATE/DELETE to authenticated staff with `products.manage`.
+   - Closes an anon-key upload path that could consume the project storage quota.
+8. **`seeds/001_admin.sql`**
    - Creates the single master moderator row.
    - No demo staff, customers, suppliers, products, prices, or stock are created.
    - `app_versions` starts empty; releases are added by `scripts/publish_release.ps1` after the artifact is uploaded.
@@ -146,7 +150,8 @@ Optional:
 After running the reset, run **`schema/001_fresh_schema.sql`**,
 **`schema/002_migration_00035.sql`**, **`schema/003_migration_00035b.sql`**,
 **`schema/004_migration_00036.sql`**, **`schema/005_phase0_security.sql`**,
-**`schema/006_auth_management.sql`**, and **`seeds/001_admin.sql`** again.
+**`schema/006_auth_management.sql`**, **`schema/007_storage_policy_hardening.sql`**,
+and **`seeds/001_admin.sql`** again.
 Existing Auth users are left untouched; if you want a completely clean identity
 store, delete the old Auth users manually before re-seeding.
 
@@ -184,14 +189,17 @@ registered in another:
 ```powershell
 # .env also needs SUPABASE_SERVICE_ROLE_KEY for publishing
 # (legacy service_role JWT or a new sb_secret_... key)
+# Releases are published to GitHub Releases by default, which needs a token
+# with "Contents: Read and write":
+#   GITHUB_TOKEN=github_pat_...
 .\scripts\publish_release.ps1 -AppType staff_app -Platform android -Version 1.1.0
 ```
 
 The publisher refuses to mix a URL and a key that belong to different projects.
 For CI releases, set the GitHub Actions secrets `SUPABASE_URL`,
-`SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` to the new project before
-running the workflow. All three are required because the apps have no compiled
-fallback project.
+`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `GITHUB_TOKEN` (or rely on
+the workflow's built-in `GITHUB_TOKEN`) before running the workflow. All three
+Supabase values are required because the apps have no compiled fallback project.
 
 Because a fresh project starts with an empty `app_versions` table, the first
 release would otherwise auto-select build `1`. OTA clients only update when
@@ -283,10 +291,10 @@ All state changes go through atomic, idempotent `SECURITY DEFINER` RPC functions
 - `rpc_open_pos_shift`, `rpc_close_pos_shift`
 - Staff/customer profile and PIN management RPCs
 
-### Storage & Free Tier Optimization (00034)
+### Storage & Free Tier Optimization (00034, 00038)
 
-- `product-images` bucket (public read, staff write).
-- `app-releases` bucket for OTA application packages.
+- `product-images` bucket (public read; writes restricted to authenticated staff with `products.manage` as of `00038`).
+- `app-releases` bucket for OTA application packages. **Optional:** `scripts/publish_release.ps1` now publishes to GitHub Releases by default (`-ReleaseHost github`), which avoids the Free-tier 50 MB per-file limit and egress charges. Pass `-ReleaseHost supabase` to keep using this bucket.
 - **Storage Lifecycle & Auto-Purge:** `rpc_purge_historical_data` automatically archives and prunes closed orders (>60 days), audit logs (>30 days), and driver telemetry (>7 days) while strictly preserving products, customers, suppliers, ledgers, and wallets.
 - **Automated Pre-Purge Backup Action:** `.github/workflows/database_backup_and_prune.yml` exports historical datasets to compressed JSON artifacts in GitHub Artifacts before executing the database prune.
 - **Storage Inspection Tool:** `operations/check_storage_footprint.sql` audits disk usage against the 500 MB Supabase Free Tier ceiling.

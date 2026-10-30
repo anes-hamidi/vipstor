@@ -4,8 +4,14 @@
 
 .DESCRIPTION
     Builds the selected app for Android, Windows, or Web, packages the
-    artifact, uploads it to Supabase Storage ('app-releases'), and registers
-    the release in public.app_versions so devices can pick it up.
+    artifact, publishes it to GitHub Releases (default), and registers the
+    release in public.app_versions so devices can pick it up.
+
+    Hosting:
+      Release binaries no longer need to live in Supabase Storage. The default
+      host is GitHub Releases, which has no 50 MB Free-tier cap and no egress
+      charges. Supabase keeps only the app_versions row (a few hundred bytes).
+      Use -ReleaseHost supabase to restore the old behavior.
 
     Safety features:
       - Fails on non-zero native exit codes (never publishes a stale binary).
@@ -14,9 +20,9 @@
       - Verifies the produced APK versionName/versionCode when aapt is available.
       - Verifies the APK signing certificate; android/key.properties pins it via signerSha256.
       - Sends UTF-8 JSON (Arabic release notes survive Windows PowerShell 5.1).
-      - Checks artifact size against the Supabase per-file limit before upload.
+      - Checks artifact size against the selected host's per-file limit before upload.
       - Uses curl.exe for large uploads with retries.
-      - Verifies that the uploaded object is publicly reachable.
+      - Verifies that the published artifact is publicly reachable.
 
     Supabase configuration:
       The Flutter apps read SUPABASE_URL and SUPABASE_ANON_KEY through
@@ -38,6 +44,20 @@
       supported; opaque keys are sent only in the apikey header because
       Supabase rejects them in Authorization.
 
+    GitHub configuration (default release host):
+      The repository must be PUBLIC, because the in-app updater downloads the
+      asset without credentials. Create a token with "Contents: Read and write"
+      (fine-grained) or the "repo" scope (classic) and expose it as
+      GITHUB_TOKEN / GH_TOKEN, or add it to .env at the repository root:
+
+          # .env (git-ignored)
+          GITHUB_TOKEN=github_pat_...
+
+      The repository is auto-detected from the git origin remote. Override it
+      with -GitHubRepo owner/name. Each build is published as its own GitHub
+      release tagged "<app>-<platform>-v<version>-b<build>", and the asset's
+      browser_download_url is written to app_versions.download_url.
+
 .PARAMETER BuildNumber
     Monotonic build number (Android versionCode). If omitted, the script reads
     the latest published build from app_versions and uses (latest + 1).
@@ -49,8 +69,28 @@
     Which ABI to embed in the APK. 'universal' builds one APK for all ABIs
     (larger). The other values build a single-ABI APK (smaller).
 
+.PARAMETER ReleaseHost
+    Where the artifact is stored: 'github' (default) or 'supabase'.
+    GitHub Releases has no 50 MB Free-tier cap and no egress charges.
+    Supabase Storage keeps the legacy behavior (Free plan caps at 50 MB per
+    file and 1 GB total).
+
+.PARAMETER GitHubRepo
+    Repository that receives the release, as owner/name. Defaults to the
+    origin remote of the current git repository.
+
+.PARAMETER GitHubToken
+    Token with permission to create releases and upload assets. Defaults to
+    GITHUB_TOKEN, then GH_TOKEN. Never pass this on a shared shell history;
+    prefer the environment variable or .env.
+
+.PARAMETER GitHubTag
+    Override the release tag. Defaults to
+    "<app>-<platform>-v<version>-b<build>".
+
 .PARAMETER MaxUploadMB
-    Supabase per-file upload limit for your plan. Free = 50, Pro = 500.
+    Per-file upload limit for the selected host. Defaults to 2048 MB on GitHub
+    and 50 MB on Supabase (Free plan). Pro allows 500 MB on Supabase.
 
 .PARAMETER NotesFile
     Optional UTF-8 text file with release notes. Overrides -Notes.
@@ -85,7 +125,8 @@
     .\scripts\publish_release.ps1 -AppType staff_app -Platform android -Version 1.1.0
     .\scripts\publish_release.ps1 -AppType staff_app -Platform windows -Version 1.1.0 -MinSupportedBuild 2 -IsMandatory
     .\scripts\publish_release.ps1 -AppType customer_app -Platform web -Version 1.1.0
-    .\scripts\publish_release.ps1 -AppType staff_app -Platform android -Version 1.1.0 -AndroidAbi universal -MaxUploadMB 500
+    .\scripts\publish_release.ps1 -AppType staff_app -Platform android -Version 1.1.0 -ReleaseHost supabase -MaxUploadMB 500
+    .\scripts\publish_release.ps1 -AppType staff_app -Platform android -Version 1.1.0 -GitHubRepo anes-hamidi/vipstor
 #>
 
 [CmdletBinding()]
@@ -126,6 +167,19 @@ param (
     [Parameter(Mandatory = $false)]
     [ValidateRange(1, 2048)]
     [int]$MaxUploadMB = 50,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('github', 'supabase')]
+    [string]$ReleaseHost = 'github',
+
+    [Parameter(Mandatory = $false)]
+    [string]$GitHubRepo,
+
+    [Parameter(Mandatory = $false)]
+    [string]$GitHubToken,
+
+    [Parameter(Mandatory = $false)]
+    [string]$GitHubTag,
 
     [Parameter(Mandatory = $false)]
     [string]$AllowedSignerSha256,
@@ -385,6 +439,11 @@ if (-not (Test-Path -LiteralPath $platformDir)) {
     throw ('The {0} runner directory does not exist: {1}' -f $Platform, $platformDir)
 }
 
+if ($ReleaseHost -eq 'github' -and -not $PSBoundParameters.ContainsKey('MaxUploadMB')) {
+    # GitHub allows 2 GB per release asset. Leave headroom for the API limit.
+    $MaxUploadMB = 2048
+}
+
 Write-Host '==========================================================' -ForegroundColor Yellow
 Write-Host '  VIP SMOCK - RELEASE PUBLISHER (MULTI-APP)' -ForegroundColor Yellow
 Write-Host '==========================================================' -ForegroundColor Yellow
@@ -395,6 +454,7 @@ Write-Host ('Build number    : {0}' -f $(if ($BuildNumber -gt 0) { $BuildNumber 
 Write-Host ('Min supported   : {0}' -f $MinSupportedBuild)
 Write-Host ('Mandatory       : {0}' -f $IsMandatory.IsPresent)
 Write-Host ('Android ABI     : {0}' -f $AndroidAbi)
+Write-Host ('Release host    : {0}' -f $ReleaseHost)
 Write-Host ('Upload limit    : {0} MB' -f $MaxUploadMB)
 Write-Host ('Source path     : {0}' -f $appDir)
 Write-Host '----------------------------------------------------------'
@@ -416,7 +476,7 @@ if ($dotEnvValues.Count -gt 0) {
 #    shell history and the process list). Use an environment variable or the
 #    secure prompt. It is never passed to Flutter.
 # -----------------------------------------------------------------------------
-$needsSupabase = (-not $SkipDatabase) -or (-not $SkipUpload)
+$needsSupabase = (-not $SkipDatabase) -or ((-not $SkipUpload) -and $ReleaseHost -eq 'supabase')
 $supabaseUrl = $env:SUPABASE_URL
 $supabaseAnonKey = $env:SUPABASE_ANON_KEY
 $serviceRoleKey = $null
@@ -493,6 +553,82 @@ if ($needsSupabase) {
     }
 
     Write-Ok ('Supabase project: {0}' -f $supabaseUrl)
+}
+
+# -----------------------------------------------------------------------------
+# 2b. GitHub Releases configuration (default artifact host)
+#     The repository must be public: the in-app updater downloads the asset
+#     without credentials. The token is used only by this script.
+# -----------------------------------------------------------------------------
+$githubApiBase = 'https://api.github.com'
+$githubUploadBase = 'https://uploads.github.com'
+$githubRepoSlug = $null
+
+function Resolve-GitHubRepoSlug {
+    param([Parameter(Mandatory = $false)][string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    $v = $Value.Trim()
+
+    $remote = [regex]::Match($v, 'github\.com[:/]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$')
+    if ($remote.Success) { return ('{0}/{1}' -f $remote.Groups[1].Value, $remote.Groups[2].Value) }
+
+    $slug = [regex]::Match($v, '^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$')
+    if ($slug.Success) { return $v }
+
+    return $null
+}
+
+if (-not $SkipUpload -and $ReleaseHost -eq 'github') {
+    Write-Step 'GitHub Releases configuration'
+
+    $repoCandidate = $GitHubRepo
+    if ([string]::IsNullOrWhiteSpace($repoCandidate)) {
+        # GitHub Actions provides this automatically (owner/repo).
+        $repoCandidate = Resolve-GitHubRepoSlug -Value ([string]$env:GITHUB_REPOSITORY)
+    }
+    if ([string]::IsNullOrWhiteSpace($repoCandidate)) {
+        $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+        if ($gitCmd) {
+            $remoteUrl = (& $gitCmd.Source config --get remote.origin.url 2>$null)
+            if ($LASTEXITCODE -eq 0) {
+                $repoCandidate = Resolve-GitHubRepoSlug -Value ([string]$remoteUrl)
+            }
+        }
+    }
+    else {
+        $repoCandidate = Resolve-GitHubRepoSlug -Value $repoCandidate
+    }
+
+    if ([string]::IsNullOrWhiteSpace($repoCandidate)) {
+        throw 'Could not determine the GitHub repository. Pass -GitHubRepo owner/name, or run from a clone whose origin is on GitHub.'
+    }
+
+    $repoMatch = [regex]::Match($repoCandidate, '^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$')
+    if (-not $repoMatch.Success) {
+        throw ('Invalid GitHub repository "{0}". Use owner/name.' -f $repoCandidate)
+    }
+    $githubRepoSlug = $repoCandidate
+
+    if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
+        foreach ($tokenVariable in @('GITHUB_TOKEN', 'GH_TOKEN', 'GITHUB_RELEASE_TOKEN')) {
+            $tokenValue = [Environment]::GetEnvironmentVariable($tokenVariable)
+            if (-not [string]::IsNullOrWhiteSpace($tokenValue)) {
+                $GitHubToken = $tokenValue.Trim()
+                break
+            }
+        }
+    }
+
+    if ($DryRun) {
+        Write-Ok ('Repository: {0} (token check skipped for -DryRun)' -f $githubRepoSlug)
+    }
+    elseif ([string]::IsNullOrWhiteSpace($GitHubToken)) {
+        throw 'No GitHub token found. Set GITHUB_TOKEN (Contents: Read and write) in .env or the environment, or pass -GitHubToken.'
+    }
+    else {
+        Write-Ok ('Repository: {0}' -f $githubRepoSlug)
+    }
 }
 
 if (-not $SkipBuild) {
@@ -573,6 +709,163 @@ function Invoke-SupabaseRest {
     }
 
     Write-Output $response
+}
+
+function Invoke-GitHubApi {
+    param(
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $false)][object]$Body = $null
+    )
+
+    $headers = @{
+        'Accept'               = 'application/vnd.github+json'
+        'Authorization'        = ('Bearer ' + $GitHubToken)
+        'X-GitHub-Api-Version' = '2022-11-28'
+    }
+
+    $request = @{
+        Uri        = ($githubApiBase + $Path)
+        Method     = $Method
+        Headers    = $headers
+        UserAgent  = 'vip-release-publisher/1.0'
+        TimeoutSec = 60
+    }
+
+    if ($null -ne $Body) {
+        $json = $Body | ConvertTo-Json -Depth 6 -Compress
+        # Windows PowerShell 5.1 would encode a string body as ASCII.
+        $request['Body'] = [System.Text.Encoding]::UTF8.GetBytes($json)
+        $request['ContentType'] = 'application/json; charset=utf-8'
+    }
+
+    try {
+        $response = Invoke-RestMethod @request
+    }
+    catch {
+        $detail = ''
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message }
+        throw ('GitHub API {0} {1} failed: {2} {3}' -f $Method, $Path, $_.Exception.Message, $detail)
+    }
+
+    if ($null -eq $response) { return }
+
+    # Windows PowerShell 5.1 returns a JSON array as one pipeline object, so
+    # @(Invoke-GitHubApi ...) would produce a nested array. Emit items instead.
+    if ($response -is [System.Collections.IEnumerable] -and $response -isnot [string]) {
+        foreach ($item in $response) { Write-Output $item }
+        return
+    }
+
+    Write-Output $response
+}
+
+function Get-GitHubReleaseByTag {
+    param([Parameter(Mandatory = $true)][string]$Tag)
+
+    $path = ('/repos/{0}/releases/tags/{1}' -f $githubRepoSlug, [uri]::EscapeDataString($Tag))
+    try {
+        return Invoke-GitHubApi -Method 'GET' -Path $path
+    }
+    catch {
+        if ($_.Exception.Message -match '404|Not Found') { return $null }
+        throw
+    }
+}
+
+function New-GitHubRelease {
+    param(
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string]$BodyText
+    )
+
+    $payload = [ordered]@{
+        tag_name               = $Tag
+        name                   = $Title
+        body                   = $BodyText
+        draft                  = $false
+        prerelease             = $false
+        generate_release_notes = $false
+    }
+
+    return Invoke-GitHubApi -Method 'POST' -Path ('/repos/{0}/releases' -f $githubRepoSlug) -Body $payload
+}
+
+function Send-GitHubReleaseAsset {
+    param(
+        [Parameter(Mandatory = $true)][object]$Release,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$ContentType
+    )
+
+    $uri = ('{0}/repos/{1}/releases/{2}/assets?name={3}' -f `
+            $githubUploadBase, $githubRepoSlug, $Release.id, [uri]::EscapeDataString($Name))
+
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curl) {
+        $responseFile = [System.IO.Path]::GetTempFileName()
+        try {
+            $curlArgs = @(
+                '-sS',
+                '--retry', '3',
+                '--retry-delay', '2',
+                '-o', $responseFile,
+                '-w', '%{http_code}',
+                '-X', 'POST', $uri,
+                '-H', ('Authorization: Bearer ' + $GitHubToken),
+                '-H', 'Accept: application/vnd.github+json',
+                '-H', 'X-GitHub-Api-Version: 2022-11-28',
+                '-H', ('Content-Type: ' + $ContentType),
+                '-H', 'User-Agent: vip-release-publisher/1.0',
+                '--data-binary', ('@' + $Path)
+            )
+
+            $status = & $curl.Source @curlArgs
+            $curlExit = $LASTEXITCODE
+            $body = ''
+            if (Test-Path -LiteralPath $responseFile) {
+                $body = Get-Content -LiteralPath $responseFile -Raw
+            }
+
+            if ($curlExit -ne 0) {
+                throw ('curl failed with exit code {0}: {1}' -f $curlExit, $body)
+            }
+
+            $statusCode = [int]$status
+            if ($statusCode -lt 200 -or $statusCode -ge 300) {
+                if ($statusCode -eq 422 -and $body -match 'already_exists') {
+                    throw ('GitHub already has an asset named "{0}" on this release. Re-run with -AllowRebuild.' -f $Name)
+                }
+                throw ('GitHub asset upload failed with HTTP {0}: {1}' -f $statusCode, $body)
+            }
+
+            Write-Ok ('Uploaded with curl (HTTP {0})' -f $statusCode)
+            return ($body | ConvertFrom-Json)
+        }
+        finally {
+            Remove-Item -LiteralPath $responseFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $headers = @{
+        'Authorization'        = ('Bearer ' + $GitHubToken)
+        'Accept'               = 'application/vnd.github+json'
+        'X-GitHub-Api-Version' = '2022-11-28'
+    }
+    try {
+        Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -ContentType $ContentType -InFile $Path -UserAgent 'vip-release-publisher/1.0' -TimeoutSec 900 | Out-Null
+        Write-Ok 'Uploaded with Invoke-RestMethod (curl.exe not found)'
+        return (Invoke-GitHubApi -Method 'GET' -Path ('/repos/{0}/releases/{1}/assets' -f $githubRepoSlug, $Release.id) |
+                Where-Object { $_.name -eq $Name } |
+                Select-Object -First 1)
+    }
+    catch {
+        $detail = ''
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message }
+        throw ('GitHub asset upload failed: {0} {1}' -f $_.Exception.Message, $detail)
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -999,15 +1292,20 @@ Write-Host ('  SHA-256         : {0}' -f $sha256)
 
 $maxBytes = [long]$MaxUploadMB * 1MB
 if (-not $SkipUpload -and $fileSize -gt $maxBytes) {
-    throw ('Artifact is {0:N2} MB, above the {1} MB upload limit. Supabase Free allows 50 MB per file. Use a smaller ABI (-AndroidAbi arm64-v8a), reduce the app size, or pass -MaxUploadMB only if your plan allows it.' -f $fileSizeMB, $MaxUploadMB)
+    if ($ReleaseHost -eq 'supabase') {
+        throw ('Artifact is {0:N2} MB, above the {1} MB upload limit. Supabase Free allows 50 MB per file. Use a smaller ABI (-AndroidAbi arm64-v8a), switch to -ReleaseHost github, or pass -MaxUploadMB only if your plan allows it.' -f $fileSizeMB, $MaxUploadMB)
+    }
+    throw ('Artifact is {0:N2} MB, above the {1} MB upload limit. Reduce the app size or raise -MaxUploadMB.' -f $fileSizeMB, $MaxUploadMB)
 }
 
 # -----------------------------------------------------------------------------
-# 7. Upload to Supabase Storage
+# 7. Publish the artifact
+#    github   -> GitHub Releases (no 50 MB Free-tier cap, no egress charges)
+#    supabase -> legacy Supabase Storage bucket 'app-releases'
 # -----------------------------------------------------------------------------
-$objectPath = ('{0}/{1}' -f $storageFolder, $fileName)
-$uploadUri = ('{0}/storage/v1/object/app-releases/{1}' -f $supabaseUrl, $objectPath)
-$publicUrl = ('{0}/storage/v1/object/public/app-releases/{1}' -f $supabaseUrl, $objectPath)
+$objectPath = $null
+$uploadUri = $null
+$publicUrl = $null
 
 function Invoke-StorageUpload {
     param(
@@ -1089,7 +1387,75 @@ if ($SkipUpload) {
     Write-Step 'Skipping upload (-SkipUpload)'
     Write-Ok ('Artifact kept at {0}' -f $filePath)
 }
+elseif ($ReleaseHost -eq 'github') {
+    Write-Step 'Publishing to GitHub Releases...'
+
+    # OTA downloads are unauthenticated, so a private repository cannot work.
+    $repoInfo = Invoke-GitHubApi -Method 'GET' -Path ('/repos/{0}' -f $githubRepoSlug)
+    if ($repoInfo.private -eq $true) {
+        throw ('Repository {0} is private. GitHub release assets on a private repository cannot be downloaded by the app without a token. Use a public repository or -ReleaseHost supabase.' -f $githubRepoSlug)
+    }
+
+    if ([string]::IsNullOrWhiteSpace($GitHubTag)) {
+        $GitHubTag = ('{0}-{1}-v{2}-b{3}' -f $AppType, $Platform, $Version, $BuildNumber)
+    }
+    $releaseTitle = ('{0} {1} v{2} (build {3})' -f $AppType, $Platform, $Version, $BuildNumber)
+    $releaseBody = @(
+        $Notes,
+        '',
+        '---',
+        ('- App: `{0}`' -f $AppType),
+        ('- Platform: `{0}`' -f $Platform),
+        ('- Version: `{0}` (build {1})' -f $Version, $BuildNumber),
+        ('- Min supported build: {0}' -f $MinSupportedBuild),
+        ('- Mandatory: {0}' -f $IsMandatory.IsPresent),
+        ('- SHA-256: `{0}`' -f $sha256),
+        ('- Size: {0} MB' -f $fileSizeMB)
+    ) -join "`n"
+
+    $release = Get-GitHubReleaseByTag -Tag $GitHubTag
+    if ($null -eq $release) {
+        $release = New-GitHubRelease -Tag $GitHubTag -Title $releaseTitle -BodyText $releaseBody
+        Write-Ok ('Created GitHub release {0} (id {1})' -f $GitHubTag, $release.id)
+    }
+    else {
+        Write-Warn ('GitHub release {0} already exists; reusing it.' -f $GitHubTag)
+    }
+
+    # GitHub rejects a second asset with the same name (422 already_exists), so
+    # remove the old one when a build number is republished with -AllowRebuild.
+    $existingAssets = Invoke-GitHubApi -Method 'GET' -Path ('/repos/{0}/releases/{1}/assets' -f $githubRepoSlug, $release.id)
+    foreach ($asset in $existingAssets) {
+        if ([string]$asset.name -eq $fileName) {
+            Invoke-GitHubApi -Method 'DELETE' -Path ('/repos/{0}/releases/assets/{1}' -f $githubRepoSlug, $asset.id) | Out-Null
+            Write-Warn ('Deleted the previous asset {0} (id {1}).' -f $asset.name, $asset.id)
+        }
+    }
+
+    $uploaded = Send-GitHubReleaseAsset -Release $release -Path $filePath -Name $fileName -ContentType $contentType
+    if ($null -eq $uploaded -or [string]::IsNullOrWhiteSpace([string]$uploaded.browser_download_url)) {
+        throw 'GitHub did not return a browser_download_url for the uploaded asset.'
+    }
+    $publicUrl = [string]$uploaded.browser_download_url
+
+    Write-Host ('  Public URL      : {0}' -f $publicUrl)
+
+    # GitHub's CDN can take a few seconds to serve a freshly uploaded asset.
+    $reachable = $false
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        if (Test-PublicUrl -Url $publicUrl) { $reachable = $true; break }
+        Start-Sleep -Seconds (2 * $attempt)
+    }
+    if (-not $reachable) {
+        throw ('The release asset is not publicly reachable at {0}. Confirm the repository is public and the token can write releases.' -f $publicUrl)
+    }
+    Write-Ok 'Public URL is reachable.'
+}
 else {
+    $objectPath = ('{0}/{1}' -f $storageFolder, $fileName)
+    $uploadUri = ('{0}/storage/v1/object/app-releases/{1}' -f $supabaseUrl, $objectPath)
+    $publicUrl = ('{0}/storage/v1/object/public/app-releases/{1}' -f $supabaseUrl, $objectPath)
+
     Write-Step 'Uploading to Supabase Storage (app-releases)...'
     Invoke-StorageUpload -Uri $uploadUri -Path $filePath -ContentType $contentType
 
@@ -1168,6 +1534,7 @@ Write-Host ('  Artifact        : {0}' -f $fileName)
 Write-Host ('  Size            : {0} MB' -f $fileSizeMB)
 Write-Host ('  SHA-256         : {0}' -f $sha256)
 if (-not $SkipUpload) {
+    Write-Host ('  Release host    : {0}' -f $ReleaseHost)
     Write-Host ('  Download URL    : {0}' -f $publicUrl)
 }
 Write-Host ('  Mandatory       : {0}' -f $IsMandatory.IsPresent)
