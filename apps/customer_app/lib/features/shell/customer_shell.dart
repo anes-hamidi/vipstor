@@ -23,9 +23,6 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
   int _index = 0;
   bool _checkedUpdate = false;
 
-  // ── Algomend brand color ────────────────────────────────────────────────
-  static const _algomendGreen = Color(0xFF1DAB61);
-
   static const _destinations = [
     (
       icon: Icons.storefront_outlined,
@@ -90,11 +87,6 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
-    final cartCount = ref.watch(
-      customerCartProvider.select(
-        (items) => items.fold<int>(0, (sum, item) => sum + item.quantity),
-      ),
-    );
 
     return Scaffold(
       backgroundColor: scheme.surface,
@@ -112,7 +104,7 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
           color: scheme.surfaceContainerLow,
           border: Border(
             top: BorderSide(
-              color: _algomendGreen.withValues(alpha: isDark ? 0.30 : 0.20),
+              color: scheme.primary.withValues(alpha: isDark ? 0.30 : 0.20),
             ),
           ),
           boxShadow: isDark ? AppShadows.navDark : AppShadows.navLight,
@@ -130,8 +122,6 @@ class _CustomerShellState extends ConsumerState<CustomerShell> {
                     icon: selected ? dest.active : dest.icon,
                     label: dest.label,
                     selected: selected,
-                    badge: i == 0 && cartCount > 0 ? cartCount : null,
-                    brandColor: _algomendGreen,
                     onTap: () => setState(() => _index = i),
                   ),
                 );
@@ -148,17 +138,13 @@ class _ShellNavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool selected;
-  final int? badge;
-  final Color brandColor;
   final VoidCallback onTap;
 
   const _ShellNavItem({
     required this.icon,
     required this.label,
     required this.selected,
-    required this.brandColor,
     required this.onTap,
-    this.badge,
   });
 
   @override
@@ -172,7 +158,7 @@ class _ShellNavItem extends StatelessWidget {
       label: label,
       child: InkWell(
         onTap: onTap,
-        splashColor: brandColor.withValues(alpha: 0.14),
+        splashColor: scheme.secondary.withValues(alpha: 0.14),
         highlightColor: Colors.transparent,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -181,56 +167,24 @@ class _ShellNavItem extends StatelessWidget {
               duration: const Duration(milliseconds: 220),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
               decoration: BoxDecoration(
-                color: selected ? brandColor : null,
+                color: selected ? scheme.secondary : null,
                 borderRadius: AppRadius.pillAll,
                 boxShadow: selected
                     ? [
                         BoxShadow(
-                          color: brandColor.withValues(alpha: 0.35),
+                          color: scheme.secondary.withValues(alpha: 0.28),
                           blurRadius: 10,
                           offset: const Offset(0, 3),
                         ),
                       ]
                     : null,
               ),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Icon(
-                    icon,
-                    size: 21,
-                    color: selected
-                        ? Colors.white
-                        : scheme.onSurfaceVariant.withValues(alpha: 0.72),
-                  ),
-                  if (badge != null)
-                    PositionedDirectional(
-                      top: -7,
-                      end: -10,
-                      child: Container(
-                        constraints: const BoxConstraints(minWidth: 16),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: scheme.error,
-                          borderRadius: AppRadius.pillAll,
-                          border: Border.all(
-                            color: scheme.surface,
-                            width: 1.5,
-                          ),
-                        ),
-                        child: Text(
-                          badge! > 99 ? '99+' : '$badge',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: scheme.onError,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
+              child: Icon(
+                icon,
+                size: 21,
+                color: selected
+                    ? scheme.onSecondary
+                    : scheme.onSurfaceVariant.withValues(alpha: 0.72),
               ),
             ),
             const SizedBox(height: 2),
@@ -241,7 +195,7 @@ class _ShellNavItem extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-                color: selected ? brandColor : scheme.onSurfaceVariant,
+                color: selected ? scheme.secondary : scheme.onSurfaceVariant,
               ),
             ),
           ],
