@@ -99,14 +99,14 @@ class CatalogSkeleton extends StatelessWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 220,
-              mainAxisExtent: 278,
+              maxCrossAxisExtent: 200,
+              mainAxisExtent: 220,
               crossAxisSpacing: 10,
               mainAxisSpacing: 10,
             ),
             itemCount: 6,
             itemBuilder: (_, __) => AppStates.skeleton(
-              height: 266,
+              height: 220,
               borderRadius: AppRadius.xlAll,
             ),
           ),

@@ -60,7 +60,7 @@ class CatalogProductCard extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(
-                height: 120,
+                height: 96,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
@@ -122,31 +122,21 @@ class CatalogProductCard extends ConsumerWidget {
               Expanded(
                 child: Padding(
                   padding: const EdgeInsetsDirectional.fromSTEB(
-                    AppSpacing.md,
                     AppSpacing.sm,
-                    AppSpacing.md,
-                    AppSpacing.md,
+                    AppSpacing.sm,
+                    AppSpacing.sm,
+                    AppSpacing.sm,
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        product.category,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.xxs),
-                      Text(
                         product.nameAr,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall?.copyWith(
-                          fontSize: 13.5,
-                          height: 1.25,
+                          fontSize: 13,
+                          height: 1.2,
                           fontWeight: FontWeight.w700,
                           color: available
                               ? scheme.onSurface
@@ -163,7 +153,7 @@ class CatalogProductCard extends ConsumerWidget {
                           color: scheme.onSurfaceVariant,
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.xs),
+                      const SizedBox(height: AppSpacing.xxs),
                       FittedBox(
                         fit: BoxFit.scaleDown,
                         alignment: AlignmentDirectional.centerStart,
