@@ -135,6 +135,8 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
   _RoleOption get _currentRole =>
       _roles.firstWhere((r) => r.value == _selectedRole);
 
+  bool get _isModeratorRole => _selectedRole == 'moderator';
+
   // ── Validation ────────────────────────────────────────────────────────────
 
   String? get _nameError {
@@ -156,8 +158,8 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
   }
 
   String? get _pinError {
-    if (!RegExp(r'^[0-9]{4,8}$').hasMatch(_pinController.text.trim())) {
-      return 'PIN يجب أن يكون من 4 إلى 8 أرقام';
+    if (!RegExp(r'^[0-9]{4}$').hasMatch(_pinController.text.trim())) {
+      return 'PIN يجب أن يكون 4 أرقام';
     }
     return null;
   }
@@ -173,9 +175,10 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
     // Trigger UI rebuild to show errors
     setState(() {});
 
+    final passwordError = _isModeratorRole ? _passwordError : null;
     if (_nameError != null ||
         _phoneError != null ||
-        _passwordError != null ||
+        passwordError != null ||
         _pinError != null ||
         _adminPinError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -198,7 +201,13 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
         name: _nameController.text.trim(),
         phone: _phoneController.text.trim(),
         role: _selectedRole,
-        password: _passwordController.text,
+        // A staff password is an internal secret that is rotated on the first
+        // PIN login and never shown. Generate a fresh valid one at submit time
+        // so an abandoned moderator password field can never leak into a staff
+        // account.
+        password: _isModeratorRole
+            ? _passwordController.text
+            : _generateRandomPassword(),
         initialPin: _pinController.text.trim(),
         language: _selectedLang,
       );
@@ -206,7 +215,9 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
       if (!mounted) return;
       res['name'] = _nameController.text.trim();
       res['pin'] = _pinController.text.trim();
-      res['temporary_password'] = _passwordController.text;
+      if (_isModeratorRole) {
+        res['temporary_password'] = _passwordController.text;
+      }
       Navigator.pop(context, res);
     } catch (e) {
       if (!mounted) return;
@@ -279,24 +290,61 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
                         _buildLanguageToggle(theme, isDark),
                         AppSpacing.gapXl,
 
-                        // Section 4: Temporary password
-                        const SectionHeader(title: 'كلمة المرور المؤقتة'),
-                        AppSpacing.gapSm,
-                        Text(
-                          'تُستخدم لتسجيل الدخول مع رقم الهاتف. لا تُرسل رسائل SMS — '
-                          'سلّمها للموظف بطريقة آمنة، ويمكنك تغييرها لاحقاً من شاشة تعديل الموظف.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant),
-                        ),
-                        AppSpacing.gapMd,
-                        _buildPasswordField(),
-                        AppSpacing.gapXl,
+                        // Section 4: Password (moderators only)
+                        if (_isModeratorRole) ...[
+                          const SectionHeader(title: 'كلمة المرور المؤقتة'),
+                          AppSpacing.gapSm,
+                          Text(
+                            'تُستخدم لتسجيل الدخول مع رقم الهاتف. لا تُرسل رسائل SMS — '
+                            'سلّمها للمشرف بطريقة آمنة، ويمكنك تغييرها لاحقاً من شاشة تعديل الموظف.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant),
+                          ),
+                          AppSpacing.gapMd,
+                          _buildPasswordField(),
+                          AppSpacing.gapXl,
+                        ] else ...[
+                          Container(
+                            padding: const EdgeInsets.all(AppSpacing.md),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primaryContainer
+                                  .withValues(alpha: 0.45),
+                              borderRadius: AppRadius.mdAll,
+                              border: Border.all(
+                                color: theme.colorScheme.primary
+                                    .withValues(alpha: 0.25),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.dialpad_rounded,
+                                  size: 18,
+                                  color: theme.colorScheme.primary,
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Expanded(
+                                  child: Text(
+                                    'الموظف يسجل الدخول برمز PIN فقط. لا حاجة لإظهار '
+                                    'كلمة مرور؛ تُولَّد كلمة مرور داخلية تلقائياً ولا تُعرض.',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onPrimaryContainer,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          AppSpacing.gapXl,
+                        ],
 
                         // Section 5: Initial PIN
-                        const SectionHeader(title: 'رمز تأكيد العمليات (PIN)'),
+                        const SectionHeader(title: 'رمز الدخول (PIN)'),
                         AppSpacing.gapSm,
                         Text(
-                          'يُطلب فقط لتأكيد العمليات الحساسة — يجب تغييره عند أول استخدام',
+                          _isModeratorRole
+                              ? 'يُستخدم لتأكيد العمليات الإدارية الحساسة.'
+                              : 'رمز الدخول الأساسي للموظف — يجب تغييره عند أول استخدام.',
                           style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant),
                         ),
@@ -549,12 +597,12 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
                 keyboardType: TextInputType.number,
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(8),
+                  LengthLimitingTextInputFormatter(4),
                 ],
                 obscureText: !_showStaffPin,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
-                  labelText: 'رمز PIN الأولي (4-8 أرقام) *',
+                  labelText: 'رمز PIN الأولي (4 أرقام) *',
                   prefixIcon: const Icon(Icons.lock_outline_rounded),
                   counterText: '',
                   suffixIcon: IconButton(
@@ -690,11 +738,11 @@ class _CreateStaffDialogState extends ConsumerState<CreateStaffDialog>
   Widget _buildFooter(bool isDark) {
     final isValid = _nameError == null &&
         _phoneError == null &&
-        _passwordError == null &&
+        (!_isModeratorRole || _passwordError == null) &&
         _pinError == null &&
         _adminPinError == null &&
         _nameController.text.isNotEmpty &&
-        _passwordController.text.length >= 8;
+        (!_isModeratorRole || _passwordController.text.length >= 8);
 
     return Container(
       padding: const EdgeInsetsDirectional.fromSTEB(

@@ -1,14 +1,19 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 /**
- * auth-admin — password-only account lifecycle.
+ * auth-admin — account lifecycle + staff PIN sign-in.
  *
  * Deploy with JWT verification disabled:
  *   supabase functions deploy auth-admin --no-verify-jwt
  *
  * The function only uses the service role after validating the caller for
- * staff actions. Public actions are deliberately limited to customer
- * self-registration and recovery-code password reset.
+ * staff actions. Moderators authenticate with phone + password and keep a
+ * normal Supabase session. Ordinary staff authenticate with a PIN only: the
+ * function verifies the PIN server-side, rotates the hidden Auth password and
+ * returns a real Supabase session so RLS/data access keeps working.
+ *
+ * Public actions are deliberately limited to customer self-registration,
+ * recovery-code password reset, the PIN staff directory and PIN sign-in.
  */
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
@@ -19,11 +24,24 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ??
 
 const AUTH_EMAIL_DOMAIN = "vip.algomend.app";
 const STAFF_ROLES = ["moderator", "manager", "cashier", "driver"] as const;
+const PIN_STAFF_ROLES = ["manager", "cashier", "driver"] as const;
 const RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
+
+/**
+ * Separate anonymous client used only to exchange the rotated password for a
+ * Supabase session. Keeping this away from `admin` prevents sign-in from
+ * replacing the service-role authorization used by later admin operations in
+ * the same isolate.
+ */
+function createSessionClient() {
+  return createClient(SUPABASE_URL, ANON_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -153,6 +171,29 @@ function validateRole(input: unknown): string {
     throw new ApiError(400, "دور الموظف غير صالح", "invalid_role");
   }
   return role;
+}
+
+function isPinStaffRole(role: unknown): boolean {
+  return PIN_STAFF_ROLES.includes(
+    String(role ?? "") as (typeof PIN_STAFF_ROLES)[number],
+  );
+}
+
+/**
+ * Random, never-disclosed password used only to obtain a Supabase session for
+ * a PIN-authenticated staff member. It is rotated on every PIN sign-in, so no
+ * lasting password credential is exposed to staff or moderators.
+ */
+function generateInternalPassword(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  const random = Array.from(
+    bytes,
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  // Prefix guarantees upper/lower/digit/symbol for projects with a strict
+  // password policy while the 256-bit random suffix carries the entropy.
+  return `Aa1!${random}`;
 }
 
 function validateLanguage(input: unknown): string {
@@ -543,6 +584,187 @@ async function customerResetPassword(
   });
 }
 
+/**
+ * Public PIN-terminal directory. Only active cashiers, managers and drivers
+ * are listed. Phone numbers are intentionally omitted: the terminal only needs
+ * a display name and role, and this endpoint is unauthenticated.
+ */
+async function staffDirectory(req: Request) {
+  await enforceRateLimit(req, "staff_directory", 120, 60, 60);
+
+  const { data, error } = await admin
+    .from("users")
+    .select("id, name, role, language, must_change_pin")
+    .in("role", [...PIN_STAFF_ROLES])
+    .eq("active", true)
+    .is("deleted_at", null)
+    .order("name");
+
+  if (error) {
+    console.error("failed to load staff directory", error);
+    throw new ApiError(
+      503,
+      "تعذر تحميل قائمة الموظفين. تحقق من الاتصال وحاول لاحقاً.",
+      "directory_failed",
+    );
+  }
+
+  return json({ success: true, staff: data ?? [] });
+}
+
+/**
+ * PIN-only staff sign-in.
+ *
+ * 1. Verify the PIN through the service-role-only internal RPC, which keeps the
+ *    existing bcrypt comparison and escalating lockout rules.
+ * 2. Rotate the hidden Supabase Auth password to a random secret.
+ * 3. Sign in with that secret and return the resulting session tokens.
+ *
+ * The app installs those tokens with `auth.setSession`, so the staff member
+ * gets a normal Supabase JWT and every RLS policy continues to work. Moderators
+ * are rejected here and must use phone + password.
+ */
+async function staffPinLogin(req: Request, body: Record<string, unknown>) {
+  const userId = String(body.user_id ?? "").trim();
+  const pin = validatePin(body.pin);
+  if (!userId) {
+    throw new ApiError(400, "اختر الموظف أولاً", "invalid_user");
+  }
+
+  await enforceRateLimit(req, "staff_pin_login", 30, 300, 300);
+
+  const { data: user, error: userError } = await admin
+    .from("users")
+    .select(
+      "id, name, phone, role, active, language, must_change_pin, auth_user_id, deleted_at",
+    )
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (userError) {
+    console.error("failed to read PIN login user", userError);
+    throw new ApiError(
+      503,
+      "تعذر قراءة بيانات الحساب. حاول لاحقاً.",
+      "account_read_failed",
+    );
+  }
+  if (!user || user.deleted_at || user.active !== true) {
+    throw new ApiError(
+      403,
+      "هذا الحساب غير متاح. راجع الإدارة.",
+      "account_unavailable",
+    );
+  }
+  if (!isPinStaffRole(user.role)) {
+    throw new ApiError(
+      403,
+      "دخول المشرف يتطلب رقم الهاتف وكلمة المرور.",
+      "moderator_password_required",
+    );
+  }
+  if (!user.auth_user_id) {
+    throw new ApiError(
+      409,
+      "الحساب غير مرتبط ببيانات دخول. اطلب من الإدارة إعادة إنشائه.",
+      "auth_missing",
+    );
+  }
+
+  await enforceRateLimit(
+    req,
+    `staff_pin_login_user:${user.id}`,
+    8,
+    300,
+    300,
+  );
+
+  const { data: verified, error: verifyError } = await admin.rpc(
+    "internal_verify_user_pin",
+    {
+      p_user_id: user.id,
+      p_pin: pin,
+    },
+  );
+
+  if (verifyError) {
+    console.error("failed to verify staff PIN", verifyError);
+    throw new ApiError(
+      503,
+      "تعذر التحقق من رمز PIN. حاول لاحقاً.",
+      "pin_check_failed",
+    );
+  }
+  if (!verified?.valid) {
+    const locked = verified?.locked === true;
+    throw new ApiError(
+      locked ? 429 : 400,
+      String(verified?.message ?? "رمز PIN غير صحيح"),
+      locked ? "pin_locked" : "invalid_pin",
+    );
+  }
+
+  const internalPassword = generateInternalPassword();
+  const { error: rotateError } = await admin.auth.admin.updateUserById(
+    String(user.auth_user_id),
+    { password: internalPassword },
+  );
+  if (rotateError) {
+    console.error("failed to rotate staff auth password", rotateError);
+    throw new ApiError(
+      502,
+      "تعذر بدء جلسة الدخول. حاول لاحقاً.",
+      "session_prepare_failed",
+    );
+  }
+
+  const sessionClient = createSessionClient();
+  const phone = String(user.phone ?? "");
+  let signIn = await sessionClient.auth.signInWithPassword({
+    email: authEmailForPhone(phone),
+    password: internalPassword,
+  });
+
+  // Legacy phone-auth identities may not have the synthetic email. Keep the
+  // password-only fallback without ever sending an SMS.
+  if (signIn.error) {
+    try {
+      const normalizedPhone = normalizePhone(phone);
+      signIn = await sessionClient.auth.signInWithPassword({
+        phone: normalizedPhone.e164,
+        password: internalPassword,
+      });
+    } catch {
+      // Keep the original/synthetic-email error for the response below.
+    }
+  }
+
+  const session = signIn.data.session;
+  if (signIn.error || !session) {
+    console.error("failed to create staff session", signIn.error);
+    throw new ApiError(
+      502,
+      "تعذر بدء جلسة الدخول. حاول لاحقاً.",
+      "session_create_failed",
+    );
+  }
+
+  return json({
+    success: true,
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    expires_in: session.expires_in,
+    token_type: session.token_type,
+    user: {
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      language: user.language,
+      must_change_pin: user.must_change_pin === true,
+    },
+  });
+}
+
 async function staffCreate(req: Request, body: Record<string, unknown>) {
   const caller = await requireModerator(req);
   const pin = validatePin(body.admin_pin);
@@ -551,7 +773,13 @@ async function staffCreate(req: Request, body: Record<string, unknown>) {
   const name = validateName(body.name);
   const phone = normalizePhone(body.phone);
   const role = validateRole(body.role);
-  const password = validatePassword(body.password);
+  // Only moderators use a password. PIN staff get a random internal Auth
+  // password that is never known to the client and is rotated on every PIN
+  // sign-in. A caller therefore cannot create a staff account with a known
+  // password.
+  const password = role === "moderator"
+    ? validatePassword(body.password)
+    : generateInternalPassword();
   const initialPin = validatePin(body.initial_pin);
   const language = validateLanguage(body.language);
 
@@ -667,9 +895,24 @@ async function staffUpdate(req: Request, body: Record<string, unknown>) {
   }
   const newPin = validatePin(body.new_pin, false);
   const rawPassword = String(body.new_password ?? "");
-  const newPassword = rawPassword.length > 0
-    ? validatePassword(rawPassword)
-    : null;
+  let newPassword: string | null = null;
+
+  if (role === "moderator") {
+    newPassword = rawPassword.length > 0
+      ? validatePassword(rawPassword)
+      : null;
+    if (target.role !== "moderator" && !newPassword) {
+      throw new ApiError(
+        400,
+        "عند ترقية موظف إلى مشرف، عيّن كلمة مرور دخول جديدة.",
+        "password_required",
+      );
+    }
+  } else if (target.role === "moderator") {
+    // Demoting a moderator to a PIN-only role retires the password they used
+    // to sign in. The replacement is random and never returned.
+    newPassword = generateInternalPassword();
+  }
 
   const phoneChanged = target.phone !== phone.local;
   const roleChanged = target.role !== role;
@@ -847,6 +1090,10 @@ Deno.serve(async (req) => {
         return await customerRegister(req, body);
       case "customer_reset_password":
         return await customerResetPassword(req, body);
+      case "staff_directory":
+        return await staffDirectory(req);
+      case "staff_pin_login":
+        return await staffPinLogin(req, body);
       case "staff_create":
         return await staffCreate(req, body);
       case "staff_update":

@@ -1,17 +1,17 @@
 import 'dart:async';
 
-import 'package:core/core.dart' show themeModeProvider, Success, FailureResult;
+import 'package:core/core.dart' show themeModeProvider;
 import 'package:data/data.dart';
 import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:ui_kit/ui_kit.dart';
 
 import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
 import 'widgets/auth_theme.dart';
-import 'widgets/change_pin_dialog.dart';
 
 /// Tactile staff sign-in terminal.
 ///
@@ -58,7 +58,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       final lastUser =
           await ref.read(staffLocalAuthStoreProvider).getLastActiveUser();
-      if (lastUser != null && mounted && _selectedStaff == null) {
+      if (lastUser != null &&
+          lastUser.role != UserRole.moderator &&
+          mounted &&
+          _selectedStaff == null) {
         setState(() => _selectedStaff = lastUser);
       }
     } catch (_) {}
@@ -138,54 +141,38 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     try {
       final repo = ref.read(authRepositoryProvider);
-      final result = await repo.verifyPin(
+      final staff = await repo.signInStaffWithPin(
         userId: _selectedStaff!.id,
         pin: pin,
       );
 
       if (!mounted) return;
-
-      switch (result) {
-        case Success(:final value) when value:
-          final staff = _selectedStaff!;
-          await ref.read(staffLocalAuthStoreProvider).saveLastActiveUser(staff);
-          ref.read(staffAuditLoggerProvider).logLogin(user: staff);
-          ref.read(authStateProvider.notifier).state = staff;
-        case Success():
-          setState(() {
-            _isAuthenticating = false;
-            _errorMessage = 'رمز PIN غير صحيح!';
-            _pinController.clear();
-          });
-        case FailureResult(:final error):
-          setState(() {
-            _isAuthenticating = false;
-            _errorMessage = error.message;
-            _pinController.clear();
-          });
-      }
+      final localStore = ref.read(staffLocalAuthStoreProvider);
+      await localStore.markPinSession(staff.id);
+      await localStore.saveLastActiveUser(staff);
+      if (!mounted) return;
+      ref.read(staffAuditLoggerProvider).logLogin(user: staff);
+      ref.read(authStateProvider.notifier).state = staff;
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isAuthenticating = false;
-        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        _errorMessage = _friendlyLoginError(e);
         _pinController.clear();
       });
     }
   }
 
-  void _openChangePinDialog() {
-    if (_selectedStaff == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('يرجى تحديد حساب الموظف أولاً!')),
-      );
-      return;
+  String _friendlyLoginError(Object error) {
+    final raw = error.toString();
+    final match = RegExp(
+      r'AuthException\(message:\s*(.*?)(?:,\s*(?:statusCode|code):|\)$)',
+    ).firstMatch(raw);
+    if (match != null) {
+      final message = match.group(1)?.trim() ?? '';
+      if (message.isNotEmpty) return message;
     }
-
-    showDialog(
-      context: context,
-      builder: (_) => ChangePinDialog(staffMember: _selectedStaff!),
-    );
+    return raw.replaceFirst('Exception: ', '').trim();
   }
 
   void _toggleTheme() {
@@ -286,14 +273,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           final activeStaff =
                               staffList.where((u) => u.active).toList();
 
-                          if (_selectedStaff == null &&
-                              activeStaff.isNotEmpty) {
+                          final selectedStillExists = _selectedStaff != null &&
+                              activeStaff.any(
+                                (u) => u.id == _selectedStaff!.id,
+                              );
+                          if ((_selectedStaff == null ||
+                                  !selectedStillExists) &&
+                              (activeStaff.isNotEmpty ||
+                                  _selectedStaff != null)) {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (mounted && _selectedStaff == null) {
-                                setState(
-                                  () => _selectedStaff = activeStaff.first,
-                                );
-                              }
+                              if (!mounted) return;
+                              setState(
+                                () => _selectedStaff = activeStaff.isNotEmpty
+                                    ? activeStaff.first
+                                    : null,
+                              );
                             });
                           }
 
@@ -617,7 +611,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
             decoration: _searchDecoration(
               p,
-              hint: 'ابحث عن موظف بالاسم أو الهاتف...',
+              hint: 'ابحث عن موظف بالاسم...',
               showClear: _searchQuery.isNotEmpty,
             ),
           ),
@@ -642,12 +636,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   label: 'مدير مخزن',
                   selected: _filterRole == UserRole.manager,
                   onTap: () => setState(() => _filterRole = UserRole.manager),
-                ),
-                const SizedBox(width: 6),
-                _AuthFilterChip(
-                  label: 'مشرف عام',
-                  selected: _filterRole == UserRole.moderator,
-                  onTap: () => setState(() => _filterRole = UserRole.moderator),
                 ),
                 const SizedBox(width: 6),
                 _AuthFilterChip(
@@ -1043,7 +1031,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                               decoration: _searchDecoration(
                                 p,
-                                hint: 'بحث عن موظف بالاسم أو الهاتف...',
+                                hint: 'بحث عن موظف بالاسم...',
                               ),
                             ),
                             const SizedBox(height: AppSpacing.md),
@@ -1071,14 +1059,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     selected: roleFilter == UserRole.manager,
                                     onTap: () => setSheetState(
                                       () => roleFilter = UserRole.manager,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  _AuthFilterChip(
-                                    label: 'مشرف عام',
-                                    selected: roleFilter == UserRole.moderator,
-                                    onTap: () => setSheetState(
-                                      () => roleFilter = UserRole.moderator,
                                     ),
                                   ),
                                   const SizedBox(width: 6),
@@ -1189,7 +1169,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                                           ),
                                                         ),
                                                         Text(
-                                                          '${roleLabel(staff.role)} • ${staff.phone}',
+                                                          staff.phone.isEmpty
+                                                              ? roleLabel(
+                                                                  staff.role,
+                                                                )
+                                                              : '${roleLabel(staff.role)} • ${staff.phone}',
                                                           maxLines: 1,
                                                           overflow: TextOverflow
                                                               .ellipsis,
@@ -1350,7 +1334,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(width: AppSpacing.sm),
                       Text(
-                        'جارٍ التحقق من الرمز...',
+                        'جارٍ تسجيل الدخول...',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: p.muted,
                           fontWeight: FontWeight.w600,
@@ -1359,18 +1343,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ],
                   )
                 : TextButton.icon(
-                    key: const ValueKey('change-pin'),
-                    onPressed: _openChangePinDialog,
+                    key: const ValueKey('moderator-login'),
+                    onPressed: () => context.push('/moderator-login'),
                     style: TextButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                     ),
                     icon: Icon(
-                      Icons.password_rounded,
+                      Icons.admin_panel_settings_rounded,
                       size: 14,
                       color: p.accent,
                     ),
                     label: Text(
-                      'تغيير رمز PIN',
+                      'دخول المشرف (هاتف + كلمة مرور)',
                       style: theme.textTheme.labelSmall?.copyWith(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,

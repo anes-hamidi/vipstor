@@ -1441,12 +1441,14 @@ class _StaffTabState extends ConsumerState<_StaffTab> {
   Future<void> _showStaffCredentials(Map<String, dynamic> res) async {
     final name = res['name']?.toString() ?? '';
     final phone = res['phone']?.toString() ?? '';
+    final role = res['role']?.toString() ?? '';
     final password = res['temporary_password']?.toString() ?? '';
     final pin = res['pin']?.toString() ?? '';
+    final showPassword = role == 'moderator' && password.isNotEmpty;
     final all = <String>[
       if (name.isNotEmpty) 'الاسم: $name',
       if (phone.isNotEmpty) 'الهاتف: $phone',
-      if (password.isNotEmpty) 'كلمة المرور المؤقتة: $password',
+      if (showPassword) 'كلمة المرور المؤقتة: $password',
       if (pin.isNotEmpty) 'رمز PIN: $pin',
     ].join('\n');
 
@@ -1473,15 +1475,18 @@ class _StaffTabState extends ConsumerState<_StaffTab> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
-                    'اعرض هذه البيانات مرة واحدة وسلّمها للموظف بطريقة آمنة. '
-                    'لن تظهر كلمة المرور المؤقتة مرة أخرى.',
+                    showPassword
+                        ? 'اعرض هذه البيانات مرة واحدة وسلّمها للمشرف بطريقة آمنة. '
+                            'لن تظهر كلمة المرور المؤقتة مرة أخرى.'
+                        : 'الموظف يسجل الدخول برمز PIN فقط. سلّم رمز PIN '
+                            'بطريقة آمنة ولن يظهر مرة أخرى.',
                     style: Theme.of(dialogContext).textTheme.bodySmall,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 if (name.isNotEmpty) _credentialRow('الاسم', name),
                 if (phone.isNotEmpty) _credentialRow('رقم الهاتف', phone),
-                if (password.isNotEmpty)
+                if (showPassword)
                   _credentialRow('كلمة المرور المؤقتة', password, ltr: true),
                 if (pin.isNotEmpty) _credentialRow('رمز PIN', pin, ltr: true),
               ],

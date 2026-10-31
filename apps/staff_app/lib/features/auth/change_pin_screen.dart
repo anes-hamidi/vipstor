@@ -46,8 +46,8 @@ class _ChangePinScreenState extends ConsumerState<ChangePinScreen> {
       setState(() => _error = 'أدخل رمز PIN الحالي.');
       return;
     }
-    if (next.length < 4 || !RegExp(r'^\d{4,8}$').hasMatch(next)) {
-      setState(() => _error = 'رمز PIN الجديد يجب أن يكون من 4 إلى 8 أرقام.');
+    if (next.length != 4 || !RegExp(r'^\d{4}$').hasMatch(next)) {
+      setState(() => _error = 'رمز PIN الجديد يجب أن يكون 4 أرقام.');
       return;
     }
     if (next == current) {

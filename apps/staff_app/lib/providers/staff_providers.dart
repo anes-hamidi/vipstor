@@ -135,9 +135,11 @@ final appUpdateCheckProvider =
   return service.checkForUpdate();
 });
 
+/// Staff shown on the PIN terminal. This uses the public directory action so
+/// it can load before a Supabase session exists; moderators are excluded.
 final liveStaffUsersProvider = FutureProvider<List<UserEntity>>((ref) async {
   final repo = ref.watch(authRepositoryProvider);
-  return repo.getStaffMembers();
+  return repo.getStaffDirectory();
 });
 
 final staffMembersProvider =

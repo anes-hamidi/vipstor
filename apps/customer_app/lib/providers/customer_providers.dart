@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/customer_models.dart';
 import '../services/app_update_service.dart';
+import '../services/customer_credential_store.dart';
 import '../services/customer_device_auth_service.dart';
 import '../services/customer_local_store.dart';
 
@@ -21,6 +22,13 @@ final sharedPreferencesProvider = Provider<SharedPreferences?>((ref) => null);
 
 final customerLocalStoreProvider = Provider<CustomerLocalStore>((ref) {
   return CustomerLocalStore(ref.watch(sharedPreferencesProvider));
+});
+
+/// Remembers the last successful phone/password login so the login form can be
+/// prefilled when the Supabase session is no longer available.
+final customerCredentialStoreProvider =
+    Provider<CustomerCredentialStore>((ref) {
+  return CustomerCredentialStore(ref.watch(sharedPreferencesProvider));
 });
 
 final customerSupabaseClientProvider = Provider<SupabaseClient>((ref) {
@@ -151,8 +159,24 @@ class CustomerAuthController extends AsyncNotifier<UserEntity?> {
       if (!_disposed) state = const AsyncData(null);
       rethrow;
     }
+    // Remember the credentials only after the server accepted them. The saved
+    // password is used to prefill the login form if the session is lost.
+    await _rememberCredentials(phone: phone, password: password);
     if (!_disposed) state = AsyncData(user);
     return user;
+  }
+
+  Future<void> _rememberCredentials({
+    required String phone,
+    required String password,
+  }) async {
+    try {
+      await ref
+          .read(customerCredentialStoreProvider)
+          .save(phone: phone, password: password);
+    } catch (e) {
+      debugPrint('[CustomerAuth] credential save failed: $e');
+    }
   }
 
   Future<CustomerRegistrationResult> registerCustomer({
@@ -171,12 +195,16 @@ class CustomerAuthController extends AsyncNotifier<UserEntity?> {
     required String phone,
     required String recoveryCode,
     required String newPassword,
-  }) {
-    return ref.read(customerAuthRepositoryProvider).resetCustomerPassword(
-          phone: phone,
-          recoveryCode: recoveryCode,
-          newPassword: newPassword,
-        );
+  }) async {
+    final result =
+        await ref.read(customerAuthRepositoryProvider).resetCustomerPassword(
+              phone: phone,
+              recoveryCode: recoveryCode,
+              newPassword: newPassword,
+            );
+    // Keep the login form in sync with the new password.
+    await _rememberCredentials(phone: phone, password: newPassword);
+    return result;
   }
 
   Future<void> signOut() async {

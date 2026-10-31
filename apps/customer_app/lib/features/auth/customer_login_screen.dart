@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/customer_providers.dart';
+import '../../services/customer_credential_store.dart';
 import 'customer_forgot_password_screen.dart';
 import 'customer_register_screen.dart';
 
@@ -33,6 +34,39 @@ class _CustomerLoginScreenState extends ConsumerState<CustomerLoginScreen> {
   static const _teal = Color(0xFF034F40); // Circuit Teal
   static const _black = Color(0xFF111111); // Typography Black
   static const _gray = Color(0xFF333333); // Tagline Gray
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreRememberedCredentials();
+  }
+
+  /// Prefills the form with the last successful login on this device.
+  ///
+  /// The normal startup path already has SharedPreferences loaded, so the
+  /// synchronous read avoids a visible empty frame. The async fallback covers
+  /// embedded usage where the provider is not overridden in `main()`.
+  void _restoreRememberedCredentials() {
+    final store = ref.read(customerCredentialStoreProvider);
+    final saved = store.readSync();
+    if (saved != null) {
+      _applyRememberedCredentials(saved);
+      return;
+    }
+    store.read().then<void>((saved) {
+      if (!mounted || saved == null) return;
+      _applyRememberedCredentials(saved);
+    }).catchError((Object _) {});
+  }
+
+  void _applyRememberedCredentials(SavedCustomerCredentials saved) {
+    if (_phoneController.text.isEmpty && saved.phone.isNotEmpty) {
+      _phoneController.text = saved.phone;
+    }
+    if (_passwordController.text.isEmpty && saved.password.isNotEmpty) {
+      _passwordController.text = saved.password;
+    }
+  }
 
   @override
   void dispose() {

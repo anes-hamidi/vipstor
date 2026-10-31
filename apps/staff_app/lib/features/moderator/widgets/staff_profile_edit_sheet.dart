@@ -155,13 +155,23 @@ class _StaffProfileEditSheetState extends ConsumerState<StaffProfileEditSheet> {
       }
 
       final newPin = _changePin ? _newPinCtrl.text.trim() : null;
-      if (_changePin && !RegExp(r'^[0-9]{4,8}$').hasMatch(newPin ?? '')) {
-        throw Exception('رمز PIN الجديد يجب أن يكون من 4 إلى 8 أرقام');
+      if (_changePin && !RegExp(r'^[0-9]{4}$').hasMatch(newPin ?? '')) {
+        throw Exception('رمز PIN الجديد يجب أن يكون 4 أرقام');
       }
 
-      final newPassword = _changePassword ? _newPasswordCtrl.text : null;
-      if (_changePassword && (newPassword ?? '').length < 8) {
+      // Staff sign in with a PIN only. Passwords are reserved for moderator
+      // accounts (including staff promoted to moderator).
+      final newPassword =
+          _changePassword && _role == 'moderator' ? _newPasswordCtrl.text : null;
+      if (newPassword != null && newPassword.length < 8) {
         throw Exception('كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل');
+      }
+      if (_role == 'moderator' &&
+          widget.initialRole != 'moderator' &&
+          newPassword == null) {
+        throw Exception(
+          'عند ترقية موظف إلى مشرف، عيّن كلمة مرور دخول جديدة.',
+        );
       }
 
       Map<String, dynamic> res;
@@ -565,8 +575,8 @@ class _StaffProfileEditSheetState extends ConsumerState<StaffProfileEditSheet> {
                     ),
                     const SizedBox(height: AppSpacing.lg),
 
-                    // Login password (moderator only)
-                    if (isModerator) ...[
+                    // Login password (moderator accounts only)
+                    if (isModerator && _role == 'moderator') ...[
                       LuxuryCard(
                         padding: const EdgeInsets.all(AppSpacing.md),
                         child: Column(
@@ -597,7 +607,8 @@ class _StaffProfileEditSheetState extends ConsumerState<StaffProfileEditSheet> {
                             if (_changePassword) ...[
                               const SizedBox(height: AppSpacing.sm),
                               Text(
-                                'تُحدّث كلمة المرور فوراً. سلّمها للموظف بطريقة آمنة.',
+                                'تُحدّث كلمة المرور فوراً. تُستخدم لدخول المشرف '
+                                'برقم الهاتف وكلمة المرور فقط.',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: theme.colorScheme.onSurfaceVariant,
                                 ),
@@ -753,18 +764,17 @@ class _StaffProfileEditSheetState extends ConsumerState<StaffProfileEditSheet> {
                               controller: _newPinCtrl,
                               keyboardType: TextInputType.number,
                               obscureText: true,
-                              maxLength: 8,
+                              maxLength: 4,
                               decoration: const InputDecoration(
-                                labelText:
-                                    'رمز PIN الجديد (4 أرقام على الأقل) *',
+                                labelText: 'رمز PIN الجديد (4 أرقام) *',
                                 prefixIcon: Icon(Icons.lock_reset),
                                 counterText: '',
                               ),
                               validator: (v) {
                                 if (!_changePin) return null;
-                                if (!RegExp(r'^[0-9]{4,8}$')
+                                if (!RegExp(r'^[0-9]{4}$')
                                     .hasMatch(v?.trim() ?? '')) {
-                                  return 'يجب أن يكون الرمز من 4 إلى 8 أرقام';
+                                  return 'يجب أن يكون الرمز 4 أرقام';
                                 }
                                 return null;
                               },

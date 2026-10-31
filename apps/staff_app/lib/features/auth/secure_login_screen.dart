@@ -2,12 +2,16 @@ import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
 
-/// Staff login. Identity comes from a password-only Supabase Auth session.
-/// PIN is never accepted here; it is a step-up confirmation after login.
+/// Moderator login with phone + password.
+///
+/// Cashiers, managers and drivers must use the PIN terminal instead. This
+/// screen rejects every non-moderator account so a staff password can never be
+/// used to bypass PIN-only login.
 class SecureLoginScreen extends ConsumerStatefulWidget {
   const SecureLoginScreen({super.key});
 
@@ -64,6 +68,16 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
       setState(() {
         _busy = false;
         _error = 'هذا حساب زبون. استخدم تطبيق الزبائن.';
+      });
+      return;
+    }
+    if (user.role != UserRole.moderator) {
+      await repo.signOut();
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error =
+            'الموظفون يسجلون الدخول برمز PIN فقط. ارجع إلى شاشة دخول الموظفين.';
       });
       return;
     }
@@ -134,7 +148,7 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
                           size: 44, color: colors.primary),
                       const SizedBox(height: 12),
                       Text(
-                        'دخول الموظفين',
+                        'دخول المشرف العام',
                         textAlign: TextAlign.center,
                         style:
                             Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -143,7 +157,8 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'جلسة آمنة عبر Supabase Auth. رمز PIN يُطلب فقط لتأكيد العمليات الحساسة.',
+                        'رقم الهاتف وكلمة المرور الخاصة بالمشرف. '
+                        'أما الموظفون فيسجلون الدخول برمز PIN من الشاشة الرئيسية.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: colors.onSurfaceVariant,
@@ -213,11 +228,20 @@ class _SecureLoginScreenState extends ConsumerState<SecureLoginScreen> {
                       ],
                       const SizedBox(height: 16),
                       Text(
-                        'لا تملك حساباً؟ اطلب من المشرف إنشاء حساب موظف وتعيين كلمة مرور مؤقتة. لا تُستخدم رسائل SMS.',
+                        'هل أنت موظف (كاشير، مدير مخزن أو سائق)؟ '
+                        'ارجع إلى الشاشة الرئيسية واستخدم رمز PIN.',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: colors.onSurfaceVariant,
                             ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => context.go('/login'),
+                        icon: const Icon(Icons.dialpad_rounded, size: 18),
+                        label: const Text('العودة إلى دخول الموظفين برمز PIN'),
                       ),
                     ],
                   ),

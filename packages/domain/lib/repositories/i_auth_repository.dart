@@ -25,7 +25,24 @@ abstract class IAuthRepository {
 
   Future<List<UserEntity>> getStaffMembers();
 
-  /// Verifies a staff PIN.
+  /// Returns the public PIN-login directory (active cashiers, managers and
+  /// drivers). This is available before authentication so the PIN terminal can
+  /// list employees; moderators are deliberately excluded because they sign in
+  /// with phone + password.
+  Future<List<UserEntity>> getStaffDirectory();
+
+  /// Signs a staff member in with their PIN.
+  ///
+  /// The auth-admin Edge Function verifies the PIN server-side and returns a
+  /// short-lived Supabase session for the linked Auth identity. The repository
+  /// installs that session so RLS and every existing data/RPC call keep
+  /// working, then resolves the matching public staff profile.
+  Future<UserEntity> signInStaffWithPin({
+    required String userId,
+    required String pin,
+  });
+
+  /// Verifies a staff PIN as a step-up check for sensitive operations.
   /// Returns [Success(true)] on valid, [Success(false)] on invalid,
   /// [FailureResult(PinLockedFailure)] when account is locked,
   /// [FailureResult(NetworkFailure)] when offline and no cached PIN.

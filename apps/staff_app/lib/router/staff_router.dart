@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:domain/domain.dart';
 
 import '../features/auth/change_pin_screen.dart';
+import '../features/auth/login_screen.dart';
 import '../features/auth/secure_login_screen.dart';
 import '../features/moderator/moderator_dashboard_screen.dart';
 import '../features/manager/purchase_receiving_screen.dart';
@@ -13,7 +14,8 @@ import '../features/driver/driver_deliveries_screen.dart';
 import '../providers/staff_providers.dart';
 
 // ── Auth state ─────────────────────────────────────────────────────────────────
-// Holds the resolved user after both Supabase session check AND PIN verify.
+// Holds the resolved public staff user. PIN login and session restore both
+// resolve through the repository, which also installs the Supabase session.
 final authStateProvider = StateProvider<UserEntity?>((ref) => null);
 
 /// Maps the authenticated staff account onto the theme role whose palette the
@@ -55,10 +57,25 @@ final _authListenableProvider = Provider<_AuthChangeNotifier>((ref) {
 final _sessionRestoreProvider = FutureProvider<void>((ref) async {
   try {
     final repo = ref.read(authRepositoryProvider);
+    final store = ref.read(staffLocalAuthStoreProvider);
+    await store.purgeLegacyAuthCache();
     final user = await repo.getCurrentUser();
-    if (user != null && user.active && user.role != UserRole.customer) {
-      ref.read(authStateProvider.notifier).state = user;
+    if (user == null || !user.active || user.role == UserRole.customer) {
+      return;
     }
+
+    // Staff sessions are restored only when they were established through the
+    // PIN terminal on this device. A legacy password-created staff session is
+    // signed out so it cannot bypass the PIN-only login screen.
+    if (user.role != UserRole.moderator) {
+      final hasPinSession = await store.hasPinSession(user.id);
+      if (!hasPinSession) {
+        await repo.signOut();
+        return;
+      }
+    }
+
+    ref.read(authStateProvider.notifier).state = user;
   } catch (_) {
     // No valid session — stays on login screen
   } finally {
@@ -78,6 +95,12 @@ final staffRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(
         path: '/login',
+        builder: (_, __) => const LoginScreen(),
+      ),
+      // Moderator-only password login. Ordinary staff use the PIN terminal
+      // above and never see a password field.
+      GoRoute(
+        path: '/moderator-login',
         builder: (_, __) => const SecureLoginScreen(),
       ),
       GoRoute(
@@ -103,15 +126,17 @@ final staffRouterProvider = Provider<GoRouter>((ref) {
     ],
     redirect: (context, state) {
       final restored = ref.read(sessionRestoredProvider);
-      // While session restore is in flight, stay on splash/login — no redirect
-      if (!restored) return state.matchedLocation == '/login' ? null : '/login';
+      final isAuthRoute = state.matchedLocation == '/login' ||
+          state.matchedLocation == '/moderator-login';
+
+      // While session restore is in flight, stay on a login route — no redirect
+      if (!restored) return isAuthRoute ? null : '/login';
 
       final authUser = ref.read(authStateProvider);
-      final isLoggingIn = state.matchedLocation == '/login';
 
-      // Not authenticated → login
+      // Not authenticated → login (either the PIN terminal or moderator form)
       if (authUser == null) {
-        return isLoggingIn ? null : '/login';
+        return isAuthRoute ? null : '/login';
       }
 
       // Inactive account → back to login (cleared below)
@@ -128,8 +153,8 @@ final staffRouterProvider = Provider<GoRouter>((ref) {
         return _dashboardFor(authUser.role);
       }
 
-      // Authenticated + on login page → redirect to role dashboard
-      if (isLoggingIn) {
+      // Authenticated + on either login page → redirect to role dashboard
+      if (isAuthRoute) {
         return _dashboardFor(authUser.role);
       }
 

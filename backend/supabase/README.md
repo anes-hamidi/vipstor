@@ -10,9 +10,14 @@ This folder is the complete database backend for the VIP Wholesale & POS system.
 backend/supabase/
 ├── schema/
 │   ├── 001_fresh_schema.sql      # Complete baseline schema (through 00034)
+│   ├── 002_migration_00035.sql   # Blocker fixes and performance hardening
+│   ├── 003_migration_00035b.sql  # Stock conflict queue
+│   ├── 004_migration_00036.sql   # Driver-location RPC hardening
 │   ├── 005_phase0_security.sql   # Phase 0 hardening, JWT identity, PIN/RLS/RPC lockdown
-│   ├── 006_auth_management.sql   # Password-only auth, recovery codes, staff lifecycle
-│   └── 007_storage_policy_hardening.sql  # product-images writes restricted to staff
+│   ├── 006_auth_management.sql   # Auth lifecycle, recovery codes, staff management
+│   ├── 007_storage_policy_hardening.sql  # product-images writes restricted to staff
+│   ├── 008_fix_audit_log_actor.sql       # Auth identity -> public.users audit mapping
+│   └── 009_staff_pin_auth.sql            # PIN-only staff session bridge
 ├── functions/
 │   ├── auth-admin/index.ts       # Service-role Auth lifecycle Edge Function
 │   └── README.md                 # Deployment and secret notes
@@ -51,17 +56,20 @@ Use a brand-new Supabase project. In the Supabase Dashboard, open **SQL Editor**
 5. **`schema/005_phase0_security.sql`**
    - Hardens identity and authorization: JWT-derived user identity, PIN step-up, device binding, RPC/RLS lockdown, and audit protections.
 6. **`schema/006_auth_management.sql`**
-   - Adds password-only auth helpers, deterministic phone-to-email mapping, customer recovery codes, soft deletion, and moderator-managed staff lifecycle RPCs.
+   - Adds Auth lifecycle helpers, deterministic phone-to-email mapping, customer recovery codes, soft deletion, and moderator-managed staff lifecycle RPCs.
 7. **`schema/007_storage_policy_hardening.sql`**
    - Restricts `product-images` INSERT/UPDATE/DELETE to authenticated staff with `products.manage`.
    - Closes an anon-key upload path that could consume the project storage quota.
 8. **`schema/008_fix_audit_log_actor.sql`**
    - Maps the Supabase Auth identity to `public.users.id` before writing `audit_log.user_id`.
    - Fixes `audit_log_user_id_fkey` violations on moderator PIN resets and other audited writes.
-9. **`seeds/001_admin.sql`**
-   - Creates the single master moderator row.
-   - No demo staff, customers, suppliers, products, prices, or stock are created.
-   - `app_versions` starts empty; releases are added by `scripts/publish_release.ps1` after the artifact is uploaded.
+9. **`schema/009_staff_pin_auth.sql`**
+   - Grants the internal PIN verification RPC to `service_role` only, enabling PIN-only staff sign-in through `auth-admin`.
+   - Must be applied before deploying the updated `auth-admin` function.
+10. **`seeds/001_admin.sql`**
+    - Creates the single master moderator row.
+    - No demo staff, customers, suppliers, products, prices, or stock are created.
+    - `app_versions` starts empty; releases are added by `scripts/publish_release.ps1` after the artifact is uploaded.
 
 Then deploy the Auth lifecycle Edge Function from the repository root:
 
@@ -73,12 +81,13 @@ supabase functions deploy auth-admin --no-verify-jwt
 ```
 
 `auth-admin` must be deployed with JWT verification **disabled** because customer
-registration and recovery are unauthenticated. The function validates staff JWTs
-and PINs itself; see [`functions/README.md`](functions/README.md).
+registration, customer recovery, the staff PIN directory, and staff PIN sign-in
+are unauthenticated. The function validates staff JWTs and moderator PINs
+itself; see [`functions/README.md`](functions/README.md).
 
 Optional:
 
-10. **`operations/verify_installation.sql`**
+11. **`operations/verify_installation.sql`**
    - Read-only checks for tables, RPCs, RLS coverage, the admin account, RBAC reference data, and storage buckets.
 
 ### Default moderator
@@ -154,7 +163,7 @@ After running the reset, run **`schema/001_fresh_schema.sql`**,
 **`schema/002_migration_00035.sql`**, **`schema/003_migration_00035b.sql`**,
 **`schema/004_migration_00036.sql`**, **`schema/005_phase0_security.sql`**,
 **`schema/006_auth_management.sql`**, **`schema/007_storage_policy_hardening.sql`**,
-**`schema/008_fix_audit_log_actor.sql`**,
+**`schema/008_fix_audit_log_actor.sql`**, **`schema/009_staff_pin_auth.sql`**,
 and **`seeds/001_admin.sql`** again.
 Existing Auth users are left untouched; if you want a completely clean identity
 store, delete the old Auth users manually before re-seeding.
@@ -223,20 +232,31 @@ publisher and CI use it.
 
 ### Authentication
 
-- **Password-only Supabase Auth.** There is no SMS/OTP flow and no mail is
-  sent. A phone number is mapped to a deterministic synthetic email:
+- **Supabase Auth is the session layer.** There is no SMS/OTP flow and no mail
+  is sent. A phone number is mapped to a deterministic synthetic email:
   `<international digits>@vip.algomend.app` (for example
-  `213673336972@vip.algomend.app`). The apps submit phone + password; the
+  `213673336972@vip.algomend.app`). Moderators and customers submit phone +
+  password; cashiers, managers and drivers submit a 4-digit PIN only. The
   synthetic email stays an implementation detail.
 - **Disable public sign-ups** in **Authentication → Providers → Email**.
   Customer accounts must be created through `auth-admin` so the recovery code
   and `public.users` row are provisioned together. The Email provider itself
   stays enabled for password sign-in.
-- **Staff:** phone + password for login. PINs are separate step-up secrets and
-  are bcrypt hashes in `users.pin_code`; verification and progressive lockout
-  happen inside `rpc_verify_user_pin`. Moderators create/edit/delete staff
-  through the `auth-admin` Edge Function, which provisions or removes the
-  Supabase Auth identity alongside the `public.users` row.
+- **Staff:** cashiers, managers and drivers sign in with a PIN only. The
+  `auth-admin` Edge Function verifies the PIN through the service-role-only
+  `internal_verify_user_pin` RPC, rotates a hidden random Supabase Auth
+  password, and returns a real session so RLS keeps working. Staff never see or
+  manage a password. Moderators keep phone + password sign-in; their PIN remains
+  a step-up secret for sensitive operations. Moderators create/edit/delete staff
+  through `auth-admin`, which provisions or removes the Supabase Auth identity
+  alongside the `public.users` row. Staff PINs are bcrypt hashes in
+  `users.pin_code`; verification and progressive lockout happen server-side.
+  The PIN terminal accepts 4 digits, so reset any legacy staff PIN longer than
+  that from the moderator staff editor. PIN verification is server-side only:
+  there is no offline PIN fallback. The local store keeps only the last active
+  staff hint, a PIN-session marker used to reject legacy password sessions on
+  restore, and POS shift state. The app purges legacy cached staff lists and
+  offline PIN hashes from previous versions on first launch.
 - **Customers:** self-registration through `auth-admin`; the server returns a
   one-time 12-character recovery code (`XXXX-XXXX-XXXX`), stores only its bcrypt
   hash, and rotates it after a successful password reset. Recovery requires the
@@ -245,8 +265,9 @@ publisher and CI use it.
   **Authentication → Users**.
 - **Legacy phone-auth identities** can use the phone-password fallback only
   while the Supabase **Phone** provider is enabled; password sign-in does not
-  send an SMS. If phone auth is disabled, migrate the Auth email to the
-  synthetic address (or reset/recreate the account) before release.
+  send an SMS. The same fallback is used when exchanging a staff PIN for a
+  session. If phone auth is disabled, migrate the Auth email to the synthetic
+  address (or reset/recreate the account) before release.
 - **Soft deletion:** deleting a staff account sets `users.deleted_at`, disables
   the row, and deletes the Auth identity. A partial unique index
   (`uq_users_phone_live`) lets the phone number be reused without breaking
@@ -262,7 +283,8 @@ publisher and CI use it.
 - Every table in `public` has Row Level Security enabled.
 - Authenticated clients carry a Supabase JWT; `current_app_user_id()` and
   `current_app_role()` resolve identity from that JWT, never from client-supplied
-  user ids. PIN is required only for step-up operations.
+  user ids. PIN is the staff login secret and the step-up secret for sensitive
+  operations; moderators use a password for login and their PIN for step-up.
 - The Auth trigger derives the public phone from the verified Auth `phone` claim
   or the deterministic synthetic email. Client-editable `user_metadata.phone`
   is never trusted for identity or linkage.
@@ -314,15 +336,17 @@ The baseline creates a `schema_migrations` table and records every bundled migra
 ```
 
 `002`/`003` insert `00035`/`00035b`; `006_auth_management.sql` records `00036`
-and `00037`. The `005` hardening script does not insert its own row. The table
-is read-only to clients. Future migrations should insert a row for their version
-after they run.
+and `00037`; `007_storage_policy_hardening.sql` records `00038`;
+`008_fix_audit_log_actor.sql` records `00039`; and `009_staff_pin_auth.sql`
+records `00040`. The `005` hardening script does not insert its own row. The
+table is read-only to clients. Future migrations should insert a row for their
+version after they run.
 
 ---
 
 ## Adding future migrations
 
-Put new incremental files in `schema/`, starting at `007_...`. See
+Put new incremental files in `schema/`, starting at `010_...`. See
 `migrations/README.md` for the archive convention.
 
 Rules:

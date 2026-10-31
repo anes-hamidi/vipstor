@@ -2,7 +2,8 @@
 
 ## `auth-admin`
 
-Service-role account lifecycle for the password-only authentication model.
+Service-role account lifecycle for the PIN-only staff and password-based
+moderator authentication model.
 
 The function exists because Supabase Auth's admin API requires the service-role
 key, which must never ship inside the Flutter apps. The function accepts only
@@ -14,8 +15,10 @@ the small set of actions below and never exposes a generic Auth proxy.
 | :--- | :--- | :--- |
 | `customer_register` | Public | Creates a customer Auth identity + public row and returns a one-time recovery code. |
 | `customer_reset_password` | Public | Verifies phone + recovery code, sets a new password, and rotates the recovery code. |
-| `staff_create` | Moderator | Creates the staff Auth identity and public profile (role, PIN, temporary password). |
-| `staff_update` | Moderator | Updates profile, phone/login email, password, role, active state, and optional PIN. |
+| `staff_directory` | Public | Lists active cashiers, managers and drivers for the PIN terminal (names/roles only). |
+| `staff_pin_login` | Public | Verifies a staff PIN, rotates the hidden Auth password and returns a real Supabase session. Moderators are rejected. |
+| `staff_create` | Moderator | Creates the staff Auth identity and public profile. PIN staff receive a hidden random Auth password; moderators receive the supplied password. |
+| `staff_update` | Moderator | Updates profile, phone/login email, role, active state, and optional PIN. Passwords are only settable on moderator targets; demoting a moderator retires the old password. |
 | `staff_delete` | Moderator | Soft-deletes the public staff row and deletes the Auth identity. |
 
 Every response is JSON. Success responses include `"success": true`; failures
@@ -23,8 +26,9 @@ include `"success": false`, `"error"`, and a stable `"code"`.
 
 ### Deploy
 
-Run the SQL migrations first (at minimum `005_phase0_security.sql` and
-`006_auth_management.sql`). Then, from the repository root:
+Run the SQL migrations first (at minimum `005_phase0_security.sql`,
+`006_auth_management.sql`, and `009_staff_pin_auth.sql`). Then, from the
+repository root:
 
 ```powershell
 cd backend
@@ -33,9 +37,10 @@ supabase link --project-ref <project-ref>
 supabase functions deploy auth-admin --no-verify-jwt
 ```
 
-JWT verification **must be disabled**: `customer_register` and
-`customer_reset_password` are intentionally unauthenticated. The function
-validates staff Bearer tokens and moderator PINs itself before any staff action.
+JWT verification **must be disabled**: `customer_register`,
+`customer_reset_password`, `staff_directory` and `staff_pin_login` are
+intentionally unauthenticated. The function validates staff Bearer tokens and
+moderator PINs itself before any administrative staff action.
 If you manage functions in `supabase/config.toml`, use:
 
 ```toml
@@ -63,6 +68,9 @@ The local `supabase/.env` must contain `SUPABASE_URL`,
 ### Security model
 
 - Public customer actions are rate-limited through `rpc_auth_rate_limit`.
+- `staff_directory` and `staff_pin_login` are also rate-limited. The directory
+  only returns active cashiers, managers and drivers; it never returns phone
+  numbers or moderator accounts.
 - Customer registration rejects any live `public.users.phone` row. Without a
   prior verified identity, an unlinked pre-created customer row cannot be
   claimed.
@@ -84,6 +92,19 @@ The local `supabase/.env` must contain `SUPABASE_URL`,
 - `staff_delete` marks `deleted_at`, clears the PIN, keeps the row for historical
   foreign keys, and deletes the Auth identity. The last active moderator and
   self-deletion are rejected in SQL.
+- `staff_pin_login` verifies the PIN through the service-role-only
+  `internal_verify_user_pin` RPC (bcrypt comparison + escalating lockout),
+  rejects moderators, rotates the hidden Auth password to a random secret, and
+  returns access/refresh tokens. The app installs them with `auth.setSession`,
+  so staff get a normal Supabase JWT and RLS keeps working without ever seeing
+  a password. `009_staff_pin_auth.sql` grants the internal RPC to
+  `service_role` only.
+- `staff_create` ignores any client-supplied password for cashiers, managers
+  and drivers and generates a hidden random one. `staff_update` ignores
+  `new_password` for those roles, requires a new password when promoting a
+  staff member to moderator, and rotates the password to a random secret when
+  a moderator is demoted. A password therefore never becomes a usable login
+  path for PIN staff.
 - Phone numbers map to `<international digits>@vip.algomend.app`. No mail is
   ever sent, and no SMS provider is used.
 
@@ -91,8 +112,11 @@ The local `supabase/.env` must contain `SUPABASE_URL`,
 
 1. Apply `005_phase0_security.sql` if not already applied.
 2. Apply `006_auth_management.sql`.
-3. Deploy `auth-admin` with `--no-verify-jwt`.
-4. Release the updated customer and staff apps.
+3. Apply `007_storage_policy_hardening.sql` and `008_fix_audit_log_actor.sql`
+   if they are not already applied.
+4. Apply `009_staff_pin_auth.sql` (service-role grant for the internal PIN RPC).
+5. Deploy `auth-admin` with `--no-verify-jwt`.
+6. Release the updated customer and staff apps.
 
 `006` revokes the legacy `rpc_create_staff_member` grant from `PUBLIC`, `anon`,
 and `authenticated`. Staff creation in an older app build will fail until the

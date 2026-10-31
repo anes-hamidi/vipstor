@@ -6,8 +6,11 @@ import '../datasources/remote/auth_admin_gateway.dart';
 
 /// Real Supabase Auth repository.
 ///
-/// The JWT is the only source of identity. The local staff store is kept only
-/// for non-authoritative caches; it is never allowed to restore a session.
+/// The JWT is the only source of identity. Staff authenticate with a PIN
+/// through the `auth-admin` Edge Function, which verifies the PIN server-side
+/// and exchanges it for a real Supabase session. Moderators keep the regular
+/// phone + password sign-in. The local staff store is kept only for
+/// non-authoritative caches; it is never allowed to restore a session.
 class AuthRepositoryImpl implements IAuthRepository {
   final SupabaseClient client;
   final StaffLocalAuthStore localStore;
@@ -56,6 +59,84 @@ class AuthRepositoryImpl implements IAuthRepository {
     return (rows as List).map((row) => _rowToEntity(row)).toList();
   }
 
+  // ── PIN-only staff login ───────────────────────────────────────────────────
+
+  @override
+  Future<List<UserEntity>> getStaffDirectory() async {
+    final data = await AuthAdminGateway(client).invoke('staff_directory');
+    final rows = data['staff'];
+    if (rows is! List) return const [];
+
+    return rows
+        .whereType<Map>()
+        .map((raw) {
+          final row = Map<String, dynamic>.from(raw);
+          return UserEntity(
+            id: row['id']?.toString() ?? '',
+            phone: row['phone']?.toString() ?? '',
+            name: row['name']?.toString() ?? '',
+            role: UserRole.fromString(row['role']?.toString() ?? 'cashier'),
+            active: true,
+            language: row['language']?.toString() ?? 'ar',
+            mustChangePin: row['must_change_pin'] as bool? ?? false,
+          );
+        })
+        .where((user) => user.id.isNotEmpty)
+        .toList();
+  }
+
+  @override
+  Future<UserEntity> signInStaffWithPin({
+    required String userId,
+    required String pin,
+  }) async {
+    final data = await AuthAdminGateway(client).invoke(
+      'staff_pin_login',
+      <String, dynamic>{
+        'user_id': userId.trim(),
+        'pin': pin.trim(),
+      },
+    );
+
+    final accessToken = data['access_token']?.toString() ?? '';
+    final refreshToken = data['refresh_token']?.toString() ?? '';
+    if (accessToken.isEmpty || refreshToken.isEmpty) {
+      throw const AuthException(
+        'تعذر بدء جلسة العمل. حاول مرة أخرى.',
+      );
+    }
+
+    try {
+      await client.auth.setSession(
+        refreshToken,
+        accessToken: accessToken,
+      );
+    } catch (_) {
+      throw const AuthException(
+        'تعذر بدء جلسة العمل. تحقق من الإنترنت وحاول مرة أخرى.',
+      );
+    }
+
+    late final UserEntity user;
+    try {
+      user = await _resolveAuthedUser(client.auth.currentUser?.id);
+    } catch (_) {
+      await signOut();
+      rethrow;
+    }
+    if (user.role == UserRole.moderator || user.role == UserRole.customer) {
+      await signOut();
+      throw const AuthException(
+        'هذا الحساب يستخدم رقم الهاتف وكلمة المرور. استخدم بوابة المشرف.',
+      );
+    }
+    if (!user.active) {
+      await signOut();
+      throw const AuthException('هذا الحساب معطّل. راجع الإدارة.');
+    }
+    return user;
+  }
+
   // ── Phone + password (synthetic email under the hood) ───────────────────────
 
   @override
@@ -84,6 +165,10 @@ class AuthRepositoryImpl implements IAuthRepository {
         throw AuthException(emailError.message);
       }
     }
+
+    // A password login is never a PIN session, even when the account is a
+    // moderator that may later be demoted back to a PIN-only role.
+    await localStore.clearPinSession();
 
     final user = await _resolveAuthedUser(response.user?.id);
     if (!user.active) {
@@ -225,6 +310,7 @@ class AuthRepositoryImpl implements IAuthRepository {
       await client.auth.signOut();
     } catch (_) {}
     await localStore.clearLastActiveUser();
+    await localStore.clearPinSession();
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
