@@ -33,6 +33,7 @@ abstract class IInventoryRepository {
     required String auditId,
     required String userId,
     required String userName,
+    required String callerPin,
     required String reconciliationNotes,
   });
 
@@ -61,6 +62,7 @@ abstract class IInventoryRepository {
     required String createdById,
     required String createdByName,
     List<String>? selectedProductIds,
+    Map<String, int>? quantityOverrides,
   });
 
   // ── 5. Purchase Orders & Goods Receiving Note (GRN) ────────────────────────
@@ -75,6 +77,17 @@ abstract class IInventoryRepository {
     required List<Map<String, dynamic>> receivedItems,
     required String userId,
     required String userName,
+    required String callerPin,
     String? locationId,
+  });
+
+  /// Moves a purchase order through its operational lifecycle
+  /// (draft → ordered → cancelled). Receiving is handled by
+  /// [receiveGoodsNote], which derives the received status automatically.
+  Future<PurchaseOrderEntity> updatePurchaseOrderStatus({
+    required String poId,
+    required PurchaseOrderStatus status,
+    required String userId,
+    required String userName,
   });
 }

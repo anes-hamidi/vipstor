@@ -4,12 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ui_kit/ui_kit.dart';
 import 'package:core/core.dart';
 import 'package:domain/domain.dart';
+import '../../providers/inventory_providers.dart';
 import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
 import 'widgets/create_supplier_dialog.dart';
 import 'widgets/create_product_dialog.dart';
 import 'widgets/online_orders_pipeline_view.dart';
 import 'widgets/purchases_history_view.dart';
+import 'widgets/purchase_orders_view.dart';
+import 'widgets/stock_operations_view.dart';
 import 'widgets/stock_adjustment_dialog.dart';
 import 'widgets/cycle_count_audit_sheet.dart';
 import 'widgets/low_stock_replenishment_dashboard.dart';
@@ -19,9 +22,6 @@ import 'services/pdf_invoice_service.dart';
 import '../common/widgets/headless_barcode_scanner_button.dart';
 import '../common/services/headless_barcode_scanner_service.dart';
 import '../moderator/widgets/staff_profile_edit_sheet.dart';
-
-
-
 
 class PurchaseReceivingScreen extends ConsumerStatefulWidget {
   const PurchaseReceivingScreen({super.key});
@@ -36,6 +36,14 @@ class _PurchaseReceivingScreenState
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
+  static const int _tabOverview = 0;
+  static const int _tabOrders = 1;
+  static const int _tabReceiving = 2;
+  static const int _tabPurchases = 3;
+  static const int _tabPurchaseOrders = 4;
+  static const int _tabStockOps = 5;
+  static const int _tabCatalog = 6;
+
   final _invoiceNoController = TextEditingController(
       text:
           'FAC-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch % 10000}');
@@ -47,16 +55,34 @@ class _PurchaseReceivingScreenState
   final _productSearchController = TextEditingController();
   String _productSearch = '';
   String? _receivingCategory;
-  // Product search inside catalog tab
+  // Product search & filters inside catalog tab
+  final _catalogSearchController = TextEditingController();
   String _catalogSearch = '';
+  String _catalogHealthFilter = 'all';
+  String? _catalogCategory;
+
+  int _tabIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
+    _tabController.addListener(_handleTabChange);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAppUpdates();
     });
+  }
+
+  void _handleTabChange() {
+    if (_tabIndex != _tabController.index) {
+      setState(() => _tabIndex = _tabController.index);
+    }
+  }
+
+  void _goToTab(int index) {
+    if (index < 0 || index >= _tabController.length) return;
+    _tabController.animateTo(index);
+    if (_tabIndex != index) setState(() => _tabIndex = index);
   }
 
   Future<void> _checkAppUpdates() async {
@@ -101,7 +127,8 @@ class _PurchaseReceivingScreenState
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
+            content: Text(
+                'أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
             backgroundColor: const Color(0xFF1E3A2F),
           ),
         );
@@ -121,6 +148,8 @@ class _PurchaseReceivingScreenState
   void dispose() {
     HeadlessBarcodeScannerService.instance.stopScanning();
     _productSearchController.dispose();
+    _catalogSearchController.dispose();
+    _tabController.removeListener(_handleTabChange);
     _tabController.dispose();
     _invoiceNoController.dispose();
     super.dispose();
@@ -172,6 +201,7 @@ class _PurchaseReceivingScreenState
     );
     if (product != null && mounted) {
       ref.invalidate(liveProductsProvider);
+      ref.invalidate(lowStockProductsProvider);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('تمت إضافة المنتج "${product.nameAr}" بنجاح!'),
@@ -259,7 +289,7 @@ class _PurchaseReceivingScreenState
         action: SnackBarAction(
           label: 'عرض في السجل',
           textColor: Colors.white,
-          onPressed: () => _tabController.animateTo(2),
+          onPressed: () => _goToTab(_tabPurchases),
         ),
       ));
       setState(() {
@@ -278,66 +308,97 @@ class _PurchaseReceivingScreenState
     }
   }
 
-  // ─── Build ────────────────────────────────────────────────────────────────
+  // ─── Shell ────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final authUser = ref.watch(authStateProvider);
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final isWide = MediaQuery.sizeOf(context).width >= 1000;
+
+    final tabViews = <Widget>[
+      ManagerCommandCenterView(onNavigateTab: _goToTab),
+      const OnlineOrdersPipelineView(),
+      _buildReceivingTab(),
+      PurchasesHistoryView(
+        onNavigateToReceiving: () => _goToTab(_tabReceiving),
+      ),
+      const PurchaseOrdersView(),
+      const StockOperationsView(),
+      _buildCatalogTab(),
+    ];
 
     final mainScaffold = Scaffold(
       backgroundColor:
           isDark ? const Color(0xFF0E0C0A) : const Color(0xFFF8F5EE),
-      appBar: _buildAppBar(authUser, theme, isDark),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          ManagerCommandCenterView(
-            onNavigateTab: (targetIndex) => _tabController.animateTo(targetIndex),
-          ),
-          const OnlineOrdersPipelineView(),
-          _buildReceivingTab(),
-          PurchasesHistoryView(
-            onNavigateToReceiving: () => _tabController.animateTo(2),
-          ),
-          _buildCatalogTab(),
-        ],
-      ),
+      appBar: _buildAppBar(authUser, theme, isDark, isWide),
+      body: isWide
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildRail(authUser, theme, isDark),
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: tabViews,
+                  ),
+                ),
+              ],
+            )
+          : TabBarView(
+              controller: _tabController,
+              children: tabViews,
+            ),
     );
 
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyF, control: true): () {
-          if (_tabController.index == 2) {
-            _productSearchController.selection = TextSelection(
-              baseOffset: 0,
-              extentOffset: _productSearchController.text.length,
-            );
-          }
-        },
-        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () {
-          if (_tabController.index == 2) {
-            _productSearchController.selection = TextSelection(
-              baseOffset: 0,
-              extentOffset: _productSearchController.text.length,
-            );
-          }
-        },
-        const SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
-          setState(() {
-            _invoiceNoController.text =
-                'FAC-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch % 10000}';
-            _invoiceItems.clear();
-          });
-        },
-        const SingleActivator(LogicalKeyboardKey.escape): () {
-          setState(() {
-            _productSearch = '';
-            _productSearchController.clear();
-          });
-        },
+    void focusSearch() {
+      if (_tabIndex == _tabReceiving) {
+        _productSearchController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _productSearchController.text.length,
+        );
+      } else if (_tabIndex == _tabCatalog) {
+        _catalogSearchController.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _catalogSearchController.text.length,
+        );
+      }
+    }
+
+    final bindings = <ShortcutActivator, VoidCallback>{
+      const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+          focusSearch,
+      const SingleActivator(LogicalKeyboardKey.keyF, meta: true): focusSearch,
+      const SingleActivator(LogicalKeyboardKey.keyN, control: true): () {
+        _resetInvoice();
+        _goToTab(_tabReceiving);
       },
+      const SingleActivator(LogicalKeyboardKey.escape): () {
+        setState(() {
+          _productSearch = '';
+          _productSearchController.clear();
+          _catalogSearch = '';
+          _catalogSearchController.clear();
+        });
+      },
+      for (var i = 0; i < 7; i++)
+        SingleActivator(
+          [
+            LogicalKeyboardKey.digit1,
+            LogicalKeyboardKey.digit2,
+            LogicalKeyboardKey.digit3,
+            LogicalKeyboardKey.digit4,
+            LogicalKeyboardKey.digit5,
+            LogicalKeyboardKey.digit6,
+            LogicalKeyboardKey.digit7,
+          ][i],
+          control: true,
+        ): () => _goToTab(i),
+    };
+
+    return CallbackShortcuts(
+      bindings: bindings,
       child: Focus(
         autofocus: true,
         child: mainScaffold,
@@ -345,13 +406,32 @@ class _PurchaseReceivingScreenState
     );
   }
 
+  void _resetInvoice() {
+    setState(() {
+      _invoiceNoController.text =
+          'FAC-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch % 10000}';
+      _invoiceItems.clear();
+    });
+  }
+
   PreferredSizeWidget _buildAppBar(
-      dynamic authUser, ThemeData theme, bool isDark) {
+    UserEntity? authUser,
+    ThemeData theme,
+    bool isDark,
+    bool isWide,
+  ) {
+    final lowStockCount =
+        ref.watch(lowStockProductsProvider).value?.length ?? 0;
+    final unverified = ref.watch(unverifiedOrdersCountProvider);
+    final pendingOps = ref.watch(pendingOpsCountProvider).value ?? 0;
+    final isOnline = ref.watch(connectivityProvider).value ?? true;
+
     return AppBar(
       backgroundColor:
           isDark ? const Color(0xFF141210) : const Color(0xFFFBF8F0),
       surfaceTintColor: Colors.transparent,
       elevation: 0,
+      titleSpacing: isWide ? AppSpacing.md : 0,
       title: InkWell(
         onTap: _openEditProfile,
         borderRadius: BorderRadius.circular(8),
@@ -366,9 +446,12 @@ class _PurchaseReceivingScreenState
                   boxShadow: [AppShadows.goldGlowSm],
                 ),
                 child: Padding(
-                  padding: EdgeInsets.all(6),
-                  child: Icon(Icons.storefront_rounded,
-                      size: 18, color: Color(0xFF1A1400)),
+                  padding: EdgeInsets.all(7),
+                  child: Icon(
+                    Icons.storefront_rounded,
+                    size: 18,
+                    color: Color(0xFF1A1400),
+                  ),
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
@@ -377,30 +460,50 @@ class _PurchaseReceivingScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'إدارة المخزون والمشتريات',
+                      'مركز إدارة المخزون',
                       style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
+                          ?.copyWith(fontWeight: FontWeight.w800),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (authUser?.name != null)
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              authUser!.name,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant),
-                              overflow: TextOverflow.ellipsis,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            authUser?.name ?? 'مدير المخزون',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontSize: 10.5,
                             ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.edit_outlined,
-                            size: 12,
-                            color: theme.colorScheme.primary.withValues(alpha: 0.7),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color:
+                                isOnline ? const Color(0xFF27AE60) : Colors.red,
+                            shape: BoxShape.circle,
                           ),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 3),
+                        Flexible(
+                          child: Text(
+                            !isOnline
+                                ? 'غير متصل${pendingOps > 0 ? ' • $pendingOps معلّق' : ''}'
+                                : pendingOps > 0
+                                    ? '$pendingOps بانتظار المزامنة'
+                                    : 'متصل',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontSize: 9.5,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -409,124 +512,559 @@ class _PurchaseReceivingScreenState
         ),
       ),
       actions: [
+        if (isWide) ...[
+          GoldButton.icon(
+            icon: Icons.add_shopping_cart_rounded,
+            label: 'استلام فاتورة',
+            compact: true,
+            height: 38,
+            onPressed: () => _goToTab(_tabReceiving),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+        ],
         IconButton(
-          tooltip: 'التحقق من التحديثات',
-          icon: const Icon(Icons.system_update_rounded),
-          onPressed: _checkUpdatesManually,
-        ),
-        IconButton(
-          tooltip: 'تعديل الملف الشخصي',
-          icon: const Icon(Icons.manage_accounts_outlined),
-          onPressed: _openEditProfile,
-        ),
-        IconButton(
-          tooltip: 'تسوية وتعديل المخزون',
-          icon: const Icon(Icons.tune_rounded),
-          onPressed: () {
-            showDialog(
-              context: context,
-              builder: (ctx) => const StockAdjustmentDialog(),
-            );
-          },
-        ),
-        IconButton(
-          tooltip: 'المخزون المنخفض وإعادة التزويد',
-          icon: const Icon(Icons.notification_important_outlined),
+          tooltip: 'المخزون المنخفض ($lowStockCount)',
+          icon: Badge(
+            isLabelVisible: lowStockCount > 0,
+            label: Text(
+              '$lowStockCount',
+              style: const TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            backgroundColor: lowStockCount > 0
+                ? const Color(0xFFF2994A)
+                : const Color(0xFF27AE60),
+            child: const Icon(Icons.notification_important_outlined),
+          ),
           onPressed: () {
             Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => const LowStockReplenishmentDashboard(),
+                builder: (_) => LowStockReplenishmentDashboard(
+                  onOpenPurchaseOrders: () {
+                    Navigator.of(context).pop();
+                    _goToTab(_tabPurchaseOrders);
+                  },
+                ),
               ),
             );
           },
         ),
-        IconButton(
-          tooltip: 'الجرد الدوري والمطابقة الحية',
-          icon: const Icon(Icons.fact_check_outlined),
-          onPressed: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const CycleCountAuditSheet(),
+        if (!context.isCompact)
+          IconButton(
+            tooltip: 'تحديث البيانات',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _refreshAll,
+          ),
+        PopupMenuButton<String>(
+          tooltip: 'المزيد',
+          icon: Badge(
+            isLabelVisible: unverified > 0,
+            smallSize: 7,
+            backgroundColor: const Color(0xFFD4AF37),
+            child: const Icon(Icons.more_vert_rounded),
+          ),
+          onSelected: (value) async {
+            switch (value) {
+              case 'refresh':
+                _refreshAll();
+                break;
+              case 'updates':
+                await _checkUpdatesManually();
+                break;
+              case 'profile':
+                await _openEditProfile();
+                break;
+              case 'supplier':
+                await _showCreateSupplierDialog();
+                break;
+              case 'product':
+                await _showCreateProductDialog();
+                break;
+              case 'adjustment':
+                await showDialog<void>(
+                  context: context,
+                  builder: (_) => const StockAdjustmentDialog(),
+                );
+                ref.invalidate(stockAdjustmentHistoryProvider);
+                ref.invalidate(liveProductsProvider);
+                ref.invalidate(lowStockProductsProvider);
+                break;
+              case 'transfer':
+                await showDialog<void>(
+                  context: context,
+                  builder: (_) => const StockTransferDialog(),
+                );
+                ref.invalidate(stockTransfersProvider);
+                break;
+              case 'cycle':
+                await showModalBottomSheet<void>(
+                  context: context,
+                  isScrollControlled: true,
+                  useSafeArea: true,
+                  backgroundColor: Colors.transparent,
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(context).height * 0.94,
+                  ),
+                  builder: (_) => const CycleCountAuditSheet(),
+                );
+                ref.invalidate(auditHistoryProvider);
+                ref.invalidate(activeCycleCountProvider);
+                ref.invalidate(liveProductsProvider);
+                ref.invalidate(lowStockProductsProvider);
+                break;
+              case 'low-stock':
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => LowStockReplenishmentDashboard(
+                      onOpenPurchaseOrders: () {
+                        Navigator.of(context).pop();
+                        _goToTab(_tabPurchaseOrders);
+                      },
+                    ),
+                  ),
+                );
+                break;
+              case 'logout':
+                ref.read(authStateProvider.notifier).state = null;
+                break;
+            }
+          },
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'refresh',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.refresh_rounded, size: 19),
+                title: Text('تحديث البيانات'),
               ),
-            );
-          },
+            ),
+            const PopupMenuItem(
+              value: 'updates',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.system_update_rounded, size: 19),
+                title: Text('التحقق من التحديثات'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'profile',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.manage_accounts_outlined, size: 19),
+                title: Text('الملف الشخصي'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'supplier',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.person_add_alt_1_rounded, size: 19),
+                title: Text('مورد جديد'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'product',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.add_box_outlined, size: 19),
+                title: Text('منتج جديد'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'adjustment',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.tune_rounded, size: 19),
+                title: Text('تسوية مخزون'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'transfer',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.swap_horiz_rounded, size: 19),
+                title: Text('نقل داخلي'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'cycle',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.fact_check_outlined, size: 19),
+                title: Text('جرد دوري'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'low-stock',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.inventory_2_outlined, size: 19),
+                title: Text('إعادة التزويد'),
+              ),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(
+              value: 'logout',
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.logout_rounded, size: 19),
+                title: Text('تسجيل الخروج'),
+              ),
+            ),
+          ],
         ),
-        IconButton(
-          tooltip: 'نقل مخزون داخلي',
-          icon: const Icon(Icons.swap_horiz_rounded),
-          onPressed: () {
-            showDialog(
-              context: context,
-              builder: (ctx) => const StockTransferDialog(),
-            );
-          },
-        ),
-        IconButton(
-          tooltip: 'تحديث البيانات',
-          icon: const Icon(Icons.refresh_rounded),
-          onPressed: () {
-            ref.invalidate(liveProductsProvider);
-            ref.invalidate(suppliersProvider);
-            ref.invalidate(purchasesListProvider);
-            ref.invalidate(managerOnlineOrdersProvider);
-          },
-        ),
-        IconButton(
-          tooltip: 'تسجيل الخروج',
-          icon: const Icon(Icons.logout_rounded),
-          onPressed: () => ref.read(authStateProvider.notifier).state = null,
-        ),
+        const SizedBox(width: AppSpacing.xs),
       ],
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(kToolbarHeight - 8),
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(
-                color: const Color(0xFFD4AF37).withValues(alpha: 0.22),
+      bottom: isWide
+          ? null
+          : PreferredSize(
+              preferredSize: const Size.fromHeight(64),
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: const Color(0xFFD4AF37).withValues(alpha: 0.22),
+                    ),
+                  ),
+                ),
+                child: TabBar(
+                  controller: _tabController,
+                  isScrollable: true,
+                  indicatorColor: const Color(0xFFD4AF37),
+                  indicatorWeight: 2.5,
+                  tabAlignment: TabAlignment.start,
+                  tabs: [
+                    const Tab(
+                      height: 58,
+                      icon: Icon(Icons.dashboard_rounded, size: 18),
+                      text: 'نظرة عامة',
+                    ),
+                    Tab(
+                      height: 58,
+                      icon: Builder(builder: (context) {
+                        final count = ref.watch(unverifiedOrdersCountProvider);
+                        return Badge(
+                          isLabelVisible: count > 0,
+                          label: Text(
+                            '$count',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 9,
+                            ),
+                          ),
+                          backgroundColor: const Color(0xFFD4AF37),
+                          textColor: const Color(0xFF1A1400),
+                          child: const Icon(
+                            Icons.shopping_bag_outlined,
+                            size: 18,
+                          ),
+                        );
+                      }),
+                      text: 'الطلبيات',
+                    ),
+                    const Tab(
+                      height: 58,
+                      icon: Icon(Icons.add_shopping_cart_rounded, size: 18),
+                      text: 'الاستلام',
+                    ),
+                    const Tab(
+                      height: 58,
+                      icon: Icon(Icons.receipt_long_outlined, size: 18),
+                      text: 'المشتريات',
+                    ),
+                    const Tab(
+                      height: 58,
+                      icon: Icon(Icons.post_add_rounded, size: 18),
+                      text: 'أوامر الشراء',
+                    ),
+                    const Tab(
+                      height: 58,
+                      icon: Icon(Icons.warehouse_outlined, size: 18),
+                      text: 'العمليات',
+                    ),
+                    const Tab(
+                      height: 58,
+                      icon: Icon(Icons.grid_view_rounded, size: 18),
+                      text: 'الكتالوج',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  Widget _buildRail(UserEntity? authUser, ThemeData theme, bool isDark) {
+    final displayName = (authUser?.name ?? '').trim();
+    final userInitial =
+        displayName.isEmpty ? 'M' : displayName.characters.first.toUpperCase();
+    final unverified = ref.watch(unverifiedOrdersCountProvider);
+    final lowStockCount =
+        ref.watch(lowStockProductsProvider).value?.length ?? 0;
+    final openPos = ref
+            .watch(purchaseOrdersListProvider)
+            .value
+            ?.where((po) => po.isOrdered || po.isPartiallyReceived)
+            .length ??
+        0;
+    final activeTransfers = ref
+            .watch(stockTransfersProvider)
+            .value
+            ?.where((t) => t.isPending || t.isInTransit)
+            .length ??
+        0;
+
+    final items = [
+      _RailItem(
+        icon: Icons.dashboard_rounded,
+        label: 'نظرة عامة',
+        selected: _tabIndex == _tabOverview,
+        onTap: () => _goToTab(_tabOverview),
+      ),
+      _RailItem(
+        icon: Icons.shopping_bag_outlined,
+        label: 'طلبيات الزبائن',
+        selected: _tabIndex == _tabOrders,
+        badge: unverified,
+        onTap: () => _goToTab(_tabOrders),
+      ),
+      _RailItem(
+        icon: Icons.add_shopping_cart_rounded,
+        label: 'استلام الفواتير',
+        selected: _tabIndex == _tabReceiving,
+        onTap: () => _goToTab(_tabReceiving),
+      ),
+      _RailItem(
+        icon: Icons.receipt_long_outlined,
+        label: 'سجل المشتريات',
+        selected: _tabIndex == _tabPurchases,
+        onTap: () => _goToTab(_tabPurchases),
+      ),
+      _RailItem(
+        icon: Icons.post_add_rounded,
+        label: 'أوامر الشراء',
+        selected: _tabIndex == _tabPurchaseOrders,
+        badge: openPos,
+        onTap: () => _goToTab(_tabPurchaseOrders),
+      ),
+      _RailItem(
+        icon: Icons.warehouse_outlined,
+        label: 'العمليات المخزنية',
+        selected: _tabIndex == _tabStockOps,
+        badge: activeTransfers,
+        onTap: () => _goToTab(_tabStockOps),
+      ),
+      _RailItem(
+        icon: Icons.grid_view_rounded,
+        label: 'كتالوج المنتجات',
+        selected: _tabIndex == _tabCatalog,
+        onTap: () => _goToTab(_tabCatalog),
+      ),
+    ];
+
+    return Container(
+      width: 236,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF141210) : const Color(0xFFFBF8F0),
+        border: BorderDirectional(
+          end: BorderSide(
+            color: const Color(0xFFD4AF37).withValues(alpha: 0.16),
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Container(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    const Color(0xFFD4AF37).withValues(alpha: 0.14),
+                    Colors.transparent,
+                  ],
+                ),
+                borderRadius: AppRadius.mdAll,
+                border: Border.all(
+                  color: const Color(0xFFD4AF37).withValues(alpha: 0.22),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.diamond_outlined,
+                    size: 19,
+                    color: Color(0xFFB8860B),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'VIP STOCK',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1,
+                            color: const Color(0xFFB8860B),
+                          ),
+                        ),
+                        Text(
+                          'Inventory Workspace',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontSize: 8.5,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-          child: TabBar(
-            controller: _tabController,
-            isScrollable: true,
-            indicatorColor: const Color(0xFFD4AF37),
-            indicatorWeight: 2.5,
-            tabs: [
-              const Tab(
-                  icon: Icon(Icons.dashboard_rounded, size: 18),
-                  text: 'لوحة القيادة'),
-              Tab(
-                  icon: Builder(builder: (context) {
-                    final unverifiedCount = ref.watch(unverifiedOrdersCountProvider);
-                    return Badge(
-                      isLabelVisible: unverifiedCount > 0,
-                      label: Text(
-                        '$unverifiedCount',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              children: [
+                ...items,
+                if (lowStockCount > 0) ...[
+                  const Divider(height: AppSpacing.lg),
+                  InkWell(
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => LowStockReplenishmentDashboard(
+                            onOpenPurchaseOrders: () {
+                              Navigator.of(context).pop();
+                              _goToTab(_tabPurchaseOrders);
+                            },
+                          ),
+                        ),
+                      );
+                    },
+                    borderRadius: AppRadius.mdAll,
+                    child: Container(
+                      padding: const EdgeInsets.all(AppSpacing.sm),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF2994A).withValues(alpha: 0.10),
+                        borderRadius: AppRadius.mdAll,
+                        border: Border.all(
+                          color:
+                              const Color(0xFFF2994A).withValues(alpha: 0.30),
+                        ),
                       ),
-                      backgroundColor: const Color(0xFFD4AF37),
-                      textColor: const Color(0xFF1A1400),
-                      child: const Icon(Icons.shopping_bag_outlined, size: 18),
-                    );
-                  }),
-                  text: 'طلبيات الزبائن'),
-              const Tab(
-                  icon: Icon(Icons.add_shopping_cart_rounded, size: 18),
-                  text: 'استلام الفواتير'),
-              const Tab(
-                  icon: Icon(Icons.receipt_long_outlined, size: 18),
-                  text: 'سجل المشتريات'),
-              const Tab(
-                  icon: Icon(Icons.grid_view_rounded, size: 18),
-                  text: 'كتالوج المنتجات'),
-            ],
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.notification_important_outlined,
+                            size: 16,
+                            color: Color(0xFFF2994A),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              '$lowStockCount صنف يحتاج تزويداً',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFFF2994A),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor:
+                      const Color(0xFFD4AF37).withValues(alpha: 0.16),
+                  child: Text(
+                    userInitial,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFFB8860B),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        authUser?.name ?? 'مدير المخزون',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const Text(
+                        'مدير المخزون',
+                        style: TextStyle(
+                          fontSize: 8.5,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'تعديل الملف الشخصي',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.manage_accounts_outlined, size: 17),
+                  onPressed: _openEditProfile,
+                ),
+                IconButton(
+                  tooltip: 'تسجيل الخروج',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.logout_rounded, size: 17),
+                  onPressed: () =>
+                      ref.read(authStateProvider.notifier).state = null,
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
+  void _refreshAll() {
+    ref.invalidate(liveProductsProvider);
+    ref.invalidate(suppliersProvider);
+    ref.invalidate(purchasesListProvider);
+    ref.invalidate(managerOnlineOrdersProvider);
+    ref.invalidate(lowStockProductsProvider);
+    ref.invalidate(purchaseOrdersListProvider);
+    ref.invalidate(stockAdjustmentHistoryProvider);
+    ref.invalidate(stockTransfersProvider);
+    ref.invalidate(auditHistoryProvider);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('تم تحديث بيانات مساحة العمل.'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  }
 
   // ─── Receiving Tab ────────────────────────────────────────────────────────
 
@@ -608,37 +1146,39 @@ class _PurchaseReceivingScreenState
                   ),
                 ),
               ),
-             ConstrainedBox(
-  constraints: const BoxConstraints(minWidth: 220, maxWidth: 320),
-  child: suppliersAsync.when(
-    // skipLoadingOnRefresh allows the dropdown to stay alive with previous items while updating
-    skipLoadingOnRefresh: true, 
-    data: (suppliers) {
-      // Safety check: if the selected ID is not in the fetched list, default to null
-      final hasSelectedId = suppliers.any((s) => s['id'] == _selectedSupplierId);
-      
-      return DropdownButtonFormField<String>(
-        initialValue: hasSelectedId ? _selectedSupplierId : null,
-        decoration: const InputDecoration(
-          labelText: 'المورد *',
-          prefixIcon: Icon(Icons.business_outlined),
-        ),
-        items: suppliers
-            .map((s) => DropdownMenuItem<String>(
-                  value: s['id'] as String,
-                  child: Text(s['name'] as String,
-                      overflow: TextOverflow.ellipsis),
-                ))
-            .toList(),
-        onChanged: (val) => setState(() => _selectedSupplierId = val),
-      );
-    },
-    // This loading only shows up on the VERY FIRST load of the screen
-    loading: () => const LinearProgressIndicator(), 
-    error: (_, __) => const Text('تعذر جلب الموردين'),
-  ),
-),
-  GoldIconButton(
+              ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 220, maxWidth: 320),
+                child: suppliersAsync.when(
+                  // skipLoadingOnRefresh allows the dropdown to stay alive with previous items while updating
+                  skipLoadingOnRefresh: true,
+                  data: (suppliers) {
+                    // Safety check: if the selected ID is not in the fetched list, default to null
+                    final hasSelectedId =
+                        suppliers.any((s) => s['id'] == _selectedSupplierId);
+
+                    return DropdownButtonFormField<String>(
+                      initialValue: hasSelectedId ? _selectedSupplierId : null,
+                      decoration: const InputDecoration(
+                        labelText: 'المورد *',
+                        prefixIcon: Icon(Icons.business_outlined),
+                      ),
+                      items: suppliers
+                          .map((s) => DropdownMenuItem<String>(
+                                value: s['id'] as String,
+                                child: Text(s['name'] as String,
+                                    overflow: TextOverflow.ellipsis),
+                              ))
+                          .toList(),
+                      onChanged: (val) =>
+                          setState(() => _selectedSupplierId = val),
+                    );
+                  },
+                  // This loading only shows up on the VERY FIRST load of the screen
+                  loading: () => const LinearProgressIndicator(),
+                  error: (_, __) => const Text('تعذر جلب الموردين'),
+                ),
+              ),
+              GoldIconButton(
                 icon: Icons.person_add_alt_1_rounded,
                 tooltip: 'مورد جديد',
                 onPressed: _showCreateSupplierDialog,
@@ -970,8 +1510,8 @@ class _PurchaseReceivingScreenState
                     child: ChoiceChip(
                       label: Text(c, style: const TextStyle(fontSize: 11)),
                       selected: _receivingCategory == c,
-                      onSelected: (_) => setState(() =>
-                          _receivingCategory = _receivingCategory == c ? null : c),
+                      onSelected: (_) => setState(() => _receivingCategory =
+                          _receivingCategory == c ? null : c),
                       visualDensity: VisualDensity.compact,
                     ),
                   )),
@@ -1063,7 +1603,6 @@ class _PurchaseReceivingScreenState
     );
   }
 
-
   Widget _productPlaceholder(ThemeData theme, double size) {
     return Container(
       width: size,
@@ -1082,118 +1621,405 @@ class _PurchaseReceivingScreenState
   Widget _buildCatalogTab() {
     final productsAsync = ref.watch(liveProductsProvider);
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
-    // TabBarView provides bounded height, so Column + Expanded fits cleanly.
-    return Padding(
-      padding: const EdgeInsetsDirectional.all(AppSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // ── Header row ─────────────────────────────────────
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'كتالوج المنتجات والمخزون الفعلي',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
+    return productsAsync.when(
+      skipLoadingOnRefresh: true,
+      loading: () => const AppLoadingView(message: 'جاري تحميل الكتالوج...'),
+      error: (err, _) => AppErrorView(
+        message: 'تعذر تحميل كتالوج المنتجات: $err',
+        onRetry: () => ref.invalidate(liveProductsProvider),
+      ),
+      data: (products) {
+        final categories = products
+            .map((p) => p.category.trim())
+            .where((c) => c.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+        final effectiveCategory =
+            categories.contains(_catalogCategory) ? _catalogCategory : null;
+
+        final filtered = products.where((p) {
+          if (effectiveCategory != null &&
+              p.category.trim() != effectiveCategory) {
+            return false;
+          }
+          final matchesHealth = switch (_catalogHealthFilter) {
+            'low' => p.healthStatus == StockHealthStatus.lowStock ||
+                p.healthStatus == StockHealthStatus.critical,
+            'out' => p.healthStatus == StockHealthStatus.outOfStock,
+            'overstocked' => p.healthStatus == StockHealthStatus.overstocked,
+            'inactive' => !p.active,
+            _ => true,
+          };
+          if (!matchesHealth) return false;
+          if (_catalogSearch.trim().isNotEmpty) {
+            final q = _catalogSearch.trim().toLowerCase();
+            return p.nameAr.toLowerCase().contains(q) ||
+                p.nameFr.toLowerCase().contains(q) ||
+                p.category.toLowerCase().contains(q) ||
+                p.barcodes.any((b) => b.contains(q));
+          }
+          return true;
+        }).toList()
+          ..sort((a, b) => a.nameAr.compareTo(b.nameAr));
+
+        final inventoryValue = products.fold<int>(
+          0,
+          (sum, p) => sum + (p.availableQty * p.costCentimes),
+        );
+        final lowCount = products
+            .where(
+              (p) =>
+                  p.healthStatus == StockHealthStatus.lowStock ||
+                  p.healthStatus == StockHealthStatus.critical,
+            )
+            .length;
+        final outCount = products
+            .where((p) => p.healthStatus == StockHealthStatus.outOfStock)
+            .length;
+        final inactiveCount = products.where((p) => !p.active).length;
+
+        return RefreshIndicator(
+          onRefresh: () async {
+            ref.invalidate(liveProductsProvider);
+            await ref.read(liveProductsProvider.future);
+          },
+          child: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsetsDirectional.fromSTEB(
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                ),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _catalogHeader(theme, products.length),
+                      AppSpacing.gapMd,
+                      _catalogStats(
+                        theme,
+                        inventoryValue,
+                        lowCount,
+                        outCount,
+                        inactiveCount,
+                      ),
+                      AppSpacing.gapMd,
+                      TextField(
+                        controller: _catalogSearchController,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: 'بحث في الكتالوج (اسم، باركود، فئة)...',
+                          prefixIcon:
+                              const Icon(Icons.search_rounded, size: 18),
+                          suffixIcon: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              HeadlessBarcodeScannerButton(
+                                controller: _catalogSearchController,
+                                onScanned: (code) => setState(
+                                  () => _catalogSearch = code.trim(),
+                                ),
+                                tooltip: 'مسح باركود المنتج',
+                              ),
+                              if (_catalogSearch.isNotEmpty)
+                                IconButton(
+                                  tooltip: 'مسح البحث',
+                                  icon: const Icon(
+                                    Icons.clear_rounded,
+                                    size: 17,
+                                  ),
+                                  onPressed: () {
+                                    _catalogSearchController.clear();
+                                    setState(() => _catalogSearch = '');
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+                        onChanged: (v) =>
+                            setState(() => _catalogSearch = v.trim()),
+                      ),
+                      AppSpacing.gapSm,
+                      _catalogFilters(theme, categories, effectiveCategory),
+                    ],
+                  ),
                 ),
               ),
-              GoldButton.icon(
-                icon: Icons.add_rounded,
-                label: 'منتج جديد',
-                onPressed: _showCreateProductDialog,
-                compact: true,
-              ),
+              if (filtered.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: products.isEmpty
+                      ? AppEmptyView(
+                          icon: Icons.inventory_2_outlined,
+                          title: 'الكتالوج فارغ',
+                          description: 'أضف أول منتج لبدء إدارة المخزون.',
+                          actionLabel: 'إضافة منتج الآن',
+                          onAction: _showCreateProductDialog,
+                        )
+                      : AppEmptyView(
+                          icon: Icons.search_off_rounded,
+                          title: 'لا نتائج مطابقة',
+                          description:
+                              'جرّب تغيير كلمة البحث أو الفلاتر المحددة.',
+                          actionLabel: 'مسح الفلاتر',
+                          onAction: () => setState(() {
+                            _catalogSearch = '';
+                            _catalogSearchController.clear();
+                            _catalogHealthFilter = 'all';
+                            _catalogCategory = null;
+                          }),
+                        ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsetsDirectional.fromSTEB(
+                    AppSpacing.lg,
+                    0,
+                    AppSpacing.lg,
+                    AppSpacing.xxl,
+                  ),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (ctx, i) {
+                        if (i.isOdd) {
+                          return const Divider(height: 1);
+                        }
+                        final product = filtered[i ~/ 2];
+                        return _CatalogProductRow(
+                          product: product,
+                          onEdit: () => _showEditProductDialog(product),
+                          onAdjustStock: () => _showAdjustmentFor(product),
+                        );
+                      },
+                      childCount:
+                          filtered.isEmpty ? 0 : filtered.length * 2 - 1,
+                    ),
+                  ),
+                ),
             ],
           ),
-          AppSpacing.gapMd,
+        );
+      },
+    );
+  }
 
-          // ── Search bar ──────────────────────────────────────
-          TextField(
-            decoration: const InputDecoration(
-              isDense: true,
-              hintText: 'بحث في الكتالوج (اسم، باركود، فئة)...',
-              prefixIcon: Icon(Icons.search_rounded, size: 18),
+  Widget _catalogHeader(ThemeData theme, int totalProducts) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFFD4AF37).withValues(alpha: 0.12),
+            theme.colorScheme.surfaceContainerLowest,
+          ],
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+        ),
+        borderRadius: AppRadius.lgAll,
+        border: Border.all(
+          color: const Color(0xFFD4AF37).withValues(alpha: 0.22),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(11),
+            decoration: const BoxDecoration(
+              gradient: AppGradients.gold,
+              borderRadius: AppRadius.mdAll,
+              boxShadow: [AppShadows.goldGlowSm],
             ),
-            onChanged: (v) => setState(() => _catalogSearch = v),
+            child: const Icon(
+              Icons.grid_view_rounded,
+              size: 23,
+              color: Color(0xFF1A1400),
+            ),
           ),
-          AppSpacing.gapMd,
-
-          // ── List ───────────────────────────────────────────
+          const SizedBox(width: AppSpacing.md),
           Expanded(
-            child: productsAsync.when(
-              data: (products) {
-                final filtered = _catalogSearch.isEmpty
-                    ? products
-                    : products
-                        .where((p) =>
-                            p.nameAr.contains(_catalogSearch) ||
-                            p.nameFr
-                                .toLowerCase()
-                                .contains(_catalogSearch.toLowerCase()) ||
-                            p.category.contains(_catalogSearch) ||
-                            p.barcodes.any((b) => b.contains(_catalogSearch)))
-                        .toList();
-
-                if (products.isEmpty) {
-                  return AppEmptyView(
-                    icon: Icons.inventory_2_outlined,
-                    title: 'الكتالوج فارغ',
-                    description: 'أضف أول منتج لبدء إدارة المخزون.',
-                    actionLabel: 'إضافة منتج الآن',
-                    onAction: _showCreateProductDialog,
-                  );
-                }
-
-                if (filtered.isEmpty) {
-                  return AppEmptyView(
-                    icon: Icons.search_off_rounded,
-                    title: 'لا نتائج مطابقة',
-                    description: 'جرّب كلمة بحث أخرى.',
-                    actionLabel: 'مسح البحث',
-                    onAction: () => setState(() => _catalogSearch = ''),
-                  );
-                }
-
-                return DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1A1814)
-                        : const Color(0xFFFFFDF8),
-                    borderRadius: AppRadius.lgAll,
-                    border: Border.all(
-                      color: isDark
-                          ? const Color(0x38D4AF37)
-                          : const Color(0x28C59B27),
-                    ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'كتالوج المنتجات والمخزون',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
-                  child: ClipRRect(
-                    borderRadius: AppRadius.lgAll,
-                    child: ListView.separated(
-                      padding: const EdgeInsetsDirectional.all(AppSpacing.md),
-                      itemCount: filtered.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (ctx, i) => _CatalogProductRow(
-                        product: filtered[i],
-                        onEdit: () => _showEditProductDialog(filtered[i]),
-                      ),
-                    ),
+                ),
+                Text(
+                  '$totalProducts منتج • إدارة الأسعار ومستويات المخزون والتسويات السريعة.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
-                );
-              },
-              loading: () =>
-                  const AppLoadingView(message: 'جاري تحميل الكتالوج...'),
-              error: (err, _) => AppErrorView(
-                message: 'تعذر الاتصال بالخادم',
-                onRetry: () => ref.invalidate(liveProductsProvider),
-              ),
+                ),
+              ],
             ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          GoldButton.icon(
+            icon: Icons.add_rounded,
+            label: 'منتج جديد',
+            onPressed: _showCreateProductDialog,
+            compact: true,
           ),
         ],
       ),
     );
+  }
+
+  Widget _catalogStats(
+    ThemeData theme,
+    int inventoryValue,
+    int lowCount,
+    int outCount,
+    int inactiveCount,
+  ) {
+    final stats = [
+      _CatalogStat(
+        label: 'قيمة المخزون',
+        value: DzdFormatter.formatCentimes(inventoryValue),
+        icon: Icons.account_balance_wallet_outlined,
+        color: const Color(0xFFD4AF37),
+      ),
+      _CatalogStat(
+        label: 'منخفض / حرج',
+        value: '$lowCount',
+        icon: Icons.trending_down_rounded,
+        color: const Color(0xFFF2994A),
+      ),
+      _CatalogStat(
+        label: 'نفد من المخزون',
+        value: '$outCount',
+        icon: Icons.remove_shopping_cart_outlined,
+        color: Colors.red,
+      ),
+      _CatalogStat(
+        label: 'منتجات معطلة',
+        value: '$inactiveCount',
+        icon: Icons.visibility_off_outlined,
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 900
+            ? 4
+            : constraints.maxWidth >= 560
+                ? 2
+                : 1;
+        const spacing = AppSpacing.sm;
+        final width =
+            (constraints.maxWidth - spacing * (columns - 1)) / columns;
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children:
+              stats.map((stat) => SizedBox(width: width, child: stat)).toList(),
+        );
+      },
+    );
+  }
+
+  Widget _catalogFilters(
+    ThemeData theme,
+    List<String> categories,
+    String? effectiveCategory,
+  ) {
+    final filters = [
+      ('all', 'الكل', Icons.apps_rounded),
+      ('low', 'منخفض / حرج', Icons.trending_down_rounded),
+      ('out', 'نفد', Icons.remove_shopping_cart_outlined),
+      ('overstocked', 'فائض', Icons.trending_up_rounded),
+      ('inactive', 'معطل', Icons.visibility_off_outlined),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: filters.map((filter) {
+              final selected = _catalogHealthFilter == filter.$1;
+              return Padding(
+                padding: const EdgeInsetsDirectional.only(end: AppSpacing.xs),
+                child: ChoiceChip(
+                  selected: selected,
+                  showCheckmark: false,
+                  avatar: Icon(
+                    filter.$3,
+                    size: 14,
+                    color: selected
+                        ? const Color(0xFF1A1400)
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                  label: Text(filter.$2),
+                  labelStyle: TextStyle(
+                    fontSize: 11,
+                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    color: selected ? const Color(0xFF1A1400) : null,
+                  ),
+                  selectedColor: const Color(0xFFD4AF37),
+                  onSelected: (_) =>
+                      setState(() => _catalogHealthFilter = filter.$1),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        if (categories.isNotEmpty) ...[
+          AppSpacing.gapXs,
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: AppSpacing.xs),
+                  child: ChoiceChip(
+                    selected: effectiveCategory == null,
+                    label: const Text('كل الفئات'),
+                    labelStyle: const TextStyle(fontSize: 10.5),
+                    onSelected: (_) => setState(() => _catalogCategory = null),
+                  ),
+                ),
+                ...categories.map(
+                  (category) => Padding(
+                    padding: const EdgeInsetsDirectional.only(
+                      end: AppSpacing.xs,
+                    ),
+                    child: ChoiceChip(
+                      selected: effectiveCategory == category,
+                      label: Text(category),
+                      labelStyle: const TextStyle(fontSize: 10.5),
+                      onSelected: (_) => setState(
+                        () => _catalogCategory =
+                            effectiveCategory == category ? null : category,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Future<void> _showAdjustmentFor(Product product) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => StockAdjustmentDialog(initialProduct: product),
+    );
+    if (!mounted) return;
+    ref.invalidate(stockAdjustmentHistoryProvider);
+    ref.invalidate(liveProductsProvider);
+    ref.invalidate(lowStockProductsProvider);
   }
 
   Future<void> _showEditProductDialog(Product product) async {
@@ -1275,7 +2101,8 @@ class _InvoiceLineItemState extends State<_InvoiceLineItem> {
                       Expanded(
                         child: Text(
                           'تعديل كمية الاستلام: ${widget.item['product_name']}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 14),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -1287,15 +2114,20 @@ class _InvoiceLineItemState extends State<_InvoiceLineItem> {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   Container(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 24),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color:
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
                       borderRadius: AppRadius.smAll,
                       border: Border.all(color: const Color(0xFFD4AF37)),
                     ),
                     child: Text(
                       '$currentQty',
-                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFFD4AF37)),
+                      style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFFD4AF37)),
                     ),
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -1437,12 +2269,19 @@ class _InvoiceLineItemState extends State<_InvoiceLineItem> {
                 Builder(
                   builder: (_) {
                     final oldOnHand = widget.item['old_on_hand'] as int? ?? 0;
-                    final oldAvgCost = widget.item['old_weighted_cost'] as int? ?? cost;
+                    final oldAvgCost =
+                        widget.item['old_weighted_cost'] as int? ?? cost;
                     final totalQty = oldOnHand + qty;
-                    final newAvg = totalQty > 0 ? (((oldOnHand * oldAvgCost) + (qty * cost)) / totalQty).round() : cost;
+                    final newAvg = totalQty > 0
+                        ? (((oldOnHand * oldAvgCost) + (qty * cost)) / totalQty)
+                            .round()
+                        : cost;
                     return Text(
                       'المتوسط المرجح بالدفتر: ${DzdFormatter.formatCentimes(newAvg)}',
-                      style: const TextStyle(fontSize: 10, color: Color(0xFFD4AF37), fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFFD4AF37),
+                          fontWeight: FontWeight.w600),
                     );
                   },
                 ),
@@ -1461,19 +2300,25 @@ class _InvoiceLineItemState extends State<_InvoiceLineItem> {
                 tooltip: 'إنقاص الكمية',
               ),
               InkWell(
-                onTap: widget.onSetQty != null ? () => _showQuickKeypad(context) : null,
+                onTap: widget.onSetQty != null
+                    ? () => _showQuickKeypad(context)
+                    : null,
                 borderRadius: AppRadius.xsAll,
                 child: Container(
-                  constraints: const BoxConstraints(minWidth: 44, minHeight: 36),
+                  constraints:
+                      const BoxConstraints(minWidth: 44, minHeight: 36),
                   alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     borderRadius: AppRadius.xsAll,
-                    border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.3)),
+                    border: Border.all(
+                        color: const Color(0xFFD4AF37).withValues(alpha: 0.3)),
                   ),
                   child: Text(
                     '${widget.item['qty']}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 14),
                   ),
                 ),
               ),
@@ -1505,8 +2350,13 @@ class _InvoiceLineItemState extends State<_InvoiceLineItem> {
 class _CatalogProductRow extends StatelessWidget {
   final Product product;
   final VoidCallback? onEdit;
+  final VoidCallback? onAdjustStock;
 
-  const _CatalogProductRow({required this.product, this.onEdit});
+  const _CatalogProductRow({
+    required this.product,
+    this.onEdit,
+    this.onAdjustStock,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1582,22 +2432,9 @@ class _CatalogProductRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  _healthBadge(theme),
                   if (isInactive) _inactiveBadge(cs),
-                  // Edit button inline on narrow
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: IconButton(
-                      tooltip: 'تعديل',
-                      icon: const Icon(Icons.edit_outlined, size: 16),
-                      onPressed: onEdit,
-                      padding: EdgeInsets.zero,
-                      style: IconButton.styleFrom(
-                        foregroundColor: const Color(0xFFD4AF37),
-                        minimumSize: const Size(32, 32),
-                      ),
-                    ),
-                  ),
+                  _menuButton(compact: true),
                 ],
               ),
               if (product.nameFr.isNotEmpty)
@@ -1612,6 +2449,7 @@ class _CatalogProductRow extends StatelessWidget {
                   StockBadge(
                     availableQty: product.availableQty,
                     unitName: product.unit,
+                    minAlert: product.reorderPoint,
                     compact: true,
                   ),
                   const SizedBox(width: AppSpacing.sm),
@@ -1686,6 +2524,7 @@ class _CatalogProductRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
+                  _healthBadge(theme),
                   if (isInactive) _inactiveBadge(cs),
                 ],
               ),
@@ -1728,6 +2567,7 @@ class _CatalogProductRow extends StatelessWidget {
               StockBadge(
                 availableQty: product.availableQty,
                 unitName: product.unit,
+                minAlert: product.reorderPoint,
                 compact: true,
               ),
               const SizedBox(height: 4),
@@ -1738,6 +2578,15 @@ class _CatalogProductRow extends StatelessWidget {
                 textAlign: TextAlign.end,
                 overflow: TextOverflow.ellipsis,
               ),
+              if (product.reorderPoint > 0)
+                Text(
+                  'ROP: ${product.reorderPoint}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 9.5,
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.75),
+                  ),
+                  textAlign: TextAlign.end,
+                ),
             ],
           ),
         ),
@@ -1762,7 +2611,17 @@ class _CatalogProductRow extends StatelessWidget {
 
         const SizedBox(width: AppSpacing.xs),
 
-        // Edit button
+        // Quick stock actions
+        IconButton(
+          tooltip: 'تسوية مخزون',
+          icon: const Icon(Icons.tune_rounded, size: 18),
+          onPressed: onAdjustStock,
+          style: IconButton.styleFrom(
+            foregroundColor: const Color(0xFF2F80ED),
+            padding: EdgeInsets.zero,
+            minimumSize: const Size(32, 32),
+          ),
+        ),
         IconButton(
           tooltip: 'تعديل المنتج',
           icon: const Icon(Icons.edit_outlined, size: 18),
@@ -1774,6 +2633,68 @@ class _CatalogProductRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _menuButton({required bool compact}) {
+    return PopupMenuButton<String>(
+      tooltip: 'خيارات المنتج',
+      padding: EdgeInsets.zero,
+      icon: Icon(
+        compact ? Icons.more_horiz_rounded : Icons.more_vert_rounded,
+        size: 18,
+        color: const Color(0xFFD4AF37),
+      ),
+      onSelected: (value) {
+        if (value == 'edit') onEdit?.call();
+        if (value == 'adjust') onAdjustStock?.call();
+      },
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'edit',
+          child: ListTile(
+            dense: true,
+            leading: Icon(Icons.edit_outlined, size: 18),
+            title: Text('تعديل المنتج'),
+          ),
+        ),
+        if (onAdjustStock != null)
+          const PopupMenuItem(
+            value: 'adjust',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.tune_rounded, size: 18),
+              title: Text('تسوية المخزون'),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _healthBadge(ThemeData theme) {
+    final status = product.healthStatus;
+    final (color, label) = switch (status) {
+      StockHealthStatus.outOfStock => (Colors.red, 'نفد'),
+      StockHealthStatus.critical => (const Color(0xFFEB5757), 'حرج'),
+      StockHealthStatus.lowStock => (const Color(0xFFF2994A), 'منخفض'),
+      StockHealthStatus.overstocked => (const Color(0xFF2F80ED), 'فائض'),
+      StockHealthStatus.normal => (const Color(0xFF27AE60), 'جيد'),
+    };
+    return Container(
+      margin: const EdgeInsetsDirectional.only(start: AppSpacing.xs),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: AppRadius.pillAll,
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.bold,
+          color: color,
+        ),
+      ),
     );
   }
 
@@ -1849,6 +2770,168 @@ class _CatalogProductRow extends StatelessWidget {
       ),
       child: Icon(Icons.inventory_2_outlined,
           size: size * 0.5, color: theme.colorScheme.onSurfaceVariant),
+    );
+  }
+}
+
+class _CatalogStat extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+
+  const _CatalogStat({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: AppRadius.mdAll,
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.11),
+              borderRadius: AppRadius.smAll,
+            ),
+            child: Icon(icon, size: 16, color: color),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontSize: 9.5,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  value,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RailItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final int badge;
+  final VoidCallback onTap;
+
+  const _RailItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.badge = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color =
+        selected ? const Color(0xFFB8860B) : theme.colorScheme.onSurfaceVariant;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Material(
+        color: selected
+            ? const Color(0xFFD4AF37).withValues(alpha: 0.13)
+            : Colors.transparent,
+        borderRadius: AppRadius.mdAll,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: AppRadius.mdAll,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: 9,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: AppRadius.mdAll,
+              border: BorderDirectional(
+                start: BorderSide(
+                  color:
+                      selected ? const Color(0xFFD4AF37) : Colors.transparent,
+                  width: 2.5,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(icon, size: 18, color: color),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                      color: selected
+                          ? const Color(0xFFB8860B)
+                          : theme.colorScheme.onSurface,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (badge > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? const Color(0xFFD4AF37)
+                          : const Color(0xFFF2994A),
+                      borderRadius: AppRadius.pillAll,
+                    ),
+                    child: Text(
+                      '$badge',
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.bold,
+                        color:
+                            selected ? const Color(0xFF1A1400) : Colors.white,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

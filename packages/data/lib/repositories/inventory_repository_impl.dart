@@ -308,18 +308,45 @@ class InventoryRepositoryImpl implements IInventoryRepository {
     required String auditId,
     required String userId,
     required String userName,
+    required String callerPin,
     required String reconciliationNotes,
   }) async {
     return _synchronized(() async {
+      if (!ConnectivityService.instance.isOnline) {
+        throw Exception(
+          'اعتماد الجرد يتطلب اتصالاً بالإنترنت لتأكيد رمز PIN وترحيل الفروقات إلى السجل السحابي.',
+        );
+      }
+      if (callerPin.trim().length != 4) {
+        throw Exception('رمز PIN غير صالح. يرجى إدخال رمز مكوّن من 4 أرقام.');
+      }
+
       final auditIdx = _localAudits.indexWhere((a) => a.id == auditId);
       if (auditIdx < 0) {
-        throw Exception('Audit not found');
+        throw Exception('جلسة الجرد غير موجودة أو انتهت صلاحيتها.');
       }
 
       final audit = _localAudits[auditIdx];
-      final discrepantItems = audit.items.where((it) => it.hasDiscrepancy).toList();
+      if (audit.status != AuditStatus.inProgress) {
+        throw Exception('لا يمكن اعتماد جلسة جرد تمت تسويتها أو إلغاؤها.');
+      }
+      final discrepantItems =
+          audit.items.where((it) => it.hasDiscrepancy).toList();
 
-      // Execute bulk atomic stock updates in Drift
+      // The server ledger is authoritative: post every variance before the
+      // local cache is reconciled. A rejected PIN aborts the whole operation.
+      for (final item in discrepantItems) {
+        await service.adjustStock(
+          userId: userId,
+          callerPin: callerPin,
+          productId: item.productId,
+          qtyChange: item.varianceQty,
+          reason:
+              'تسوية جرد [${audit.auditNumber}]: ${reconciliationNotes.isNotEmpty ? reconciliationNotes : "موازنة المخزون الفعلي"}',
+        );
+      }
+
+      // Execute bulk atomic stock updates in Drift after the server accepted.
       await db.transaction(() async {
         for (final item in discrepantItems) {
           await (db.update(db.cachedProducts)
@@ -330,21 +357,6 @@ class InventoryRepositoryImpl implements IInventoryRepository {
           ));
         }
       });
-
-      // Post variance adjustments to remote ledger
-      if (ConnectivityService.instance.isOnline) {
-        for (final item in discrepantItems) {
-          try {
-            await service.adjustStock(
-              userId: userId,
-              callerPin: '', // TODO(P1): thread PIN through reconcileAudit call site
-              productId: item.productId,
-              qtyChange: item.varianceQty,
-              reason: 'تسوية جرد [${audit.auditNumber}]: ${reconciliationNotes.isNotEmpty ? reconciliationNotes : "موازنة المخزون الفعلي"}',
-            );
-          } catch (_) {}
-        }
-      }
 
       final reconciledAudit = audit.copyWith(
         status: AuditStatus.reconciled,
@@ -394,9 +406,15 @@ class InventoryRepositoryImpl implements IInventoryRepository {
     final existing = _localTransfers[idx];
     _localTransfers[idx] = existing.copyWith(
       status: status,
-      approvedByUserId: status == TransferStatus.inTransit ? userId : existing.approvedByUserId,
-      approvedByName: status == TransferStatus.inTransit ? userName : existing.approvedByName,
-      completedAt: status == TransferStatus.completed ? DateTime.now() : existing.completedAt,
+      approvedByUserId: status == TransferStatus.inTransit
+          ? userId
+          : existing.approvedByUserId,
+      approvedByName: status == TransferStatus.inTransit
+          ? userName
+          : existing.approvedByName,
+      completedAt: status == TransferStatus.completed
+          ? DateTime.now()
+          : existing.completedAt,
     );
   }
 
@@ -441,6 +459,7 @@ class InventoryRepositoryImpl implements IInventoryRepository {
     required String createdById,
     required String createdByName,
     List<String>? selectedProductIds,
+    Map<String, int>? quantityOverrides,
   }) async {
     final lowStock = await getLowStockProducts();
 
@@ -451,29 +470,36 @@ class InventoryRepositoryImpl implements IInventoryRepository {
       return true;
     }).toList();
 
-    final items = targetProducts.map((p) {
-      final replenishmentQty = p.suggestedReplenishmentQty > 0
-          ? p.suggestedReplenishmentQty
-          : (p.packSize * 5);
+    final items = targetProducts
+        .map((p) {
+          final suggested = p.suggestedReplenishmentQty > 0
+              ? p.suggestedReplenishmentQty
+              : (p.packSize * 5);
+          final override = quantityOverrides?[p.id];
+          final replenishmentQty = override != null ? override : suggested;
 
-      return PurchaseOrderItemEntity(
-        id: _uuid.v4(),
-        productId: p.id,
-        productName: p.nameAr,
-        unit: p.unit,
-        orderedQty: replenishmentQty,
-        receivedQty: 0,
-        unitCostCentimes: p.lastUnitCostCentimes,
-        sellingPriceCentimes: p.lastUnitCostCentimes > 0
-            ? (p.lastUnitCostCentimes * 1.25).round()
-            : 0,
-        notes: 'إعادة تزويد آلي (نقطة الطلب: ${p.reorderPoint}، المخزون الحالي: ${p.availableQty})',
-      );
-    }).toList();
+          return PurchaseOrderItemEntity(
+            id: _uuid.v4(),
+            productId: p.id,
+            productName: p.nameAr,
+            unit: p.unit,
+            orderedQty: replenishmentQty,
+            receivedQty: 0,
+            unitCostCentimes: p.lastUnitCostCentimes,
+            sellingPriceCentimes: p.lastUnitCostCentimes > 0
+                ? (p.lastUnitCostCentimes * 1.25).round()
+                : 0,
+            notes:
+                'إعادة تزويد آلي (نقطة الطلب: ${p.reorderPoint}، المخزون الحالي: ${p.availableQty})',
+          );
+        })
+        .where((it) => it.orderedQty > 0)
+        .toList();
 
     final po = PurchaseOrderEntity(
       id: _uuid.v4(),
-      poNumber: 'PO-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch % 100000}',
+      poNumber:
+          'PO-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch % 100000}',
       supplierId: supplierId,
       supplierName: supplierName,
       status: PurchaseOrderStatus.draft,
@@ -511,16 +537,73 @@ class InventoryRepositoryImpl implements IInventoryRepository {
     required List<Map<String, dynamic>> receivedItems,
     required String userId,
     required String userName,
+    required String callerPin,
     String? locationId,
   }) async {
     return _synchronized(() async {
+      if (!ConnectivityService.instance.isOnline) {
+        throw Exception(
+          'استلام أمر الشراء يتطلب اتصالاً بالإنترنت لتأكيد رمز PIN وترحيل الكميات للمخزون.',
+        );
+      }
+      if (callerPin.trim().length != 4) {
+        throw Exception('رمز PIN غير صالح. يرجى إدخال رمز مكوّن من 4 أرقام.');
+      }
+
       final poIdx = _localPurchaseOrders.indexWhere((p) => p.id == poId);
-      if (poIdx < 0) return;
+      if (poIdx < 0) {
+        throw Exception('أمر الشراء غير موجود.');
+      }
 
       final po = _localPurchaseOrders[poIdx];
+      if (po.isFullyReceived || po.isCancelled) {
+        throw Exception('لا يمكن استلام أمر شراء مكتمل أو ملغى.');
+      }
+      if (po.isDraft) {
+        throw Exception(
+          'أرسل أمر الشراء إلى المورد أولاً قبل تسجيل استلام البضاعة.',
+        );
+      }
+
+      // Resolve and clamp quantities against the remaining PO quantity. Each
+      // accepted line is posted to the authoritative stock ledger first.
+      final acceptedItems = <Map<String, dynamic>>[];
+      for (final rec in receivedItems) {
+        final productId = rec['product_id'] as String;
+        final poItem =
+            po.items.where((it) => it.productId == productId).firstOrNull;
+        if (poItem == null) continue;
+
+        final requestedQty = (rec['qty_received'] as num?)?.toInt() ?? 0;
+        final qtyReceived = requestedQty.clamp(0, poItem.remainingQty);
+        if (qtyReceived <= 0) continue;
+
+        final unitCost = (rec['unit_cost_centimes'] as num?)?.toInt() ??
+            poItem.unitCostCentimes;
+
+        await service.adjustStock(
+          userId: userId,
+          callerPin: callerPin,
+          productId: productId,
+          qtyChange: qtyReceived,
+          reason:
+              'استلام أمر شراء [${po.poNumber}] من المورد ${po.supplierName}',
+        );
+
+        acceptedItems.add({
+          ...rec,
+          'product_id': productId,
+          'qty_received': qtyReceived,
+          'unit_cost_centimes': unitCost,
+        });
+      }
+
+      if (acceptedItems.isEmpty) {
+        throw Exception('لم يتم إدخال أي كمية صالحة للاستلام.');
+      }
 
       await db.transaction(() async {
-        for (final rec in receivedItems) {
+        for (final rec in acceptedItems) {
           final productId = rec['product_id'] as String;
           final qtyReceived = (rec['qty_received'] as num).toInt();
           final unitCost = (rec['unit_cost_centimes'] as num).toInt();
@@ -539,14 +622,17 @@ class InventoryRepositoryImpl implements IInventoryRepository {
             final totalNewValuation = qtyReceived * unitCost;
             final newTotalQty = oldQty + qtyReceived;
             final dynamicWAC = newTotalQty > 0
-                ? ((totalExistingValuation + totalNewValuation) / newTotalQty).round()
+                ? ((totalExistingValuation + totalNewValuation) / newTotalQty)
+                    .round()
                 : unitCost;
 
             await (db.update(db.cachedProducts)
                   ..where((tbl) => tbl.id.equals(productId)))
                 .write(CachedProductsCompanion(
-              onHandQty: Value(cached.onHandQty + qtyReceived),
-              availableQty: Value(cached.availableQty + qtyReceived),
+              onHandQty:
+                  Value((cached.onHandQty + qtyReceived).clamp(0, 9999999)),
+              availableQty:
+                  Value((cached.availableQty + qtyReceived).clamp(0, 9999999)),
               lastUnitCostCentimes: Value(dynamicWAC),
             ));
           }
@@ -555,14 +641,16 @@ class InventoryRepositoryImpl implements IInventoryRepository {
 
       // Update PO items received counts and determine new PO status
       final updatedItems = po.items.map((it) {
-        final rec = receivedItems.firstWhere(
+        final rec = acceptedItems.firstWhere(
           (r) => r['product_id'] == it.productId,
-          orElse: () => {},
+          orElse: () => const {},
         );
         if (rec.isNotEmpty) {
           final addedQty = (rec['qty_received'] as num).toInt();
           return it.copyWith(
             receivedQty: it.receivedQty + addedQty,
+            unitCostCentimes: (rec['unit_cost_centimes'] as num?)?.toInt() ??
+                it.unitCostCentimes,
             batchNumber: rec['batch_number'] as String? ?? it.batchNumber,
             expiryDate: rec['expiry_date'] != null
                 ? DateTime.tryParse(rec['expiry_date'] as String)
@@ -577,14 +665,51 @@ class InventoryRepositoryImpl implements IInventoryRepository {
 
       final nextStatus = allFulfilled
           ? PurchaseOrderStatus.fullyReceived
-          : (anyReceived
-              ? PurchaseOrderStatus.partiallyReceived
-              : po.status);
+          : (anyReceived ? PurchaseOrderStatus.partiallyReceived : po.status);
 
       _localPurchaseOrders[poIdx] = po.copyWith(
         status: nextStatus,
+        completedDate: allFulfilled ? DateTime.now() : po.completedDate,
         items: updatedItems,
       );
     });
+  }
+
+  @override
+  Future<PurchaseOrderEntity> updatePurchaseOrderStatus({
+    required String poId,
+    required PurchaseOrderStatus status,
+    required String userId,
+    required String userName,
+  }) async {
+    final poIdx = _localPurchaseOrders.indexWhere((p) => p.id == poId);
+    if (poIdx < 0) throw Exception('أمر الشراء غير موجود.');
+
+    final po = _localPurchaseOrders[poIdx];
+    if (po.isFullyReceived || po.isCancelled) {
+      throw Exception('لا يمكن تعديل حالة أمر شراء مكتمل أو ملغى.');
+    }
+    if (status == PurchaseOrderStatus.partiallyReceived ||
+        status == PurchaseOrderStatus.fullyReceived) {
+      throw Exception(
+        'حالات الاستلام تُحدَّث تلقائياً عند تسجيل استلام البضاعة (GRN).',
+      );
+    }
+    if (status == PurchaseOrderStatus.ordered && !po.isDraft) {
+      throw Exception(
+        'أمر الشراء أُرسل إلى المورد مسبقاً ولا يمكن إعادة إرساله.',
+      );
+    }
+
+    final updated = po.copyWith(
+      status: status,
+      completedDate:
+          status == PurchaseOrderStatus.cancelled ? DateTime.now() : null,
+    );
+    _localPurchaseOrders[poIdx] = updated;
+
+    // Keep the newest activity at the top for the manager workspace.
+    _localPurchaseOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+    return updated;
   }
 }

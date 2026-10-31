@@ -9,6 +9,7 @@ import '../../../providers/staff_providers.dart';
 import '../../../router/staff_router.dart';
 import '../../common/widgets/headless_barcode_scanner_button.dart';
 import '../../common/services/headless_barcode_scanner_service.dart';
+import 'pin_confirm_dialog.dart';
 
 class StockAdjustmentDialog extends ConsumerStatefulWidget {
   final Product? initialProduct;
@@ -86,10 +87,9 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
 
     // Require PIN re-confirmation before committing stock adjustment
     // (mirrors the server-side p_caller_pin gate in rpc_adjust_stock)
-    final pin = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const _PinConfirmDialog(),
+    final pin = await PinConfirmDialog.show(
+      context,
+      message: 'أدخل رمز PIN لتأكيد تسوية المخزون',
     );
     if (!mounted || pin == null || pin.isEmpty) return;
 
@@ -238,7 +238,8 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
                     onScanned: (code) {
                       final clean = code.trim();
                       final found = products
-                          .where((p) => p.barcodes.any((b) => b.trim() == clean))
+                          .where(
+                              (p) => p.barcodes.any((b) => b.trim() == clean))
                           .firstOrNull;
                       if (found != null) {
                         setState(() => _selectedProductId = found.id);
@@ -251,7 +252,8 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('لم يتم العثور على منتج بالباركود: $clean'),
+                            content: Text(
+                                'لم يتم العثور على منتج بالباركود: $clean'),
                             backgroundColor: Colors.orange,
                           ),
                         );
@@ -504,78 +506,6 @@ class _StockAdjustmentDialogState extends ConsumerState<StockAdjustmentDialog> {
           ),
         ),
       ),
-    );
-  }
-}
-
-
-/// Compact 4-digit PIN confirmation dialog shown before committing a stock
-/// adjustment. Returns the entered PIN string or null if cancelled.
-class _PinConfirmDialog extends StatefulWidget {
-  const _PinConfirmDialog();
-
-  @override
-  State<_PinConfirmDialog> createState() => _PinConfirmDialogState();
-}
-
-class _PinConfirmDialogState extends State<_PinConfirmDialog> {
-  final _controller = TextEditingController();
-  bool _obscure = true;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return AlertDialog(
-      title: const Text('تأكيد هوية المسؤول'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('أدخل رمز PIN لتأكيد تسوية المخزون'),
-          const SizedBox(height: AppSpacing.md),
-          TextField(
-            controller: _controller,
-            obscureText: _obscure,
-            keyboardType: TextInputType.number,
-            maxLength: 4,
-            autofocus: true,
-            decoration: InputDecoration(
-              labelText: 'PIN',
-              counterText: '',
-              suffixIcon: IconButton(
-                icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
-                onPressed: () => setState(() => _obscure = !_obscure),
-              ),
-            ),
-            onSubmitted: (v) {
-              if (v.length == 4) Navigator.of(context).pop(v);
-            },
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(null),
-          child: Text(
-            'إلغاء',
-            style: TextStyle(color: theme.colorScheme.error),
-          ),
-        ),
-        ValueListenableBuilder(
-          valueListenable: _controller,
-          builder: (_, value, __) => FilledButton(
-            onPressed: value.text.length == 4
-                ? () => Navigator.of(context).pop(_controller.text)
-                : null,
-            child: const Text('تأكيد'),
-          ),
-        ),
-      ],
     );
   }
 }
