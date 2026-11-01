@@ -274,7 +274,7 @@ class _DriverRouteSheetState extends State<DriverRouteSheet> {
                     ),
                     buildDefaultDragHandles: false,
                     itemCount: _ordered.length,
-                    onReorderItem: _reorder,
+                    onReorder: _reorder,
                     itemBuilder: (context, index) {
                       final order = _ordered[index];
                       return Padding(
