@@ -11,6 +11,8 @@ OrderEntity _order({
   Map<String, dynamic>? snapshot,
   double? deliveryLat,
   double? deliveryLng,
+  String? failureReason,
+  DateTime? deliveryAttemptedAt,
   DateTime? createdAt,
 }) {
   return OrderEntity(
@@ -24,6 +26,8 @@ OrderEntity _order({
     items: const [],
     deliveryLat: deliveryLat,
     deliveryLng: deliveryLng,
+    deliveryFailureReason: failureReason,
+    deliveryAttemptedAt: deliveryAttemptedAt,
     createdAt: createdAt ?? DateTime(2026, 10, 22, 10),
   );
 }
@@ -49,6 +53,68 @@ void main() {
       expect(isOrderCompleted(OrderStatus.settled), isTrue);
       expect(isOrderCompleted(OrderStatus.cancelled), isFalse);
       expect(isOrderCompleted(OrderStatus.refused), isFalse);
+    });
+  });
+
+  group('failed delivery attempts', () {
+    test('a failed attempt is removed from the active route', () {
+      final order = _order(
+        status: OrderStatus.requiresManagerReview,
+        failureReason: 'customer_unavailable',
+        deliveryAttemptedAt: DateTime(2026, 10, 22, 11),
+      );
+
+      expect(order.hasDeliveryFailure, isTrue);
+      expect(isDeliveryFailure(order), isTrue);
+      expect(isDriverDeliveryActive(order), isFalse);
+      expect(isDriverDeliveryFailed(order), isTrue);
+    });
+
+    test('a manager-review order without a failure code stays active', () {
+      final order = _order(status: OrderStatus.requiresManagerReview);
+
+      expect(order.hasDeliveryFailure, isFalse);
+      expect(isDriverDeliveryActive(order), isTrue);
+      expect(isDriverDeliveryFailed(order), isFalse);
+    });
+
+    test('a delivered order ignores a stale legacy failure code', () {
+      final order = _order(
+        status: OrderStatus.delivered,
+        failureReason: 'customer_unavailable',
+      );
+
+      expect(order.hasDeliveryFailure, isTrue);
+      expect(isDriverDeliveryFailed(order), isFalse);
+      expect(isDriverDeliveryActive(order), isFalse);
+    });
+
+    test('cancelled and refused orders are in the failed/returned bucket', () {
+      expect(
+        isDriverDeliveryFailed(_order(status: OrderStatus.cancelled)),
+        isTrue,
+      );
+      expect(
+        isDriverDeliveryFailed(_order(status: OrderStatus.refused)),
+        isTrue,
+      );
+      expect(
+        isDriverDeliveryFailed(_order(status: OrderStatus.outForDelivery)),
+        isFalse,
+      );
+    });
+
+    test('failure reason labels use stable codes', () {
+      final order = _order(
+        status: OrderStatus.requiresManagerReview,
+        failureReason: 'wrong_address',
+      );
+
+      expect(deliveryFailureReasonLabel(order), 'عنوان غير صحيح');
+      expect(
+        deliveryFailureReasonLabel(_order(failureReason: 'legacy_code')),
+        'legacy_code',
+      );
     });
   });
 

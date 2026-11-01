@@ -20,27 +20,43 @@ enum OrderStatus {
 
   static OrderStatus fromString(String val) {
     switch (val) {
-      case 'submitted': return OrderStatus.submitted;
-      case 'confirmed': return OrderStatus.confirmed;
-      case 'preparing': return OrderStatus.preparing;
-      case 'ready': return OrderStatus.ready;
-      case 'assigned': return OrderStatus.assigned;
-      case 'accepted': return OrderStatus.accepted;
-      case 'refused': return OrderStatus.refused;
-      case 'out_for_delivery': return OrderStatus.outForDelivery;
-      case 'delivered': return OrderStatus.delivered;
-      case 'settled': return OrderStatus.settled;
-      case 'cancelled': return OrderStatus.cancelled;
-      case 'requires_manager_review': return OrderStatus.requiresManagerReview;
-      default: return OrderStatus.submitted;
+      case 'submitted':
+        return OrderStatus.submitted;
+      case 'confirmed':
+        return OrderStatus.confirmed;
+      case 'preparing':
+        return OrderStatus.preparing;
+      case 'ready':
+        return OrderStatus.ready;
+      case 'assigned':
+        return OrderStatus.assigned;
+      case 'accepted':
+        return OrderStatus.accepted;
+      case 'refused':
+        return OrderStatus.refused;
+      case 'out_for_delivery':
+        return OrderStatus.outForDelivery;
+      case 'delivered':
+        return OrderStatus.delivered;
+      case 'settled':
+        return OrderStatus.settled;
+      case 'cancelled':
+        return OrderStatus.cancelled;
+      case 'requires_manager_review':
+        return OrderStatus.requiresManagerReview;
+      default:
+        return OrderStatus.submitted;
     }
   }
 
   String get dbValue {
     switch (this) {
-      case OrderStatus.outForDelivery: return 'out_for_delivery';
-      case OrderStatus.requiresManagerReview: return 'requires_manager_review';
-      default: return name;
+      case OrderStatus.outForDelivery:
+        return 'out_for_delivery';
+      case OrderStatus.requiresManagerReview:
+        return 'requires_manager_review';
+      default:
+        return name;
     }
   }
 }
@@ -109,6 +125,10 @@ class OrderEntity extends Equatable {
   final String? photoBase64;
   final double? deliveryLat;
   final double? deliveryLng;
+  final String? deliveryRecipientName;
+  final String? deliveryNotes;
+  final String? deliveryFailureReason;
+  final DateTime? deliveryAttemptedAt;
   final DateTime? confirmedAt;
   final DateTime? deliveredAt;
   final DateTime? settledAt;
@@ -138,6 +158,10 @@ class OrderEntity extends Equatable {
     this.photoBase64,
     this.deliveryLat,
     this.deliveryLng,
+    this.deliveryRecipientName,
+    this.deliveryNotes,
+    this.deliveryFailureReason,
+    this.deliveryAttemptedAt,
     this.confirmedAt,
     this.deliveredAt,
     this.settledAt,
@@ -147,6 +171,15 @@ class OrderEntity extends Equatable {
   Map<String, dynamic>? get deliveryAddress => customerSnapshot;
 
   int get dueAmountCentimes => totalAmountCentimes - paidAmountCentimes;
+
+  bool get hasDeliveryProof =>
+      (signatureBase64?.trim().isNotEmpty ?? false) ||
+      (photoBase64?.trim().isNotEmpty ?? false) ||
+      deliveryLat != null ||
+      deliveryLng != null;
+
+  bool get hasDeliveryFailure =>
+      deliveryFailureReason?.trim().isNotEmpty ?? false;
 
   /// True while the order is still being processed / delivered.
   bool get isOpen {
@@ -222,6 +255,10 @@ class OrderEntity extends Equatable {
     String? photoBase64,
     double? deliveryLat,
     double? deliveryLng,
+    String? deliveryRecipientName,
+    String? deliveryNotes,
+    String? deliveryFailureReason,
+    DateTime? deliveryAttemptedAt,
     DateTime? confirmedAt,
     DateTime? deliveredAt,
     DateTime? settledAt,
@@ -250,6 +287,12 @@ class OrderEntity extends Equatable {
       photoBase64: photoBase64 ?? this.photoBase64,
       deliveryLat: deliveryLat ?? this.deliveryLat,
       deliveryLng: deliveryLng ?? this.deliveryLng,
+      deliveryRecipientName:
+          deliveryRecipientName ?? this.deliveryRecipientName,
+      deliveryNotes: deliveryNotes ?? this.deliveryNotes,
+      deliveryFailureReason:
+          deliveryFailureReason ?? this.deliveryFailureReason,
+      deliveryAttemptedAt: deliveryAttemptedAt ?? this.deliveryAttemptedAt,
       confirmedAt: confirmedAt ?? this.confirmedAt,
       deliveredAt: deliveredAt ?? this.deliveredAt,
       settledAt: settledAt ?? this.settledAt,
@@ -281,6 +324,10 @@ class OrderEntity extends Equatable {
         photoBase64,
         deliveryLat,
         deliveryLng,
+        deliveryRecipientName,
+        deliveryNotes,
+        deliveryFailureReason,
+        deliveryAttemptedAt,
         confirmedAt,
         deliveredAt,
         settledAt,

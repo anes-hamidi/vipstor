@@ -4,7 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:staff_app/features/driver/widgets/delivery_order_card.dart';
 import 'package:ui_kit/ui_kit.dart';
 
-OrderEntity _order({OrderStatus status = OrderStatus.outForDelivery}) {
+OrderEntity _order({
+  OrderStatus status = OrderStatus.outForDelivery,
+  String? failureReason,
+  String? signatureBase64,
+  DateTime? deliveryAttemptedAt,
+}) {
   return OrderEntity(
     id: 'order-card-123456',
     orderNumber: 1042,
@@ -29,6 +34,9 @@ OrderEntity _order({OrderStatus status = OrderStatus.outForDelivery}) {
         unitCostCentimes: 0,
       ),
     ],
+    signatureBase64: signatureBase64,
+    deliveryFailureReason: failureReason,
+    deliveryAttemptedAt: deliveryAttemptedAt,
     createdAt: DateTime(2026, 10, 22, 9, 30),
   );
 }
@@ -103,6 +111,73 @@ void main() {
 
     expect(find.text('المطلوب تحصيله'), findsOneWidget);
     expect(find.text('تأكيد التسليم'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('active card exposes start and failed-attempt actions', (
+    tester,
+  ) async {
+    await _pumpCard(
+      tester,
+      DeliveryOrderCard(
+        order: _order(status: OrderStatus.accepted),
+        stopNumber: 2,
+        onNavigate: () {},
+        onStartDelivery: () {},
+        onReportFailure: () {},
+        onDeliver: () {},
+      ),
+      size: const Size(380, 900),
+    );
+
+    expect(find.text('بدء التوصيل'), findsOneWidget);
+    expect(find.text('تعذر التسليم'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('failed attempt card is clearly marked for manager review', (
+    tester,
+  ) async {
+    await _pumpCard(
+      tester,
+      DeliveryOrderCard(
+        order: _order(
+          status: OrderStatus.requiresManagerReview,
+          failureReason: 'customer_unavailable',
+          deliveryAttemptedAt: DateTime(2026, 10, 22, 10),
+        ),
+        distanceKm: 0.8,
+      ),
+      size: const Size(420, 900),
+    );
+
+    expect(find.text('تعذر التسليم'), findsOneWidget);
+    expect(find.textContaining('الزبون غير متاح'), findsOneWidget);
+    expect(
+      find.text('تم تسجيل تعذر التسليم — بانتظار المشرف'),
+      findsOneWidget,
+    );
+    expect(find.text('تأكيد التسليم'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('completed card can open the saved delivery proof', (
+    tester,
+  ) async {
+    await _pumpCard(
+      tester,
+      DeliveryOrderCard(
+        order: _order(
+          status: OrderStatus.delivered,
+          signatureBase64: 'c2lnbmF0dXJl',
+        ),
+        onViewProof: () {},
+      ),
+      size: const Size(420, 900),
+    );
+
+    expect(find.text('عرض الإثبات'), findsOneWidget);
+    expect(find.text('توقيع المستلم'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

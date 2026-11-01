@@ -86,6 +86,58 @@ class SupabaseService {
     return Map<String, dynamic>.from(response as Map);
   }
 
+  /// Complete a delivery with durable proof-of-delivery metadata.
+  ///
+  /// Uses the v2 RPC so cash collection and proof (signature, photo, GPS,
+  /// recipient and notes) are committed in the same transaction.
+  Future<Map<String, dynamic>> recordOrderDeliveryWithProof({
+    required String driverId,
+    required String orderId,
+    required int collectedCashCentimes,
+    required String clientId,
+    String? signatureBase64,
+    String? photoBase64,
+    double? deliveryLat,
+    double? deliveryLng,
+    String? recipientName,
+    String? notes,
+  }) async {
+    final response = await client.rpc('rpc_record_order_delivery_v2', params: {
+      'p_driver_id': driverId,
+      'p_order_id': orderId,
+      'p_collected_cash': collectedCashCentimes,
+      'p_client_id': clientId,
+      'p_signature_base64': signatureBase64,
+      'p_photo_base64': photoBase64,
+      'p_delivery_lat': deliveryLat,
+      'p_delivery_lng': deliveryLng,
+      'p_recipient_name': recipientName,
+      'p_notes': notes,
+    });
+    return Map<String, dynamic>.from(response as Map);
+  }
+
+  /// Record an unsuccessful delivery attempt and route the order to the
+  /// manager review queue. This never settles cash or marks the order delivered.
+  Future<Map<String, dynamic>> recordDeliveryFailure({
+    required String orderId,
+    required String reason,
+    required String clientId,
+    String? notes,
+    double? deliveryLat,
+    double? deliveryLng,
+  }) async {
+    final response = await client.rpc('rpc_record_delivery_failure', params: {
+      'p_order_id': orderId,
+      'p_reason': reason,
+      'p_client_id': clientId,
+      'p_notes': notes,
+      'p_delivery_lat': deliveryLat,
+      'p_delivery_lng': deliveryLng,
+    });
+    return Map<String, dynamic>.from(response as Map);
+  }
+
   /// End-of-Day Driver Cash Settlement
   Future<Map<String, dynamic>> settleDriverWallet({
     required String cashierId,

@@ -24,6 +24,9 @@ class DriverTelemetryState {
   final String? gpsError;
   final bool isTripActive;
   final bool isClockedIn;
+  final DateTime? shiftStartedAt;
+  final DateTime? tripStartedAt;
+  final double tripDistanceMeters;
 
   const DriverTelemetryState({
     this.batteryLevel = 100,
@@ -34,9 +37,13 @@ class DriverTelemetryState {
     this.gpsError,
     this.isTripActive = false,
     this.isClockedIn = false,
+    this.shiftStartedAt,
+    this.tripStartedAt,
+    this.tripDistanceMeters = 0,
   });
 
-  bool get isLowBattery => batteryLevel < 20 && batteryState != BatteryState.charging;
+  bool get isLowBattery =>
+      batteryLevel < 20 && batteryState != BatteryState.charging;
 
   DriverTelemetryState copyWith({
     int? batteryLevel,
@@ -47,22 +54,34 @@ class DriverTelemetryState {
     String? gpsError,
     bool? isTripActive,
     bool? isClockedIn,
+    DateTime? shiftStartedAt,
+    DateTime? tripStartedAt,
+    double? tripDistanceMeters,
+    bool clearShiftStartedAt = false,
+    bool clearTripStartedAt = false,
   }) {
     return DriverTelemetryState(
       batteryLevel: batteryLevel ?? this.batteryLevel,
       batteryState: batteryState ?? this.batteryState,
       isWakelockEnabled: isWakelockEnabled ?? this.isWakelockEnabled,
-      isBackgroundServiceActive: isBackgroundServiceActive ?? this.isBackgroundServiceActive,
+      isBackgroundServiceActive:
+          isBackgroundServiceActive ?? this.isBackgroundServiceActive,
       currentPosition: currentPosition ?? this.currentPosition,
       gpsError: gpsError ?? this.gpsError,
       isTripActive: isTripActive ?? this.isTripActive,
       isClockedIn: isClockedIn ?? this.isClockedIn,
+      shiftStartedAt:
+          clearShiftStartedAt ? null : (shiftStartedAt ?? this.shiftStartedAt),
+      tripStartedAt:
+          clearTripStartedAt ? null : (tripStartedAt ?? this.tripStartedAt),
+      tripDistanceMeters: tripDistanceMeters ?? this.tripDistanceMeters,
     );
   }
 }
 
 class DriverTelemetryService extends ChangeNotifier {
-  static final DriverTelemetryService _instance = DriverTelemetryService._internal();
+  static final DriverTelemetryService _instance =
+      DriverTelemetryService._internal();
   factory DriverTelemetryService() => _instance;
 
   DriverTelemetryService._internal() {
@@ -80,6 +99,7 @@ class DriverTelemetryService extends ChangeNotifier {
   String? _driverId;
   DateTime? _lastLocationUpload;
   Position? _lastUploadedPosition;
+  Position? _lastTripPosition;
 
   void setDriverId(String? id) {
     if (_driverId != id) {
@@ -92,8 +112,11 @@ class DriverTelemetryService extends ChangeNotifier {
 
   /// Clock the driver in (shift start). Logs a clock_in event.
   Future<void> clockIn() async {
-    if (_driverId == null) return;
-    _state = _state.copyWith(isClockedIn: true);
+    if (_driverId == null || _state.isClockedIn) return;
+    _state = _state.copyWith(
+      isClockedIn: true,
+      shiftStartedAt: DateTime.now(),
+    );
     notifyListeners();
     await _logDriverLocationEvent('clock_in');
   }
@@ -101,15 +124,37 @@ class DriverTelemetryService extends ChangeNotifier {
   /// Clock the driver out (shift end). Logs a clock_out event.
   Future<void> clockOut() async {
     if (_driverId == null) return;
-    _state = _state.copyWith(isClockedIn: false);
+    _state = _state.copyWith(
+      isClockedIn: false,
+      clearShiftStartedAt: true,
+    );
     notifyListeners();
     await _logDriverLocationEvent('clock_out');
   }
 
   /// Start a delivery trip. Logs a trip_start event.
+  ///
+  /// A trip always implies an active shift, so starting one while clocked out
+  /// records a clock-in event too. This keeps the audit trail complete without
+  /// forcing drivers through two separate taps.
   Future<void> startTrip() async {
     if (_driverId == null) return;
-    _state = _state.copyWith(isTripActive: true);
+    final now = DateTime.now();
+
+    if (!_state.isClockedIn) {
+      _state = _state.copyWith(
+        isClockedIn: true,
+        shiftStartedAt: now,
+      );
+      await _logDriverLocationEvent('clock_in');
+    }
+
+    _lastTripPosition = _state.currentPosition;
+    _state = _state.copyWith(
+      isTripActive: true,
+      tripStartedAt: now,
+      tripDistanceMeters: 0,
+    );
     notifyListeners();
     await _logDriverLocationEvent('trip_start');
   }
@@ -117,7 +162,11 @@ class DriverTelemetryService extends ChangeNotifier {
   /// End a delivery trip. Logs a trip_end event.
   Future<void> endTrip() async {
     if (_driverId == null) return;
-    _state = _state.copyWith(isTripActive: false);
+    _state = _state.copyWith(
+      isTripActive: false,
+      clearTripStartedAt: true,
+    );
+    _lastTripPosition = null;
     notifyListeners();
     await _logDriverLocationEvent('trip_end');
   }
@@ -128,7 +177,8 @@ class DriverTelemetryService extends ChangeNotifier {
     // Throttle: respect minimum time interval
     final now = DateTime.now();
     if (_lastLocationUpload != null &&
-        now.difference(_lastLocationUpload!) < _TelemetryThrottle.minUploadInterval) {
+        now.difference(_lastLocationUpload!) <
+            _TelemetryThrottle.minUploadInterval) {
       return;
     }
 
@@ -185,9 +235,11 @@ class DriverTelemetryService extends ChangeNotifier {
       _state = _state.copyWith(batteryLevel: level);
       notifyListeners();
 
-      _batterySubscription = _battery.onBatteryStateChanged.listen((batteryState) async {
+      _batterySubscription =
+          _battery.onBatteryStateChanged.listen((batteryState) async {
         final currentLevel = await _battery.batteryLevel;
-        _state = _state.copyWith(batteryLevel: currentLevel, batteryState: batteryState);
+        _state = _state.copyWith(
+            batteryLevel: currentLevel, batteryState: batteryState);
         notifyListeners();
         if (_state.currentPosition != null) {
           _syncLocationToSupabase(_state.currentPosition!);
@@ -203,7 +255,8 @@ class DriverTelemetryService extends ChangeNotifier {
         permission = await Geolocator.requestPermission();
       }
 
-      if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
         final pos = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
           timeLimit: const Duration(seconds: 5),
@@ -218,6 +271,7 @@ class DriverTelemetryService extends ChangeNotifier {
             distanceFilter: 50, // only emit when moved 50m+
           ),
         ).listen((newPos) {
+          _accumulateTripDistance(newPos);
           _state = _state.copyWith(currentPosition: newPos);
           notifyListeners();
 
@@ -229,6 +283,32 @@ class DriverTelemetryService extends ChangeNotifier {
       _state = _state.copyWith(gpsError: e.toString());
       notifyListeners();
     }
+  }
+
+  /// Accumulates real travelled distance while a trip is active. GPS jumps
+  /// larger than 500 m are ignored to avoid inflating the trip summary when the
+  /// device regains a fix after losing signal.
+  void _accumulateTripDistance(Position newPosition) {
+    if (!_state.isTripActive) {
+      _lastTripPosition = newPosition;
+      return;
+    }
+
+    final previous = _lastTripPosition;
+    _lastTripPosition = newPosition;
+    if (previous == null) return;
+
+    final meters = Geolocator.distanceBetween(
+      previous.latitude,
+      previous.longitude,
+      newPosition.latitude,
+      newPosition.longitude,
+    );
+    if (meters < 3 || meters > 500) return;
+
+    _state = _state.copyWith(
+      tripDistanceMeters: _state.tripDistanceMeters + meters,
+    );
   }
 
   Future<void> toggleWakelock(bool enable) async {

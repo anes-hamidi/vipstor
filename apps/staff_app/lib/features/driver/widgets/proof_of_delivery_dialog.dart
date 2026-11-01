@@ -1,8 +1,13 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:signature/signature.dart';
 import 'package:uuid/uuid.dart';
 import 'package:core/core.dart';
 import 'package:domain/domain.dart';
@@ -73,11 +78,15 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _cashController;
   late final TextEditingController _notesController;
+  late final TextEditingController _recipientController;
+  late final SignatureController _signatureController;
 
   int _collectedCentimes = 0;
   bool _deferredConfirmed = false;
   bool _isSubmitting = false;
   String? _errorMessage;
+  Uint8List? _photoBytes;
+  bool _isCapturingPhoto = false;
 
   // GPS stamp
   Position? _stampedPosition;
@@ -99,15 +108,32 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
       text: _amountInputText(_dueCentimes),
     );
     _notesController = TextEditingController();
+    _recipientController = TextEditingController(
+      text: deliveryCustomerName(widget.order) == 'زبون'
+          ? ''
+          : deliveryCustomerName(widget.order),
+    );
+    _signatureController = SignatureController(
+      penStrokeWidth: 2.4,
+      penColor: const Color(0xFF1A1400),
+      exportBackgroundColor: Colors.white,
+      exportPenColor: const Color(0xFF1A1400),
+    )..addListener(_onSignatureChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _captureGpsStamp();
     });
+  }
+
+  void _onSignatureChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     _cashController.dispose();
     _notesController.dispose();
+    _recipientController.dispose();
+    _signatureController.dispose();
     super.dispose();
   }
 
@@ -168,6 +194,48 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
     }
   }
 
+  Future<void> _captureDeliveryPhoto() async {
+    if (_isCapturingPhoto) return;
+    setState(() {
+      _isCapturingPhoto = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        imageQuality: 82,
+      );
+      if (picked == null || !mounted) return;
+
+      Uint8List bytes;
+      final compressed = await FlutterImageCompress.compressWithFile(
+        picked.path,
+        minWidth: 1000,
+        minHeight: 700,
+        quality: 68,
+        format: CompressFormat.jpeg,
+      );
+      bytes = compressed ?? await picked.readAsBytes();
+      if (bytes.length > 5 * 1024 * 1024) {
+        throw StateError('الصورة كبيرة جداً. أعد التقاطها بإضاءة أفضل.');
+      }
+
+      if (!mounted) return;
+      setState(() => _photoBytes = bytes);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage =
+            'تعذر التقاط صورة التسليم. تحقق من صلاحية الكاميرا وحاول مرة أخرى.';
+      });
+      debugPrint('[Driver] proof photo error: $error');
+    } finally {
+      if (mounted) setState(() => _isCapturingPhoto = false);
+    }
+  }
+
   Future<void> _finalizeDelivery() async {
     FocusScope.of(context).unfocus();
 
@@ -198,12 +266,25 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
         if (_stampedAddress != null) 'تم التسليم عند: $_stampedAddress',
       ].join(' • ');
 
+      Uint8List? signatureBytes;
+      if (_signatureController.isNotEmpty) {
+        signatureBytes = await _signatureController.toPngBytes();
+      }
+      final signatureBase64 =
+          signatureBytes == null ? null : base64Encode(signatureBytes);
+      final photoBase64 =
+          _photoBytes == null ? null : base64Encode(_photoBytes!);
+      final recipientName = _recipientController.text.trim();
+
       await ref.read(orderRepositoryProvider).completeDeliveryWithProof(
             driverId: user.id,
             orderId: widget.order.id,
             collectedCashCentimes: _collectedCentimes,
+            signatureBase64: signatureBase64,
+            photoBase64: photoBase64,
             deliveryLat: _stampedPosition?.latitude,
             deliveryLng: _stampedPosition?.longitude,
+            deliveryRecipientName: recipientName.isEmpty ? null : recipientName,
             notes: notes.isEmpty ? null : notes,
             clientId: const Uuid().v4(),
           );
@@ -332,6 +413,18 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
               const SizedBox(height: AppSpacing.md),
               _buildGpsStamp(context, theme, colors),
               const SizedBox(height: AppSpacing.md),
+              _buildProofSection(context, theme, colors),
+              const SizedBox(height: AppSpacing.md),
+              TextFormField(
+                controller: _recipientController,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'اسم المستلم (اختياري)',
+                  hintText: 'من استلم الطلب فعلياً؟',
+                  prefixIcon: Icon(Icons.person_outline_rounded),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
               TextFormField(
                 controller: _notesController,
                 textInputAction: TextInputAction.done,
@@ -844,6 +937,176 @@ class _ProofOfDeliveryDialogState extends ConsumerState<ProofOfDeliveryDialog> {
               child: const Text('تحديث'),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProofSection(
+    BuildContext context,
+    ThemeData theme,
+    AppColors colors,
+  ) {
+    return Container(
+      padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.55),
+        borderRadius: AppRadius.lgAll,
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.8),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.verified_user_outlined, size: 17, color: colors.gold),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Text(
+                  'إثبات التسليم',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsetsDirectional.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: colors.goldMuted,
+                  borderRadius: AppRadius.pillAll,
+                ),
+                child: Text(
+                  'اختياري',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colors.gold,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'وقّع المستلم أو أضف صورة للتسليم. يُحفظ الإثبات مع الطلب.',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Container(
+            height: 138,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: AppRadius.mdAll,
+              border: Border.all(color: colors.goldBorder),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Signature(
+                    controller: _signatureController,
+                    backgroundColor: Colors.white,
+                  ),
+                ),
+                if (_signatureController.isNotEmpty)
+                  PositionedDirectional(
+                    top: 4,
+                    end: 4,
+                    child: IconButton(
+                      tooltip: 'مسح التوقيع',
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.white.withValues(alpha: 0.9),
+                        foregroundColor: colors.cancelled,
+                      ),
+                      onPressed: () {
+                        setState(() => _signatureController.clear());
+                      },
+                      icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    ),
+                  ),
+                if (_signatureController.isEmpty)
+                  const PositionedDirectional(
+                    start: 12,
+                    bottom: 8,
+                    child: IgnorePointer(
+                      child: Text(
+                        'وقّع هنا',
+                        style: TextStyle(
+                          color: Color(0x88999A9C),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isCapturingPhoto ? null : _captureDeliveryPhoto,
+                  icon: _isCapturingPhoto
+                      ? const SizedBox(
+                          width: 15,
+                          height: 15,
+                          child: CircularProgressIndicator.adaptive(
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.photo_camera_outlined, size: 17),
+                  label: Text(
+                    _photoBytes == null ? 'إضافة صورة تسليم' : 'استبدال الصورة',
+                  ),
+                ),
+              ),
+              if (_photoBytes != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    ClipRRect(
+                      borderRadius: AppRadius.smAll,
+                      child: Image.memory(
+                        _photoBytes!,
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    PositionedDirectional(
+                      top: -8,
+                      end: -8,
+                      child: IconButton(
+                        tooltip: 'حذف الصورة',
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 26,
+                          height: 26,
+                        ),
+                        padding: EdgeInsets.zero,
+                        style: IconButton.styleFrom(
+                          backgroundColor: colors.cancelled,
+                          foregroundColor: colors.onCancelled,
+                        ),
+                        onPressed: () => setState(() => _photoBytes = null),
+                        icon: const Icon(Icons.close_rounded, size: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
         ],
       ),
     );

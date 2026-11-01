@@ -49,7 +49,8 @@ class OfflineSyncService {
   /// Call once from the app bootstrapper (after Supabase init).
   void start() {
     // React to connectivity changes.
-    _connectivitySub = ConnectivityService.instance.onStatusChange.listen((online) {
+    _connectivitySub =
+        ConnectivityService.instance.onStatusChange.listen((online) {
       if (online) drainQueue();
     });
     ConnectivityService.instance.startPolling(intervalSeconds: 15);
@@ -122,11 +123,27 @@ class OfflineSyncService {
           }
 
         case 'delivery':
-          await service.recordOrderDelivery(
+          await service.recordOrderDeliveryWithProof(
             driverId: payload['driver_id'] as String,
             orderId: payload['order_id'] as String,
             collectedCashCentimes: payload['collected_cash'] as int,
             clientId: op.clientId,
+            signatureBase64: payload['signature_base64'] as String?,
+            photoBase64: payload['photo_base64'] as String?,
+            deliveryLat: (payload['delivery_lat'] as num?)?.toDouble(),
+            deliveryLng: (payload['delivery_lng'] as num?)?.toDouble(),
+            recipientName: payload['delivery_recipient_name'] as String?,
+            notes: payload['notes'] as String?,
+          );
+
+        case 'delivery_failure':
+          await service.recordDeliveryFailure(
+            orderId: payload['order_id'] as String,
+            reason: payload['reason'] as String,
+            clientId: op.clientId,
+            notes: payload['notes'] as String?,
+            deliveryLat: (payload['delivery_lat'] as num?)?.toDouble(),
+            deliveryLng: (payload['delivery_lng'] as num?)?.toDouble(),
           );
 
         case 'debt_payment':
@@ -144,7 +161,8 @@ class OfflineSyncService {
             'p_client_id': op.clientId,
             'p_cashier_id': payload['cashier_id'],
             'p_cashier_pin': payload['cashier_pin'] ?? '',
-            'p_cashier_name': payload['cashier_name'] ?? '\u063a\u064a\u0631 \u0645\u0633\u062c\u0644',
+            'p_cashier_name': payload['cashier_name'] ??
+                '\u063a\u064a\u0631 \u0645\u0633\u062c\u0644',
             'p_opening_float': payload['opening_float_centimes'] ?? 0,
             'p_z_report_sequence': payload['z_report_number'] ?? 0,
             'p_opened_at': payload['opened_at'],
@@ -218,8 +236,7 @@ class OfflineSyncService {
             // Legacy payloads only carried a driver/cashier id.
             await client.rpc('rpc_confirm_online_order', params: {
               'p_order_id': payload['order_id'],
-              'p_cashier_id':
-                  payload['cashier_id'] ?? payload['driver_id'],
+              'p_cashier_id': payload['cashier_id'] ?? payload['driver_id'],
               if (driverId != null) 'p_driver_id': driverId,
             });
           }

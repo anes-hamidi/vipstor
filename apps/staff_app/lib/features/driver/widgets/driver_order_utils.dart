@@ -1,5 +1,7 @@
 import 'package:domain/domain.dart';
 
+import 'delivery_failure_reason.dart';
+
 /// Shared presentation helpers for the driver delivery workflow.
 ///
 /// Keeping these helpers in one place avoids subtle differences between the
@@ -27,6 +29,30 @@ bool isOrderActive(OrderStatus status) {
 
 bool isOrderCompleted(OrderStatus status) =>
     status == OrderStatus.delivered || status == OrderStatus.settled;
+
+bool isOrderCancelled(OrderStatus status) =>
+    status == OrderStatus.cancelled || status == OrderStatus.refused;
+
+/// A failed delivery attempt is routed to manager review, so it must not stay
+/// in the driver's active route or be delivered a second time.
+bool isDeliveryFailure(OrderEntity order) => order.hasDeliveryFailure;
+
+/// Active for the driver queue/map: still open and no failed attempt recorded.
+bool isDriverDeliveryActive(OrderEntity order) =>
+    isOrderActive(order.status) && !isDeliveryFailure(order);
+
+/// Orders a driver should see in the "needs review / returned" bucket.
+///
+/// Completed orders are never failed, even if a legacy row still contains a
+/// stale failure code from a prior attempt.
+bool isDriverDeliveryFailed(OrderEntity order) =>
+    !isOrderCompleted(order.status) &&
+    (isOrderCancelled(order.status) || isDeliveryFailure(order));
+
+String? deliveryFailureReasonLabel(OrderEntity order) {
+  if (!order.hasDeliveryFailure) return null;
+  return DeliveryFailureReason.labelForCode(order.deliveryFailureReason);
+}
 
 String deliveryCustomerName(OrderEntity order) {
   final snapshot = order.customerSnapshot;

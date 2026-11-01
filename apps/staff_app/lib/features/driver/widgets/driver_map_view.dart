@@ -26,13 +26,30 @@ import 'proof_of_delivery_dialog.dart';
 class DriverMapView extends StatefulWidget {
   final List<OrderEntity> orders;
   final LatLng? driverLocation;
+
+  /// Optional explicit route sequence (order IDs). When supplied, stop
+  /// numbering and the route panel follow the same order as the task list;
+  /// otherwise the map falls back to nearest-stop ordering.
+  final List<String>? sequenceOrder;
+
+  /// True when [sequenceOrder] comes from a manual/optimized route rather than
+  /// the dashboard's current sort order.
+  final bool customSequence;
   final VoidCallback onOrdersUpdated;
+  final Future<void> Function(OrderEntity order)? onStartDelivery;
+  final Future<void> Function(OrderEntity order)? onReportFailure;
+  final Future<void> Function(OrderEntity order)? onViewProof;
 
   const DriverMapView({
     super.key,
     required this.orders,
     this.driverLocation,
+    this.sequenceOrder,
+    this.customSequence = false,
     required this.onOrdersUpdated,
+    this.onStartDelivery,
+    this.onReportFailure,
+    this.onViewProof,
   });
 
   @override
@@ -79,6 +96,8 @@ class _DriverMapViewState extends State<DriverMapView> {
 
   String _fitSignature(List<OrderEntity> orders, LatLng? driver) {
     final buffer = StringBuffer(driver == null ? 'no-driver' : 'driver');
+    buffer.write('|custom:${widget.customSequence}');
+    buffer.write('|seq:${widget.sequenceOrder?.join(",") ?? ""}');
     for (final order in orders) {
       buffer
         ..write('|')
@@ -93,7 +112,12 @@ class _DriverMapViewState extends State<DriverMapView> {
 
   void _fitAllStops() {
     if (!_mapReady) return;
-    final data = _MapData.from(widget.orders, widget.driverLocation);
+    final data = _MapData.from(
+      widget.orders,
+      widget.driverLocation,
+      sequenceOrder: widget.sequenceOrder,
+      customSequence: widget.customSequence,
+    );
     final points = <LatLng>[
       if (data.driverLocation != null) data.driverLocation!,
       for (final stop in data.activeStops) stop.point,
@@ -193,6 +217,33 @@ class _DriverMapViewState extends State<DriverMapView> {
     );
   }
 
+  Future<void> _startDelivery(OrderEntity order) async {
+    final callback = widget.onStartDelivery;
+    if (callback == null) return;
+    await callback(order);
+  }
+
+  Future<void> _reportFailure(OrderEntity order) async {
+    final callback = widget.onReportFailure;
+    if (callback == null) return;
+    await callback(order);
+  }
+
+  Future<void> _viewProof(OrderEntity order) async {
+    final callback = widget.onViewProof;
+    if (callback == null) return;
+    await callback(order);
+  }
+
+  Future<void> _runFromOverlay(
+    BuildContext overlayContext,
+    Future<void> Function() action,
+  ) async {
+    Navigator.of(overlayContext).pop();
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    if (mounted) await action();
+  }
+
   void _showSnack(String message, {bool isError = false}) {
     if (!mounted) return;
     final colors = context.appColors;
@@ -212,7 +263,12 @@ class _DriverMapViewState extends State<DriverMapView> {
 
   @override
   Widget build(BuildContext context) {
-    final data = _MapData.from(widget.orders, widget.driverLocation);
+    final data = _MapData.from(
+      widget.orders,
+      widget.driverLocation,
+      sequenceOrder: widget.sequenceOrder,
+      customSequence: widget.customSequence,
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -232,6 +288,9 @@ class _DriverMapViewState extends State<DriverMapView> {
                   onNavigate: _openNavigation,
                   onCall: _callCustomer,
                   onDeliver: _openProofOfDelivery,
+                  onStartDelivery: _startDelivery,
+                  onReportFailure: _reportFailure,
+                  onViewProof: _viewProof,
                   onShowDetails: _showStopDetails,
                   onOpenUnlocated: (order) => _showStopDetails(
                     _MapStop(
@@ -482,6 +541,21 @@ class _DriverMapViewState extends State<DriverMapView> {
                                       _selectedOrderId == stop.order.id,
                                   onNavigate: () => _openNavigation(stop.order),
                                   onCall: () => _callCustomer(stop.order),
+                                  onStartDelivery: stop.order.status !=
+                                              OrderStatus.outForDelivery &&
+                                          widget.onStartDelivery != null
+                                      ? () => _runFromOverlay(
+                                            sheetContext,
+                                            () => _startDelivery(stop.order),
+                                          )
+                                      : null,
+                                  onReportFailure: widget.onReportFailure ==
+                                          null
+                                      ? null
+                                      : () => _runFromOverlay(
+                                            sheetContext,
+                                            () => _reportFailure(stop.order),
+                                          ),
                                   onDeliver: () => _deliverFromSheet(
                                       sheetContext, stop.order),
                                 ),
@@ -560,7 +634,7 @@ class _DriverMapViewState extends State<DriverMapView> {
     final colors = context.appColors;
     final isCompact = MediaQuery.sizeOf(context).width < 720;
     final order = stop.order;
-    final isActive = isOrderActive(order.status);
+    final isActive = isDriverDeliveryActive(order);
 
     Widget buildCard(BuildContext routeContext) {
       return DeliveryOrderCard(
@@ -569,6 +643,26 @@ class _DriverMapViewState extends State<DriverMapView> {
         distanceKm: stop.distanceKm,
         onNavigate: () => _openNavigation(order),
         onCall: () => _callCustomer(order),
+        onStartDelivery: isActive &&
+                order.status != OrderStatus.outForDelivery &&
+                widget.onStartDelivery != null
+            ? () => _runFromOverlay(
+                  routeContext,
+                  () => _startDelivery(order),
+                )
+            : null,
+        onReportFailure: isActive && widget.onReportFailure != null
+            ? () => _runFromOverlay(
+                  routeContext,
+                  () => _reportFailure(order),
+                )
+            : null,
+        onViewProof: order.hasDeliveryProof && widget.onViewProof != null
+            ? () => _runFromOverlay(
+                  routeContext,
+                  () => _viewProof(order),
+                )
+            : null,
         onDeliver: isActive
             ? () async {
                 Navigator.of(routeContext).pop();
@@ -738,30 +832,35 @@ class _MapData {
   final List<_MapStop> completedStops;
   final List<OrderEntity> unlocatedOrders;
   final LatLng? driverLocation;
+  final bool customSequence;
 
   const _MapData({
     required this.activeStops,
     required this.completedStops,
     required this.unlocatedOrders,
     required this.driverLocation,
+    this.customSequence = false,
   });
 
   factory _MapData.from(
     List<OrderEntity> orders,
-    LatLng? driverLocation,
-  ) {
+    LatLng? driverLocation, {
+    List<String>? sequenceOrder,
+    bool customSequence = false,
+  }) {
     const distance = Distance(roundResult: false);
     final active = <_MapStop>[];
     final completed = <_MapStop>[];
     final unlocated = <OrderEntity>[];
 
     for (final order in orders) {
-      final isActive = isOrderActive(order.status);
+      final isActive = isDriverDeliveryActive(order);
       final isCompleted = order.status == OrderStatus.delivered ||
           order.status == OrderStatus.settled;
 
-      // Cancelled/refused orders are not part of today's route and should not
-      // distract the driver with a marker or a "without location" warning.
+      // Cancelled, refused and failed-attempt orders are not part of today's
+      // route and should not distract the driver with a marker or a "without
+      // location" warning.
       if (!isActive && !isCompleted) continue;
 
       final latitude = orderLatitude(order);
@@ -789,7 +888,17 @@ class _MapData {
       }
     }
 
+    final rankById = <String, int>{
+      if (sequenceOrder != null)
+        for (var i = 0; i < sequenceOrder.length; i++) sequenceOrder[i]: i,
+    };
+
     active.sort((a, b) {
+      final aRank = rankById[a.order.id];
+      final bRank = rankById[b.order.id];
+      if (aRank != null || bRank != null) {
+        return (aRank ?? 1 << 30).compareTo(bRank ?? 1 << 30);
+      }
       final distanceCompare = (a.distanceKm ?? double.infinity).compareTo(
         b.distanceKm ?? double.infinity,
       );
@@ -802,13 +911,21 @@ class _MapData {
     ];
 
     completed.sort((a, b) => b.order.createdAt.compareTo(a.order.createdAt));
-    unlocated.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    unlocated.sort((a, b) {
+      final aRank = rankById[a.id];
+      final bRank = rankById[b.id];
+      if (aRank != null || bRank != null) {
+        return (aRank ?? 1 << 30).compareTo(bRank ?? 1 << 30);
+      }
+      return b.createdAt.compareTo(a.createdAt);
+    });
 
     return _MapData(
       activeStops: numbered,
       completedStops: completed,
       unlocatedOrders: unlocated,
       driverLocation: driverLocation,
+      customSequence: customSequence,
     );
   }
 
@@ -839,6 +956,9 @@ class _RoutePanel extends StatelessWidget {
   final ValueChanged<OrderEntity> onNavigate;
   final ValueChanged<OrderEntity> onCall;
   final ValueChanged<OrderEntity> onDeliver;
+  final ValueChanged<OrderEntity> onStartDelivery;
+  final ValueChanged<OrderEntity> onReportFailure;
+  final ValueChanged<OrderEntity> onViewProof;
   final ValueChanged<_MapStop> onShowDetails;
   final ValueChanged<OrderEntity> onOpenUnlocated;
 
@@ -850,6 +970,9 @@ class _RoutePanel extends StatelessWidget {
     required this.onNavigate,
     required this.onCall,
     required this.onDeliver,
+    required this.onStartDelivery,
+    required this.onReportFailure,
+    required this.onViewProof,
     required this.onShowDetails,
     required this.onOpenUnlocated,
   });
@@ -911,9 +1034,11 @@ class _RoutePanel extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          data.driverLocation != null
-                              ? 'مرتب حسب الأقرب إلى موقعك'
-                              : 'بانتظار GPS لترتيب المحطات',
+                          data.customSequence
+                              ? 'ترتيب مخصص اعتمدته لهذه الجولة'
+                              : data.driverLocation != null
+                                  ? 'مرتب حسب ترتيب قائمة المهام'
+                                  : 'بانتظار GPS لترتيب المحطات',
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
@@ -1014,6 +1139,14 @@ class _RoutePanel extends StatelessWidget {
                             highlighted: selectedOrderId == stop.order.id,
                             onNavigate: () => onNavigate(stop.order),
                             onCall: () => onCall(stop.order),
+                            onStartDelivery:
+                                stop.order.status != OrderStatus.outForDelivery
+                                    ? () => onStartDelivery(stop.order)
+                                    : null,
+                            onReportFailure: () => onReportFailure(stop.order),
+                            onViewProof: stop.order.hasDeliveryProof
+                                ? () => onViewProof(stop.order)
+                                : null,
                             onDeliver: () => onDeliver(stop.order),
                           ),
                         ),

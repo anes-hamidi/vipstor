@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:maps_launcher/maps_launcher.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 import 'package:core/core.dart';
 import 'package:domain/domain.dart';
 import 'package:ui_kit/ui_kit.dart';
@@ -13,9 +16,13 @@ import '../../providers/staff_providers.dart';
 import '../../router/staff_router.dart';
 import '../moderator/widgets/staff_profile_edit_sheet.dart';
 import 'services/driver_telemetry_service.dart';
+import 'widgets/delivery_failure_dialog.dart';
 import 'widgets/delivery_order_card.dart';
+import 'widgets/delivery_proof_viewer_dialog.dart';
 import 'widgets/driver_map_view.dart';
 import 'widgets/driver_order_utils.dart';
+import 'widgets/driver_route_sheet.dart';
+import 'widgets/driver_trip_summary_sheet.dart';
 import 'widgets/driver_wallet_sheet.dart';
 import 'widgets/proof_of_delivery_dialog.dart';
 
@@ -23,9 +30,9 @@ import 'widgets/proof_of_delivery_dialog.dart';
 // Driver deliveries dashboard
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum _DeliveryFilter { active, completed, all }
+enum _DeliveryFilter { active, completed, failed, all }
 
-enum _DeliverySort { newest, nearest, highestValue }
+enum _DeliverySort { newest, nearest, highestValue, route }
 
 class DriverDeliveriesScreen extends ConsumerStatefulWidget {
   const DriverDeliveriesScreen({super.key});
@@ -42,15 +49,25 @@ class _DriverDeliveriesScreenState
   static const Color _heroMuted = Color(0xB8FBF8F0);
 
   final DriverTelemetryService _telemetry = DriverTelemetryService();
+  final TextEditingController _searchController = TextEditingController();
 
+  Timer? _clockTimer;
   bool _isMapView = false;
+  bool _cashOnly = false;
+  String _query = '';
   _DeliveryFilter _filter = _DeliveryFilter.active;
   _DeliverySort _sort = _DeliverySort.newest;
+  List<String> _routeOrder = const [];
 
   @override
   void initState() {
     super.initState();
     _telemetry.addListener(_onTelemetryUpdate);
+    _searchController.addListener(_onSearchChanged);
+    // Refresh shift/trip elapsed labels without rebuilding on every GPS tick.
+    _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAppUpdates();
     });
@@ -98,7 +115,8 @@ class _DriverDeliveriesScreenState
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
+            content: Text(
+                'أنت تستخدم أحدث إصدار متوفر (v${res.currentVersion} #${res.currentBuild})'),
             backgroundColor: const Color(0xFF1E3A2F),
           ),
         );
@@ -116,12 +134,22 @@ class _DriverDeliveriesScreenState
 
   @override
   void dispose() {
+    _clockTimer?.cancel();
+    _searchController
+      ..removeListener(_onSearchChanged)
+      ..dispose();
     _telemetry.removeListener(_onTelemetryUpdate);
     super.dispose();
   }
 
   void _onTelemetryUpdate() {
     if (mounted) setState(() {});
+  }
+
+  void _onSearchChanged() {
+    final query = _searchController.text.trim();
+    if (query == _query) return;
+    setState(() => _query = query);
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
@@ -150,6 +178,95 @@ class _DriverDeliveriesScreenState
       order: order,
       onDelivered: _refresh,
     );
+  }
+
+  Future<void> _startDelivery(OrderEntity order) async {
+    final user = ref.read(authStateProvider);
+    if (user == null) return;
+
+    try {
+      await ref.read(orderRepositoryProvider).updateOrderStatus(
+            orderId: order.id,
+            status: OrderStatus.outForDelivery,
+            notes: 'بدأ السائق التوصيل',
+          );
+
+      if (!_telemetry.state.isTripActive) {
+        await _telemetry.startTrip();
+      }
+      await _refresh();
+      if (!mounted) return;
+      _showSnack('تم بدء توصيل الطلب #${orderShortNumber(order)}.');
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack(
+        'تعذر بدء التوصيل. تحقق من الاتصال وحاول مجدداً.',
+        isError: true,
+      );
+      debugPrint('[Driver] start delivery error: $error');
+    }
+  }
+
+  Future<void> _reportDeliveryFailure(OrderEntity order) async {
+    final result = await DeliveryFailureDialog.show(context, order: order);
+    if (result == null || !mounted) return;
+
+    final user = ref.read(authStateProvider);
+    if (user == null) return;
+
+    final position = _telemetry.state.currentPosition;
+    try {
+      await ref.read(orderRepositoryProvider).reportDeliveryFailure(
+            driverId: user.id,
+            orderId: order.id,
+            reason: result.reason.code,
+            notes: result.notes,
+            deliveryLat: position?.latitude,
+            deliveryLng: position?.longitude,
+            clientId: const Uuid().v4(),
+          );
+      await _refresh();
+      if (!mounted) return;
+      _showSnack('تم تسجيل تعذر التسليم وإرساله لمراجعة المشرف.');
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack(
+        'تعذر تسجيل الحالة. تحقق من الاتصال وحاول مجدداً.',
+        isError: true,
+      );
+      debugPrint('[Driver] delivery failure error: $error');
+    }
+  }
+
+  Future<void> _viewDeliveryProof(OrderEntity order) {
+    return DeliveryProofViewerDialog.show(context, order: order);
+  }
+
+  Future<void> _openRoutePlanner(
+    List<OrderEntity> activeOrders,
+    Map<String, double> distances,
+  ) async {
+    if (activeOrders.isEmpty) {
+      _showSnack('لا توجد محطات نشطة لترتيبها.');
+      return;
+    }
+
+    final position = _telemetry.state.currentPosition;
+    final sequence = await DriverRouteSheet.show(
+      context,
+      orders: activeOrders,
+      initialOrderIds: activeOrders.map((order) => order.id).toList(),
+      distances: distances,
+      driverLat: position?.latitude,
+      driverLng: position?.longitude,
+    );
+
+    if (sequence == null || !mounted) return;
+    setState(() {
+      _routeOrder = sequence;
+      _sort = _DeliverySort.route;
+    });
+    _showSnack('تم اعتماد ترتيب المحطات لهذه الجولة.');
   }
 
   Future<void> _openWallet() async {
@@ -225,18 +342,89 @@ class _DriverDeliveriesScreenState
   }
 
   Future<void> _toggleTrip() async {
-    final wasActive = _telemetry.state.isTripActive;
-    if (wasActive) {
+    final state = _telemetry.state;
+    if (state.isTripActive) {
+      final startedAt = state.tripStartedAt;
+      final duration = startedAt == null
+          ? Duration.zero
+          : DateTime.now().difference(startedAt);
+      final distanceKm = state.tripDistanceMeters / 1000.0;
+      final orders = ref.read(driverOrdersProvider).valueOrNull ?? const [];
+
       await _telemetry.endTrip();
-    } else {
-      await _telemetry.startTrip();
+      if (!mounted) return;
+
+      final showCompleted = await DriverTripSummarySheet.show(
+        context,
+        tripDuration: duration,
+        distanceKm: distanceKm,
+        orders: orders,
+      );
+      if (showCompleted == true && mounted) {
+        setState(() => _filter = _DeliveryFilter.completed);
+      }
+      return;
     }
 
-    _showSnack(
-      wasActive
-          ? 'تم إنهاء الجولة وتسجيل نهاية التتبع.'
-          : 'بدأت الجولة! يتم الآن تسجيل مسار التوصيل.',
+    await _telemetry.startTrip();
+    if (!mounted) return;
+    _showSnack('بدأت الجولة! يتم الآن تسجيل مسار التوصيل تلقائياً.');
+  }
+
+  Future<void> _toggleShift() async {
+    final state = _telemetry.state;
+    if (!state.isClockedIn) {
+      await _telemetry.clockIn();
+      if (!mounted) return;
+      _showSnack('تم تسجيل بدء الوردية. جولة موفقة!');
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.logout_rounded),
+        title: const Text('إنهاء الوردية'),
+        content: Text(
+          state.isTripActive
+              ? 'هناك جولة نشطة. سيتم إنهاء الجولة ثم تسجيل خروجك من الوردية.'
+              : 'هل تريد تسجيل نهاية الوردية؟ يمكنك بدء وردية جديدة في أي وقت.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('إلغاء'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('إنهاء الوردية'),
+          ),
+        ],
+      ),
     );
+    if (confirmed != true || !mounted) return;
+
+    if (state.isTripActive) {
+      final startedAt = state.tripStartedAt;
+      final duration = startedAt == null
+          ? Duration.zero
+          : DateTime.now().difference(startedAt);
+      final distanceKm = state.tripDistanceMeters / 1000.0;
+      final orders = ref.read(driverOrdersProvider).valueOrNull ?? const [];
+      await _telemetry.endTrip();
+      if (mounted) {
+        await DriverTripSummarySheet.show(
+          context,
+          tripDuration: duration,
+          distanceKm: distanceKm,
+          orders: orders,
+        );
+      }
+    }
+
+    await _telemetry.clockOut();
+    if (!mounted) return;
+    _showSnack('تم تسجيل نهاية الوردية. شكراً لجهدك اليوم.');
   }
 
   Future<void> _toggleWakelock(bool enable) async {
@@ -355,8 +543,77 @@ class _DriverDeliveriesScreenState
           return b.createdAt.compareTo(a.createdAt);
         });
         break;
+      case _DeliverySort.route:
+        final rank = <String, int>{
+          for (var i = 0; i < _routeOrder.length; i++) _routeOrder[i]: i,
+        };
+        sorted.sort((a, b) {
+          final aRank = rank[a.id];
+          final bRank = rank[b.id];
+          if (aRank != null || bRank != null) {
+            return (aRank ?? 1 << 30).compareTo(bRank ?? 1 << 30);
+          }
+          return b.createdAt.compareTo(a.createdAt);
+        });
+        break;
     }
     return sorted;
+  }
+
+  bool _matchesSearch(OrderEntity order) {
+    if (_query.isEmpty) return true;
+    final query = _query.toLowerCase();
+    final haystack = <String?>[
+      order.customerName,
+      deliveryCustomerName(order),
+      order.customerPhone,
+      deliveryCustomerPhone(order),
+      deliveryAddressText(order),
+      order.notes,
+      order.deliveryNotes,
+      order.orderNumber?.toString(),
+      order.id,
+    ];
+    return haystack.any(
+      (value) => value != null && value.toLowerCase().contains(query),
+    );
+  }
+
+  List<OrderEntity> _visibleOrders(List<OrderEntity> orders) {
+    return orders
+        .where(_matchesSearch)
+        .where(
+          (order) => !_cashOnly || order.dueAmountCentimes > 0,
+        )
+        .toList(growable: false);
+  }
+
+  bool _isToday(DateTime? date) {
+    if (date == null) return false;
+    final now = DateTime.now();
+    return date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day;
+  }
+
+  String _formatElapsed(Duration duration) {
+    if (duration.inMinutes < 1) return 'الآن';
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    if (hours == 0) return '$minutes د';
+    return '$hours س $minutes د';
+  }
+
+  Duration _shiftElapsed(DriverTelemetryState state) {
+    final startedAt = state.shiftStartedAt;
+    if (startedAt == null) return Duration.zero;
+    return DateTime.now().difference(startedAt);
+  }
+
+  Duration _tripElapsed(DriverTelemetryState state) {
+    final startedAt = state.tripStartedAt;
+    if (startedAt == null) return Duration.zero;
+    return DateTime.now().difference(startedAt);
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
@@ -375,8 +632,7 @@ class _DriverDeliveriesScreenState
     final colors = context.appColors;
     final telemetryState = _telemetry.state;
     final knownOrders = ordersAsync.valueOrNull ?? const <OrderEntity>[];
-    final activeCount =
-        knownOrders.where((o) => isOrderActive(o.status)).length;
+    final activeCount = knownOrders.where(isDriverDeliveryActive).length;
     final balance = walletAsync.valueOrNull;
 
     return Scaffold(
@@ -405,11 +661,22 @@ class _DriverDeliveriesScreenState
                     telemetryState.currentPosition!.longitude,
                   )
                 : null;
+            final activeOrders =
+                orders.where(isDriverDeliveryActive).toList(growable: false);
+            final distances = _distancesFor(activeOrders);
+            final sortedActive = _sortOrders(activeOrders, distances);
 
             return DriverMapView(
               orders: orders,
               driverLocation: driverLatLng,
+              sequenceOrder:
+                  sortedActive.map((order) => order.id).toList(growable: false),
+              customSequence:
+                  _sort == _DeliverySort.route && _routeOrder.isNotEmpty,
               onOrdersUpdated: _refresh,
+              onStartDelivery: _startDelivery,
+              onReportFailure: _reportDeliveryFailure,
+              onViewProof: _viewDeliveryProof,
             );
           }
 
@@ -612,23 +879,52 @@ class _DriverDeliveriesScreenState
     final isDesktop = width >= 1180;
     final pagePadding = width >= 840 ? AppSpacing.xl : AppSpacing.lg;
 
-    final activeOrders =
-        orders.where((o) => isOrderActive(o.status)).toList(growable: false);
-    final completedOrders =
-        orders.where((o) => isOrderCompleted(o.status)).toList(growable: false);
-    final cancelledOrders = orders
-        .where(
-          (o) =>
-              o.status == OrderStatus.cancelled ||
-              o.status == OrderStatus.refused,
-        )
+    final allActiveOrders =
+        orders.where(isDriverDeliveryActive).toList(growable: false);
+    final allCompletedOrders = orders
+        .where((order) => isOrderCompleted(order.status))
         .toList(growable: false);
-    final distances = _distancesFor(orders);
-    final sortedActive = _sortOrders(activeOrders, distances);
-    final sortedCompleted = _sortOrders(completedOrders, distances);
-    final sortedCancelled = _sortOrders(cancelledOrders, distances);
+    final allFailedOrders =
+        orders.where(isDriverDeliveryFailed).toList(growable: false);
 
-    final collectTotal = activeOrders.fold<int>(
+    final distances = _distancesFor(orders);
+    final routeActive = _sortOrders(allActiveOrders, distances);
+    final routeStopNumbers = <String, int>{
+      for (var i = 0; i < routeActive.length; i++) routeActive[i].id: i + 1,
+    };
+
+    final visibleOrders = _visibleOrders(orders);
+    final activeOrders = _sortOrders(
+      visibleOrders.where(isDriverDeliveryActive).toList(growable: false),
+      distances,
+    );
+    final completedOrders = _sortOrders(
+      visibleOrders
+          .where((order) => isOrderCompleted(order.status))
+          .toList(growable: false),
+      distances,
+    );
+    final failedOrders = _sortOrders(
+      visibleOrders.where(isDriverDeliveryFailed).toList(growable: false),
+      distances,
+    );
+
+    final todayCompleted = allCompletedOrders.where((order) {
+      return _isToday(order.deliveredAt ?? order.settledAt) ||
+          (order.deliveredAt == null &&
+              order.settledAt == null &&
+              _isToday(order.createdAt));
+    }).toList(growable: false);
+    final todayCollected = todayCompleted.fold<int>(
+      0,
+      (sum, order) => sum + order.paidAmountCentimes,
+    );
+    final failedToday = allFailedOrders.where((order) {
+      return _isToday(order.deliveryAttemptedAt) ||
+          (order.deliveryAttemptedAt == null && _isToday(order.createdAt));
+    }).length;
+
+    final collectTotal = allActiveOrders.fold<int>(
       0,
       (sum, order) => sum + order.dueAmountCentimes,
     );
@@ -660,10 +956,21 @@ class _DriverDeliveriesScreenState
                         colors,
                         authUser: authUser,
                         telemetryState: telemetryState,
-                        activeOrders: activeOrders,
-                        completedOrders: completedOrders,
+                        activeOrders: routeActive,
+                        todayCompleted: todayCompleted.length,
+                        failedCount: allFailedOrders.length,
                         collectTotal: collectTotal,
                         walletAsync: walletAsync,
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      _buildShiftStrip(
+                        context,
+                        theme,
+                        colors,
+                        telemetryState: telemetryState,
+                        todayDelivered: todayCompleted.length,
+                        todayCollected: todayCollected,
+                        failedToday: failedToday,
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       if (isDesktop)
@@ -678,19 +985,27 @@ class _DriverDeliveriesScreenState
                                     context,
                                     theme,
                                     colors,
-                                    activeCount: activeOrders.length,
-                                    completedCount: completedOrders.length,
+                                    activeCount: allActiveOrders.length,
+                                    completedCount: allCompletedOrders.length,
+                                    failedCount: allFailedOrders.length,
                                     totalCount: orders.length,
+                                    onOpenRoute: routeActive.isEmpty
+                                        ? null
+                                        : () => _openRoutePlanner(
+                                              routeActive,
+                                              distances,
+                                            ),
                                   ),
                                   const SizedBox(height: AppSpacing.md),
                                   _buildOrdersArea(
                                     context,
                                     theme,
                                     colors,
-                                    activeOrders: sortedActive,
-                                    completedOrders: sortedCompleted,
-                                    cancelledOrders: sortedCancelled,
+                                    activeOrders: activeOrders,
+                                    completedOrders: completedOrders,
+                                    failedOrders: failedOrders,
                                     distances: distances,
+                                    stopNumbers: routeStopNumbers,
                                   ),
                                 ],
                               ),
@@ -702,11 +1017,20 @@ class _DriverDeliveriesScreenState
                                 context,
                                 theme,
                                 colors,
-                                activeOrders: sortedActive,
+                                activeOrders: routeActive,
                                 distances: distances,
                                 collectTotal: collectTotal,
                                 walletAsync: walletAsync,
                                 telemetryState: telemetryState,
+                                todayDelivered: todayCompleted.length,
+                                todayCollected: todayCollected,
+                                failedToday: failedToday,
+                                onEditRoute: routeActive.isEmpty
+                                    ? null
+                                    : () => _openRoutePlanner(
+                                          routeActive,
+                                          distances,
+                                        ),
                               ),
                             ),
                           ],
@@ -716,19 +1040,27 @@ class _DriverDeliveriesScreenState
                           context,
                           theme,
                           colors,
-                          activeCount: activeOrders.length,
-                          completedCount: completedOrders.length,
+                          activeCount: allActiveOrders.length,
+                          completedCount: allCompletedOrders.length,
+                          failedCount: allFailedOrders.length,
                           totalCount: orders.length,
+                          onOpenRoute: routeActive.isEmpty
+                              ? null
+                              : () => _openRoutePlanner(
+                                    routeActive,
+                                    distances,
+                                  ),
                         ),
                         const SizedBox(height: AppSpacing.md),
                         _buildOrdersArea(
                           context,
                           theme,
                           colors,
-                          activeOrders: sortedActive,
-                          completedOrders: sortedCompleted,
-                          cancelledOrders: sortedCancelled,
+                          activeOrders: activeOrders,
+                          completedOrders: completedOrders,
+                          failedOrders: failedOrders,
                           distances: distances,
+                          stopNumbers: routeStopNumbers,
                         ),
                       ],
                     ],
@@ -751,7 +1083,8 @@ class _DriverDeliveriesScreenState
     required UserEntity? authUser,
     required DriverTelemetryState telemetryState,
     required List<OrderEntity> activeOrders,
-    required List<OrderEntity> completedOrders,
+    required int todayCompleted,
+    required int failedCount,
     required int collectTotal,
     required AsyncValue<int> walletAsync,
   }) {
@@ -826,6 +1159,15 @@ class _DriverDeliveriesScreenState
                   : const Color(0xFFFBBF24),
             ),
             _TelemetryChip(
+              icon: Icons.badge_outlined,
+              label: telemetryState.isClockedIn
+                  ? 'وردية ${_formatElapsed(_shiftElapsed(telemetryState))}'
+                  : 'وردية غير مفعلة',
+              color: telemetryState.isClockedIn
+                  ? const Color(0xFF6EE7B7)
+                  : _heroMuted,
+            ),
+            _TelemetryChip(
               icon: _batteryIcon(telemetryState),
               label: '${telemetryState.batteryLevel}%',
               color: telemetryState.isLowBattery
@@ -862,6 +1204,27 @@ class _DriverDeliveriesScreenState
           runSpacing: AppSpacing.sm,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor:
+                    telemetryState.isClockedIn ? _heroCream : _heroGold,
+                side: BorderSide(
+                  color: (telemetryState.isClockedIn ? _heroCream : _heroGold)
+                      .withValues(alpha: 0.45),
+                ),
+                minimumSize: const Size(0, 44),
+              ),
+              onPressed: _toggleShift,
+              icon: Icon(
+                telemetryState.isClockedIn
+                    ? Icons.badge_outlined
+                    : Icons.login_rounded,
+                size: 18,
+              ),
+              label: Text(
+                telemetryState.isClockedIn ? 'إنهاء الوردية' : 'بدء الوردية',
+              ),
+            ),
             if (telemetryState.isTripActive)
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
@@ -1037,7 +1400,8 @@ class _DriverDeliveriesScreenState
                         context,
                         theme,
                         activeOrders: activeOrders,
-                        completedOrders: completedOrders,
+                        todayCompleted: todayCompleted,
+                        failedCount: failedCount,
                         collectTotal: collectTotal,
                       ),
                     ),
@@ -1055,13 +1419,14 @@ class _DriverDeliveriesScreenState
     BuildContext context,
     ThemeData theme, {
     required List<OrderEntity> activeOrders,
-    required List<OrderEntity> completedOrders,
+    required int todayCompleted,
+    required int failedCount,
     required int collectTotal,
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
         const gap = AppSpacing.sm;
-        final columns = constraints.maxWidth < 380 ? 2 : 3;
+        final columns = constraints.maxWidth < 520 ? 2 : 4;
         final itemWidth =
             (constraints.maxWidth - gap * (columns - 1)) / columns;
 
@@ -1083,9 +1448,20 @@ class _DriverDeliveriesScreenState
               width: itemWidth,
               child: _HeroMetric(
                 icon: Icons.task_alt_rounded,
-                value: '${completedOrders.length}',
-                label: 'مكتملة',
+                value: '$todayCompleted',
+                label: 'مكتملة اليوم',
                 valueColor: const Color(0xFF6EE7B7),
+                theme: theme,
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: _HeroMetric(
+                icon: Icons.assignment_return_outlined,
+                value: '$failedCount',
+                label: 'مرتجعة / مراجعة',
+                valueColor:
+                    failedCount > 0 ? const Color(0xFFF87171) : _heroMuted,
                 theme: theme,
               ),
             ),
@@ -1110,6 +1486,190 @@ class _DriverDeliveriesScreenState
     );
   }
 
+  // ── Shift strip ────────────────────────────────────────────────────────────
+
+  Widget _buildShiftStrip(
+    BuildContext context,
+    ThemeData theme,
+    AppColors colors, {
+    required DriverTelemetryState telemetryState,
+    required int todayDelivered,
+    required int todayCollected,
+    required int failedToday,
+  }) {
+    final shiftElapsed = _shiftElapsed(telemetryState);
+    final tripElapsed = _tripElapsed(telemetryState);
+    final distanceKm = telemetryState.tripDistanceMeters / 1000.0;
+
+    return Container(
+      padding: const EdgeInsetsDirectional.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.7),
+        borderRadius: AppRadius.xlAll,
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsetsDirectional.all(7),
+                decoration: BoxDecoration(
+                  color: colors.goldMuted,
+                  borderRadius: AppRadius.smAll,
+                  border: Border.all(color: colors.goldBorder),
+                ),
+                child: Icon(
+                  Icons.dashboard_customize_outlined,
+                  size: 16,
+                  color: colors.gold,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'لوحة الوردية',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsetsDirectional.symmetric(
+                  horizontal: AppSpacing.sm,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: telemetryState.isClockedIn
+                      ? colors.success.withValues(alpha: 0.10)
+                      : theme.colorScheme.surfaceContainerHigh,
+                  borderRadius: AppRadius.pillAll,
+                  border: Border.all(
+                    color: telemetryState.isClockedIn
+                        ? colors.success.withValues(alpha: 0.26)
+                        : theme.colorScheme.outlineVariant,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      telemetryState.isClockedIn
+                          ? Icons.check_circle_rounded
+                          : Icons.pause_circle_outline_rounded,
+                      size: 13,
+                      color: telemetryState.isClockedIn
+                          ? colors.success
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      telemetryState.isClockedIn
+                          ? 'وردية نشطة'
+                          : 'خارج الوردية',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: telemetryState.isClockedIn
+                            ? colors.success
+                            : theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (failedToday > 0) ...[
+                const SizedBox(width: AppSpacing.xs),
+                Container(
+                  padding: const EdgeInsetsDirectional.symmetric(
+                    horizontal: AppSpacing.sm,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.cancelled.withValues(alpha: 0.10),
+                    borderRadius: AppRadius.pillAll,
+                    border: Border.all(
+                      color: colors.cancelled.withValues(alpha: 0.24),
+                    ),
+                  ),
+                  child: Text(
+                    '$failedToday مرتجعة',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colors.cancelled,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const gap = AppSpacing.sm;
+              final columns = constraints.maxWidth < 620 ? 2 : 4;
+              final width =
+                  (constraints.maxWidth - gap * (columns - 1)) / columns;
+              return Wrap(
+                spacing: gap,
+                runSpacing: gap,
+                children: [
+                  SizedBox(
+                    width: width,
+                    child: _ShiftStat(
+                      icon: Icons.schedule_rounded,
+                      label: 'مدة الوردية',
+                      value: telemetryState.isClockedIn
+                          ? _formatElapsed(shiftElapsed)
+                          : '—',
+                      color: colors.gold,
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: _ShiftStat(
+                      icon: Icons.route_rounded,
+                      label: 'الجولة الحالية',
+                      value: telemetryState.isTripActive
+                          ? '${_formatElapsed(tripElapsed)} • ${distanceKm.toStringAsFixed(distanceKm >= 10 ? 0 : 1)} كم'
+                          : 'غير نشطة',
+                      color: telemetryState.isTripActive
+                          ? colors.success
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: _ShiftStat(
+                      icon: Icons.task_alt_rounded,
+                      label: 'تم التسليم اليوم',
+                      value: '$todayDelivered',
+                      color: colors.success,
+                    ),
+                  ),
+                  SizedBox(
+                    width: width,
+                    child: _ShiftStat(
+                      icon: Icons.payments_outlined,
+                      label: 'تحصيل اليوم',
+                      value: DzdFormatter.formatCentimes(
+                        todayCollected,
+                        showDecimals: false,
+                      ),
+                      color: colors.gold,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Toolbar / filters ──────────────────────────────────────────────────────
 
   Widget _buildToolbar(
@@ -1118,79 +1678,178 @@ class _DriverDeliveriesScreenState
     AppColors colors, {
     required int activeCount,
     required int completedCount,
+    required int failedCount,
     required int totalCount,
+    required VoidCallback? onOpenRoute,
   }) {
-    return Row(
+    final searchField = TextField(
+      controller: _searchController,
+      textInputAction: TextInputAction.search,
+      style: theme.textTheme.bodySmall,
+      decoration: InputDecoration(
+        hintText: 'ابحث بالزبون أو رقم الطلب أو العنوان',
+        hintStyle: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        prefixIcon: Icon(
+          Icons.search_rounded,
+          size: 19,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        suffixIcon: _query.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'مسح البحث',
+                onPressed: _searchController.clear,
+                icon: const Icon(Icons.close_rounded, size: 18),
+              ),
+        isDense: true,
+        filled: true,
+        fillColor: theme.colorScheme.surfaceContainerLow,
+        contentPadding: const EdgeInsetsDirectional.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: 11,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: AppRadius.mdAll,
+          borderSide: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: AppRadius.mdAll,
+          borderSide: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: AppRadius.mdAll,
+          borderSide: BorderSide(color: colors.gold, width: 1.3),
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _FilterPill(
-                  label: 'نشطة',
-                  count: activeCount,
-                  icon: Icons.local_shipping_outlined,
-                  selected: _filter == _DeliveryFilter.active,
-                  onTap: () => setState(() => _filter = _DeliveryFilter.active),
+        Row(
+          children: [
+            Expanded(child: searchField),
+            const SizedBox(width: AppSpacing.sm),
+            Badge(
+              isLabelVisible: activeCount > 0,
+              label: Text('$activeCount'),
+              backgroundColor: colors.gold,
+              textColor: const Color(0xFF1A1400),
+              child: _ToolbarButton(
+                icon: Icons.alt_route_rounded,
+                tooltip: 'ترتيب محطات الجولة',
+                colors: colors,
+                theme: theme,
+                onPressed: onOpenRoute,
+                active: _sort == _DeliverySort.route,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            PopupMenuButton<_DeliverySort>(
+              tooltip: 'ترتيب المهام',
+              initialValue: _sort,
+              onSelected: (value) => setState(() => _sort = value),
+              itemBuilder: (context) => [
+                _sortMenuItem(
+                  value: _DeliverySort.newest,
+                  icon: Icons.schedule_rounded,
+                  label: 'الأحدث أولاً',
+                  selected: _sort == _DeliverySort.newest,
                 ),
-                const SizedBox(width: AppSpacing.sm),
-                _FilterPill(
-                  label: 'مكتملة',
-                  count: completedCount,
-                  icon: Icons.task_alt_rounded,
-                  selected: _filter == _DeliveryFilter.completed,
-                  onTap: () =>
-                      setState(() => _filter = _DeliveryFilter.completed),
+                _sortMenuItem(
+                  value: _DeliverySort.nearest,
+                  icon: Icons.near_me_rounded,
+                  label: 'الأقرب إليّ',
+                  selected: _sort == _DeliverySort.nearest,
                 ),
-                const SizedBox(width: AppSpacing.sm),
-                _FilterPill(
-                  label: 'الكل',
-                  count: totalCount,
-                  icon: Icons.all_inbox_outlined,
-                  selected: _filter == _DeliveryFilter.all,
-                  onTap: () => setState(() => _filter = _DeliveryFilter.all),
+                _sortMenuItem(
+                  value: _DeliverySort.highestValue,
+                  icon: Icons.trending_up_rounded,
+                  label: 'الأعلى قيمة',
+                  selected: _sort == _DeliverySort.highestValue,
+                ),
+                _sortMenuItem(
+                  value: _DeliverySort.route,
+                  icon: Icons.route_rounded,
+                  label: 'ترتيب المسار المخصص',
+                  selected: _sort == _DeliverySort.route,
                 ),
               ],
+              child: _ToolbarButton(
+                icon: Icons.swap_vert_rounded,
+                tooltip: 'ترتيب المهام',
+                colors: colors,
+                theme: theme,
+                active: _sort != _DeliverySort.newest,
+              ),
             ),
-          ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        PopupMenuButton<_DeliverySort>(
-          tooltip: 'ترتيب المهام',
-          initialValue: _sort,
-          onSelected: (value) => setState(() => _sort = value),
-          itemBuilder: (context) => [
-            _sortMenuItem(
-              value: _DeliverySort.newest,
-              icon: Icons.schedule_rounded,
-              label: 'الأحدث أولاً',
-              selected: _sort == _DeliverySort.newest,
-            ),
-            _sortMenuItem(
-              value: _DeliverySort.nearest,
-              icon: Icons.near_me_rounded,
-              label: 'الأقرب إليّ',
-              selected: _sort == _DeliverySort.nearest,
-            ),
-            _sortMenuItem(
-              value: _DeliverySort.highestValue,
-              icon: Icons.trending_up_rounded,
-              label: 'الأعلى قيمة',
-              selected: _sort == _DeliverySort.highestValue,
+            const SizedBox(width: AppSpacing.xs),
+            _ViewToggle(
+              isMapView: _isMapView,
+              onChanged: (isMap) => setState(() => _isMapView = isMap),
             ),
           ],
-          child: _ToolbarButton(
-            icon: Icons.swap_vert_rounded,
-            tooltip: 'ترتيب المهام',
-            colors: colors,
-            theme: theme,
-          ),
         ),
-        const SizedBox(width: AppSpacing.xs),
-        _ViewToggle(
-          isMapView: _isMapView,
-          onChanged: (isMap) => setState(() => _isMapView = isMap),
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _FilterPill(
+                      label: 'نشطة',
+                      count: activeCount,
+                      icon: Icons.local_shipping_outlined,
+                      selected: _filter == _DeliveryFilter.active,
+                      onTap: () =>
+                          setState(() => _filter = _DeliveryFilter.active),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    _FilterPill(
+                      label: 'مكتملة',
+                      count: completedCount,
+                      icon: Icons.task_alt_rounded,
+                      selected: _filter == _DeliveryFilter.completed,
+                      onTap: () => setState(
+                        () => _filter = _DeliveryFilter.completed,
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    _FilterPill(
+                      label: 'مرتجعة',
+                      count: failedCount,
+                      icon: Icons.assignment_return_outlined,
+                      selected: _filter == _DeliveryFilter.failed,
+                      onTap: () =>
+                          setState(() => _filter = _DeliveryFilter.failed),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    _FilterPill(
+                      label: 'الكل',
+                      count: totalCount,
+                      icon: Icons.all_inbox_outlined,
+                      selected: _filter == _DeliveryFilter.all,
+                      onTap: () =>
+                          setState(() => _filter = _DeliveryFilter.all),
+                    ),
+                    const SizedBox(width: AppSpacing.sm),
+                    _FilterPill(
+                      label: 'تحصيل نقدي',
+                      count: 0,
+                      showCount: false,
+                      icon: Icons.payments_outlined,
+                      selected: _cashOnly,
+                      onTap: () => setState(() => _cashOnly = !_cashOnly),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -1231,15 +1890,16 @@ class _DriverDeliveriesScreenState
     AppColors colors, {
     required List<OrderEntity> activeOrders,
     required List<OrderEntity> completedOrders,
-    required List<OrderEntity> cancelledOrders,
+    required List<OrderEntity> failedOrders,
     required Map<String, double> distances,
+    required Map<String, int> stopNumbers,
   }) {
-    final showActive = _filter != _DeliveryFilter.completed;
-    final showCompleted = _filter != _DeliveryFilter.active;
-    final showCancelled = _filter == _DeliveryFilter.all;
-    final stopNumbers = <String, int>{
-      for (var i = 0; i < activeOrders.length; i++) activeOrders[i].id: i + 1,
-    };
+    final showActive =
+        _filter == _DeliveryFilter.active || _filter == _DeliveryFilter.all;
+    final showCompleted =
+        _filter == _DeliveryFilter.completed || _filter == _DeliveryFilter.all;
+    final showFailed =
+        _filter == _DeliveryFilter.failed || _filter == _DeliveryFilter.all;
 
     final sections = <Widget>[
       if (showActive && activeOrders.isNotEmpty)
@@ -1266,14 +1926,14 @@ class _DriverDeliveriesScreenState
           stopNumbers: const {},
           completed: true,
         ),
-      if (showCancelled && cancelledOrders.isNotEmpty)
+      if (showFailed && failedOrders.isNotEmpty)
         _buildOrderSection(
           context,
           theme,
           colors,
-          title: 'ملغاة أو مرفوضة',
-          icon: Icons.block_outlined,
-          orders: cancelledOrders,
+          title: 'مرتجعة / تحتاج مراجعة',
+          icon: Icons.assignment_return_outlined,
+          orders: failedOrders,
           distances: distances,
           stopNumbers: const {},
           completed: true,
@@ -1282,6 +1942,9 @@ class _DriverDeliveriesScreenState
     ];
 
     if (sections.isEmpty) {
+      if (_query.isNotEmpty || _cashOnly) {
+        return _buildSearchEmptyState(context, theme, colors);
+      }
       return _buildEmptyState(
         context,
         theme,
@@ -1299,6 +1962,66 @@ class _DriverDeliveriesScreenState
           sections[i],
         ],
       ],
+    );
+  }
+
+  Widget _buildSearchEmptyState(
+    BuildContext context,
+    ThemeData theme,
+    AppColors colors,
+  ) {
+    final hasFilters = _query.isNotEmpty || _cashOnly;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsetsDirectional.all(AppSpacing.xxl),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        borderRadius: AppRadius.xlAll,
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.75),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.search_off_rounded,
+            size: 42,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'لا توجد نتائج مطابقة',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            _query.isNotEmpty
+                ? 'جرّب كلمة بحث أخرى أو أزل فلتر التحصيل النقدي.'
+                : 'لا توجد مهام مطابقة لفلتر التحصيل النقدي.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (hasFilters) ...[
+            const SizedBox(height: AppSpacing.md),
+            OutlinedButton.icon(
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _query = '';
+                  _cashOnly = false;
+                });
+              },
+              icon: const Icon(Icons.filter_alt_off_rounded, size: 17),
+              label: const Text('مسح البحث والفلاتر'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1351,6 +2074,16 @@ class _DriverDeliveriesScreenState
                       onCall: deliveryCustomerPhone(order) != null
                           ? () => _callCustomer(order)
                           : null,
+                      onStartDelivery: !completed &&
+                              order.status != OrderStatus.outForDelivery
+                          ? () => _startDelivery(order)
+                          : null,
+                      onReportFailure: !completed
+                          ? () => _reportDeliveryFailure(order)
+                          : null,
+                      onViewProof: order.hasDeliveryProof
+                          ? () => _viewDeliveryProof(order)
+                          : null,
                       onDeliver: completed
                           ? null
                           : () => _openProofOfDeliveryDialog(order),
@@ -1372,12 +2105,17 @@ class _DriverDeliveriesScreenState
     required List<OrderEntity> completedOrders,
   }) {
     final bool completedView = _filter == _DeliveryFilter.completed;
-    final bool hasOther =
-        completedView ? activeOrders.isNotEmpty : completedOrders.isNotEmpty;
+    final bool failedView = _filter == _DeliveryFilter.failed;
+    final bool hasOther = failedView
+        ? activeOrders.isNotEmpty || completedOrders.isNotEmpty
+        : completedView
+            ? activeOrders.isNotEmpty
+            : completedOrders.isNotEmpty;
 
     final String title = switch (_filter) {
       _DeliveryFilter.active => 'لا توجد مهام نشطة حالياً',
       _DeliveryFilter.completed => 'لا توجد مهام مكتملة بعد',
+      _DeliveryFilter.failed => 'لا توجد مهام مرتجعة',
       _DeliveryFilter.all => 'لا توجد طلبات توصيل',
     };
 
@@ -1386,12 +2124,16 @@ class _DriverDeliveriesScreenState
         'تم إنجاز كل المهام الموكلة إليك. سيظهر هنا أي طلب جديد فور تعيينه.',
       _DeliveryFilter.completed =>
         'ستظهر هنا الطلبات التي سلّمتها، مع مبالغ التحصيل وحالة التسوية.',
+      _DeliveryFilter.failed =>
+        'تظهر هنا الطلبات الملغاة أو التي تعذر تسليمها وبانتظار مراجعة المشرف.',
       _DeliveryFilter.all =>
         'ستظهر الطلبات الجديدة هنا بمجرد تعيينها لك من طرف المشرف أو الصندوق.',
     };
 
     final String? actionLabel = hasOther
-        ? (completedView ? 'عرض المهام النشطة' : 'عرض المهام المكتملة')
+        ? (completedView || failedView
+            ? 'عرض المهام النشطة'
+            : 'عرض المهام المكتملة')
         : null;
 
     return Container(
@@ -1411,19 +2153,24 @@ class _DriverDeliveriesScreenState
             width: 76,
             height: 76,
             decoration: BoxDecoration(
-              color: colors.goldMuted,
+              color: failedView
+                  ? colors.cancelled.withValues(alpha: 0.08)
+                  : colors.goldMuted,
               shape: BoxShape.circle,
               border: Border.all(
-                color: colors.gold.withValues(alpha: 0.28),
+                color: (failedView ? colors.cancelled : colors.gold)
+                    .withValues(alpha: 0.28),
                 width: 1.5,
               ),
             ),
             child: Icon(
-              completedView
-                  ? Icons.task_alt_rounded
-                  : Icons.local_shipping_outlined,
+              failedView
+                  ? Icons.assignment_return_outlined
+                  : completedView
+                      ? Icons.task_alt_rounded
+                      : Icons.local_shipping_outlined,
               size: 34,
-              color: colors.gold,
+              color: failedView ? colors.cancelled : colors.gold,
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -1451,13 +2198,13 @@ class _DriverDeliveriesScreenState
             OutlinedButton.icon(
               onPressed: () {
                 setState(() {
-                  _filter = completedView
+                  _filter = completedView || failedView
                       ? _DeliveryFilter.active
                       : _DeliveryFilter.completed;
                 });
               },
               icon: Icon(
-                completedView
+                completedView || failedView
                     ? Icons.local_shipping_outlined
                     : Icons.task_alt_rounded,
                 size: 17,
@@ -1481,6 +2228,10 @@ class _DriverDeliveriesScreenState
     required int collectTotal,
     required AsyncValue<int> walletAsync,
     required DriverTelemetryState telemetryState,
+    required int todayDelivered,
+    required int todayCollected,
+    required int failedToday,
+    required VoidCallback? onEditRoute,
   }) {
     final nextOrder = activeOrders.isEmpty ? null : activeOrders.first;
 
@@ -1579,8 +2330,57 @@ class _DriverDeliveriesScreenState
                         ),
                       ],
                     ),
+                    if (activeOrders.length > 1 && onEditRoute != null) ...[
+                      const SizedBox(height: AppSpacing.sm),
+                      TextButton.icon(
+                        onPressed: onEditRoute,
+                        icon: const Icon(Icons.alt_route_rounded, size: 16),
+                        label: const Text('تعديل ترتيب المحطات'),
+                      ),
+                    ],
                   ],
                 ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        _PanelCard(
+          title: 'أداء الوردية',
+          icon: Icons.insights_rounded,
+          child: Column(
+            children: [
+              _SideMetricRow(
+                label: 'تم التسليم اليوم',
+                value: '$todayDelivered طلب',
+                color: colors.success,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _SideMetricRow(
+                label: 'تحصيل اليوم',
+                value: DzdFormatter.formatCentimes(
+                  todayCollected,
+                  showDecimals: false,
+                ),
+                color: colors.gold,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _SideMetricRow(
+                label: 'مرتجعة / مراجعة',
+                value: '$failedToday',
+                color: failedToday > 0
+                    ? colors.cancelled
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _SideMetricRow(
+                label: 'مدة الوردية',
+                value: telemetryState.isClockedIn
+                    ? _formatElapsed(_shiftElapsed(telemetryState))
+                    : 'غير نشطة',
+                color: telemetryState.isClockedIn
+                    ? colors.success
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: AppSpacing.md),
         _PanelCard(
@@ -1772,6 +2572,76 @@ class _TelemetryChip extends StatelessWidget {
   }
 }
 
+class _ShiftStat extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  const _ShiftStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsetsDirectional.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest.withValues(alpha: 0.7),
+        borderRadius: AppRadius.mdAll,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.10),
+              borderRadius: AppRadius.smAll,
+            ),
+            child: Icon(icon, size: 14, color: color),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    fontSize: 10,
+                  ),
+                ),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HeroMetric extends StatelessWidget {
   final IconData icon;
   final String value;
@@ -1830,6 +2700,7 @@ class _FilterPill extends StatelessWidget {
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
+  final bool showCount;
 
   const _FilterPill({
     required this.label,
@@ -1837,6 +2708,7 @@ class _FilterPill extends StatelessWidget {
     required this.icon,
     required this.selected,
     required this.onTap,
+    this.showCount = true,
   });
 
   @override
@@ -1888,26 +2760,27 @@ class _FilterPill extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 5),
-              Container(
-                padding: const EdgeInsetsDirectional.symmetric(
-                  horizontal: 5,
-                  vertical: 1,
-                ),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? const Color(0xFF1A1400).withValues(alpha: 0.14)
-                      : colors.goldMuted,
-                  borderRadius: AppRadius.pillAll,
-                ),
-                child: Text(
-                  '$count',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: selected ? const Color(0xFF1A1400) : colors.gold,
+              if (showCount)
+                Container(
+                  padding: const EdgeInsetsDirectional.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? const Color(0xFF1A1400).withValues(alpha: 0.14)
+                        : colors.goldMuted,
+                    borderRadius: AppRadius.pillAll,
+                  ),
+                  child: Text(
+                    '$count',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: selected ? const Color(0xFF1A1400) : colors.gold,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -1921,28 +2794,51 @@ class _ToolbarButton extends StatelessWidget {
   final String tooltip;
   final AppColors colors;
   final ThemeData theme;
+  final VoidCallback? onPressed;
+  final bool active;
 
   const _ToolbarButton({
     required this.icon,
     required this.tooltip,
     required this.colors,
     required this.theme,
+    this.onPressed,
+    this.active = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final content = Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color:
+            active ? colors.goldMuted : theme.colorScheme.surfaceContainerLow,
+        borderRadius: AppRadius.mdAll,
+        border: Border.all(
+          color: active ? colors.goldBorder : theme.colorScheme.outlineVariant,
+        ),
+      ),
+      child: Icon(
+        icon,
+        size: 19,
+        color: active ? colors.gold : theme.colorScheme.onSurfaceVariant,
+      ),
+    );
+
     return Tooltip(
       message: tooltip,
-      child: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerLow,
-          borderRadius: AppRadius.mdAll,
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-        ),
-        child: Icon(icon, size: 19, color: theme.colorScheme.onSurfaceVariant),
-      ),
+      child: onPressed == null
+          ? Opacity(opacity: 0.45, child: content)
+          : Material(
+              color: Colors.transparent,
+              borderRadius: AppRadius.mdAll,
+              child: InkWell(
+                onTap: onPressed,
+                borderRadius: AppRadius.mdAll,
+                child: content,
+              ),
+            ),
     );
   }
 }

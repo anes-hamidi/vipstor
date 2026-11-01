@@ -18,6 +18,9 @@ class DeliveryOrderCard extends StatefulWidget {
   final VoidCallback? onNavigate;
   final VoidCallback? onCall;
   final VoidCallback? onDeliver;
+  final VoidCallback? onStartDelivery;
+  final VoidCallback? onReportFailure;
+  final VoidCallback? onViewProof;
   final bool embedded;
   final bool highlighted;
 
@@ -29,6 +32,9 @@ class DeliveryOrderCard extends StatefulWidget {
     this.onNavigate,
     this.onCall,
     this.onDeliver,
+    this.onStartDelivery,
+    this.onReportFailure,
+    this.onViewProof,
     this.embedded = false,
     this.highlighted = false,
   });
@@ -45,8 +51,9 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
     final theme = Theme.of(context);
     final colors = context.appColors;
     final order = widget.order;
-    final isActive = isOrderActive(order.status);
+    final isActive = isDriverDeliveryActive(order);
     final isCompleted = isOrderCompleted(order.status);
+    final isFailure = isDeliveryFailure(order);
     final customer = deliveryCustomerName(order);
     final phone = deliveryCustomerPhone(order);
     final address = deliveryAddressText(order);
@@ -59,7 +66,14 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildHeader(context, theme, colors, isActive, isCompleted),
+          _buildHeader(
+            context,
+            theme,
+            colors,
+            isActive,
+            isCompleted,
+            isFailure,
+          ),
           const SizedBox(height: AppSpacing.md),
           _buildCustomerRow(context, theme, colors, customer, phone),
           if (address != null) ...[
@@ -70,8 +84,12 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
             const SizedBox(height: AppSpacing.sm),
             _buildNote(context, theme, colors, note),
           ],
+          if (isFailure) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _buildFailureBanner(context, theme, colors),
+          ],
           const SizedBox(height: AppSpacing.md),
-          _buildMetaChips(context, theme, colors, isActive),
+          _buildMetaChips(context, theme, colors, isActive, isCompleted),
           const SizedBox(height: AppSpacing.md),
           _buildAmountPanel(context, theme, colors, isActive, isCompleted),
           const SizedBox(height: AppSpacing.sm),
@@ -83,7 +101,15 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
               vertical: AppSpacing.sm,
             ),
           ),
-          _buildActions(context, theme, colors, isActive, isCompleted, phone),
+          _buildActions(
+            context,
+            theme,
+            colors,
+            isActive,
+            isCompleted,
+            isFailure,
+            phone,
+          ),
         ],
       ),
     );
@@ -106,8 +132,13 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
     AppColors colors,
     bool isActive,
     bool isCompleted,
+    bool isFailure,
   ) {
     final order = widget.order;
+    final statusLabel = isFailure ? 'تعذر التسليم' : _statusLabel(order.status);
+    final badgeType =
+        isFailure ? StatusBadgeType.cancelled : _badgeType(order.status);
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -143,8 +174,8 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
         ),
         const SizedBox(width: AppSpacing.xs),
         StatusBadge(
-          type: _badgeType(order.status),
-          customLabel: _statusLabel(order.status),
+          type: badgeType,
+          customLabel: statusLabel,
           compact: true,
         ),
       ],
@@ -322,11 +353,54 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
     );
   }
 
+  Widget _buildFailureBanner(
+    BuildContext context,
+    ThemeData theme,
+    AppColors colors,
+  ) {
+    final reason = deliveryFailureReasonLabel(widget.order);
+    return Container(
+      padding: const EdgeInsetsDirectional.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: colors.cancelled.withValues(alpha: 0.08),
+        borderRadius: AppRadius.mdAll,
+        border: Border.all(color: colors.cancelled.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.assignment_return_outlined,
+            size: 16,
+            color: colors.cancelled,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              reason == null
+                  ? 'سُجل تعذر التسليم وأُرسل الطلب لمراجعة المشرف.'
+                  : 'تعذر التسليم: $reason — الطلب بانتظار مراجعة المشرف.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colors.cancelled,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMetaChips(
     BuildContext context,
     ThemeData theme,
     AppColors colors,
     bool isActive,
+    bool isCompleted,
   ) {
     final order = widget.order;
     final due = order.dueAmountCentimes;
@@ -355,6 +429,24 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
           _MetaChip(
             icon: Icons.verified_outlined,
             label: 'تمت التسوية',
+            color: colors.success,
+          ),
+        if (isCompleted && order.signatureBase64 != null)
+          _MetaChip(
+            icon: Icons.draw_outlined,
+            label: 'توقيع المستلم',
+            color: colors.success,
+          ),
+        if (isCompleted && order.photoBase64 != null)
+          _MetaChip(
+            icon: Icons.photo_camera_outlined,
+            label: 'صورة التسليم',
+            color: colors.success,
+          ),
+        if (isCompleted && order.deliveryLat != null)
+          _MetaChip(
+            icon: Icons.gps_fixed_rounded,
+            label: 'موقع موثق',
             color: colors.success,
           ),
       ],
@@ -584,43 +676,70 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
     AppColors colors,
     bool isActive,
     bool isCompleted,
+    bool isFailure,
     String? phone,
   ) {
     if (!isActive) {
-      return Row(
+      final hasProof = isCompleted && widget.order.hasDeliveryProof;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(
-            isCompleted ? Icons.task_alt_rounded : Icons.block_rounded,
-            size: 16,
-            color: isCompleted ? colors.success : colors.cancelled,
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-            child: Text(
-              isCompleted
-                  ? 'تم إنجاز هذه المهمة بنجاح'
-                  : 'هذه المهمة لم تعد نشطة',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: isCompleted
-                    ? colors.success
-                    : theme.colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w600,
+          Row(
+            children: [
+              Icon(
+                isFailure
+                    ? Icons.assignment_return_outlined
+                    : isCompleted
+                        ? Icons.task_alt_rounded
+                        : Icons.block_rounded,
+                size: 16,
+                color: isFailure
+                    ? colors.cancelled
+                    : isCompleted
+                        ? colors.success
+                        : theme.colorScheme.onSurfaceVariant,
               ),
-            ),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Text(
+                  isFailure
+                      ? 'تم تسجيل تعذر التسليم — بانتظار المشرف'
+                      : isCompleted
+                          ? 'تم إنجاز هذه المهمة بنجاح'
+                          : 'هذه المهمة لم تعد نشطة',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: isFailure
+                        ? colors.cancelled
+                        : isCompleted
+                            ? colors.success
+                            : theme.colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (hasProof && widget.onViewProof != null)
+                TextButton.icon(
+                  onPressed: widget.onViewProof,
+                  icon: const Icon(Icons.verified_user_outlined, size: 16),
+                  label: const Text('عرض الإثبات'),
+                ),
+              if (widget.onNavigate != null)
+                IconButton(
+                  tooltip: 'فتح العنوان',
+                  onPressed: widget.onNavigate,
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                ),
+            ],
           ),
-          if (widget.onNavigate != null)
-            TextButton.icon(
-              onPressed: widget.onNavigate,
-              icon: const Icon(Icons.map_outlined, size: 16),
-              label: const Text('العنوان'),
-            ),
         ],
       );
     }
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final narrow = constraints.maxWidth < 430;
+        final narrow = constraints.maxWidth < 560;
+        final needsStart = widget.order.status != OrderStatus.outForDelivery &&
+            widget.onStartDelivery != null;
         final navigateButton = OutlinedButton.icon(
           style: OutlinedButton.styleFrom(
             foregroundColor: colors.gold,
@@ -634,6 +753,23 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
           icon: const Icon(Icons.navigation_rounded, size: 17),
           label: const Text('الملاحة'),
         );
+        final startButton = needsStart
+            ? OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.success,
+                  side: BorderSide(
+                    color: colors.success.withValues(alpha: 0.45),
+                  ),
+                  minimumSize: const Size(0, 46),
+                  padding: const EdgeInsetsDirectional.symmetric(
+                    horizontal: AppSpacing.sm,
+                  ),
+                ),
+                onPressed: widget.onStartDelivery,
+                icon: const Icon(Icons.play_arrow_rounded, size: 18),
+                label: const Text('بدء التوصيل'),
+              )
+            : null;
         final callButton = phone != null && widget.onCall != null
             ? _SmallActionButton(
                 icon: Icons.call_rounded,
@@ -651,11 +787,26 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
             label: 'تأكيد التسليم',
           ),
         );
+        final failureButton = widget.onReportFailure == null
+            ? null
+            : TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: colors.cancelled,
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: widget.onReportFailure,
+                icon: const Icon(Icons.report_gmailerrorred_rounded, size: 16),
+                label: const Text('تعذر التسليم'),
+              );
 
         if (narrow) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (startButton != null) ...[
+                startButton,
+                const SizedBox(height: AppSpacing.sm),
+              ],
               deliverButton,
               const SizedBox(height: AppSpacing.sm),
               Row(
@@ -667,19 +818,38 @@ class _DeliveryOrderCardState extends State<DeliveryOrderCard> {
                   ],
                 ],
               ),
+              if (failureButton != null)
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: failureButton,
+                ),
             ],
           );
         }
 
-        return Row(
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(child: navigateButton),
-            if (callButton != null) ...[
-              const SizedBox(width: AppSpacing.sm),
-              callButton,
-            ],
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(flex: 2, child: deliverButton),
+            Row(
+              children: [
+                if (startButton != null) ...[
+                  Expanded(child: startButton),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
+                Expanded(child: navigateButton),
+                if (callButton != null) ...[
+                  const SizedBox(width: AppSpacing.sm),
+                  callButton,
+                ],
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(flex: 2, child: deliverButton),
+              ],
+            ),
+            if (failureButton != null)
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: failureButton,
+              ),
           ],
         );
       },

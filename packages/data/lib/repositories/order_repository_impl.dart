@@ -17,6 +17,21 @@ class OrderRepositoryImpl implements IOrderRepository {
     required this.db,
   });
 
+  /// Shared order projection. `*` keeps the query forward/backward compatible
+  /// with optional proof columns, while relations are selected explicitly.
+  static const String _orderSelect = '''
+    *,
+    order_items (
+      id,
+      product_id,
+      quantity,
+      unit_price,
+      unit_cost,
+      products ( name_ar, name_fr, unit )
+    ),
+    users!orders_driver_id_fkey ( name, phone )
+  ''';
+
   @override
   Future<List<OrderEntity>> getOrders({
     OrderStatus? status,
@@ -28,33 +43,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     DateTime? createdTo,
     int? limit,
   }) async {
-    var query = client.from('orders').select('''
-      id,
-      order_number,
-      channel,
-      customer_id,
-      status,
-      driver_id,
-      cashier_id,
-      delivery_address,
-      total_amount,
-      paid_amount,
-      notes,
-      created_at,
-      confirmed_at,
-      delivered_at,
-      settled_at,
-      client_id,
-      order_items (
-        id,
-        product_id,
-        quantity,
-        unit_price,
-        unit_cost,
-        products ( name_ar, name_fr, unit )
-      ),
-      users!orders_driver_id_fkey ( name, phone )
-    ''');
+    var query = client.from('orders').select(_orderSelect);
 
     if (statuses != null && statuses.isNotEmpty) {
       query = query.inFilter(
@@ -93,80 +82,14 @@ class OrderRepositoryImpl implements IOrderRepository {
 
     final rows = await orderedQuery;
 
-    return (rows as List).map<OrderEntity>((row) {
-      final itemsList = (row['order_items'] as List? ?? []).map((i) {
-        final productMap = i['products'] as Map<String, dynamic>?;
-        final name = productMap != null ? (productMap['name_ar'] ?? productMap['name_fr'] ?? '') : '';
-        return OrderItemEntity(
-          id: i['id'] as String,
-          productId: i['product_id'] as String,
-          productName: name,
-          quantity: (i['quantity'] as num).toInt(),
-          unitPriceCentimes: (i['unit_price'] as num).toInt(),
-          unitCostCentimes: (i['unit_cost'] as num?)?.toInt() ?? 0,
-          unit: productMap?['unit'] as String?,
-        );
-      }).toList();
-
-      final driverMap = row['users'] as Map<String, dynamic>?;
-      final deliveryAddr = row['delivery_address'] as Map<String, dynamic>?;
-
-      return OrderEntity(
-        id: row['id'] as String,
-        clientId: row['client_id'] as String?,
-        orderNumber: (row['order_number'] as num?)?.toInt(),
-        channel: row['channel'] == 'online' ? OrderChannel.online : OrderChannel.store,
-        customerId: row['customer_id'] as String?,
-        customerName: deliveryAddr?['customer_name'] ?? deliveryAddr?['store_name'],
-        customerPhone: deliveryAddr?['customer_phone'] ?? deliveryAddr?['phone'],
-        status: OrderStatus.fromString(row['status'] as String),
-        driverId: row['driver_id'] as String?,
-        driverName: driverMap?['name'] as String?,
-        driverPhone: driverMap?['phone'] as String?,
-        totalAmountCentimes: (row['total_amount'] as num).toInt(),
-        paidAmountCentimes: (row['paid_amount'] as num).toInt(),
-        deliveryAddress: deliveryAddr,
-        items: itemsList,
-        createdAt: DateTime.parse(row['created_at'] as String),
-        confirmedAt: _parseOptionalDate(row['confirmed_at']),
-        deliveredAt: _parseOptionalDate(row['delivered_at']),
-        settledAt: _parseOptionalDate(row['settled_at']),
-        notes: row['notes'] as String?,
-      );
-    }).toList();
+    return (rows as List).map(_mapOrderRow).toList();
   }
 
   @override
   Future<OrderEntity> getOrderById(String orderId) async {
     final rows = await client
         .from('orders')
-        .select('''
-          id,
-          order_number,
-          channel,
-          customer_id,
-          status,
-          driver_id,
-          cashier_id,
-          delivery_address,
-          total_amount,
-          paid_amount,
-          notes,
-          created_at,
-          confirmed_at,
-          delivered_at,
-          settled_at,
-          client_id,
-          order_items (
-            id,
-            product_id,
-            quantity,
-            unit_price,
-            unit_cost,
-            products ( name_ar, name_fr, unit )
-          ),
-          users!orders_driver_id_fkey ( name, phone )
-        ''')
+        .select(_orderSelect)
         .eq('id', orderId)
         .limit(1);
 
@@ -174,46 +97,7 @@ class OrderRepositoryImpl implements IOrderRepository {
       throw Exception('Order not found: $orderId');
     }
 
-    final row = rows.first;
-    final itemsList = (row['order_items'] as List? ?? []).map((i) {
-      final productMap = i['products'] as Map<String, dynamic>?;
-      final name = productMap != null ? (productMap['name_ar'] ?? productMap['name_fr'] ?? '') : '';
-      return OrderItemEntity(
-        id: i['id'] as String,
-        productId: i['product_id'] as String,
-        productName: name,
-        quantity: (i['quantity'] as num).toInt(),
-        unitPriceCentimes: (i['unit_price'] as num).toInt(),
-        unitCostCentimes: (i['unit_cost'] as num?)?.toInt() ?? 0,
-        unit: productMap?['unit'] as String?,
-      );
-    }).toList();
-
-    final driverMap = row['users'] as Map<String, dynamic>?;
-    final deliveryAddr = row['delivery_address'] as Map<String, dynamic>?;
-
-    return OrderEntity(
-      id: row['id'] as String,
-      clientId: row['client_id'] as String?,
-      orderNumber: (row['order_number'] as num?)?.toInt(),
-      channel: row['channel'] == 'online' ? OrderChannel.online : OrderChannel.store,
-      customerId: row['customer_id'] as String?,
-      customerName: deliveryAddr?['customer_name'] ?? deliveryAddr?['store_name'],
-      customerPhone: deliveryAddr?['customer_phone'] ?? deliveryAddr?['phone'],
-      status: OrderStatus.fromString(row['status'] as String),
-      driverId: row['driver_id'] as String?,
-      driverName: driverMap?['name'] as String?,
-      driverPhone: driverMap?['phone'] as String?,
-      totalAmountCentimes: (row['total_amount'] as num).toInt(),
-      paidAmountCentimes: (row['paid_amount'] as num).toInt(),
-      deliveryAddress: deliveryAddr,
-      items: itemsList,
-      createdAt: DateTime.parse(row['created_at'] as String),
-      confirmedAt: _parseOptionalDate(row['confirmed_at']),
-      deliveredAt: _parseOptionalDate(row['delivered_at']),
-      settledAt: _parseOptionalDate(row['settled_at']),
-      notes: row['notes'] as String?,
-    );
+    return _mapOrderRow(rows.first);
   }
 
   /// The server derives the real actor from the JWT. This helper only rejects
@@ -392,6 +276,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     String? photoBase64,
     double? deliveryLat,
     double? deliveryLng,
+    String? deliveryRecipientName,
     String? notes,
     required String clientId,
   }) async {
@@ -399,19 +284,25 @@ class OrderRepositoryImpl implements IOrderRepository {
 
     if (ConnectivityService.instance.isOnline) {
       try {
-        await service.recordOrderDelivery(
+        await service.recordOrderDeliveryWithProof(
           driverId: effectiveDriverId,
           orderId: orderId,
           collectedCashCentimes: collectedCashCentimes,
           clientId: clientId,
+          signatureBase64: signatureBase64,
+          photoBase64: photoBase64,
+          deliveryLat: deliveryLat,
+          deliveryLng: deliveryLng,
+          recipientName: deliveryRecipientName,
+          notes: notes,
         );
         return;
       } catch (_) {
-        // Fall through to queue
+        // Fall through to the offline queue. The sync worker replays the same
+        // v2 RPC with the captured proof.
       }
     }
 
-    // Offline: queue (proof metadata is best-effort)
     await db.enqueuePendingOp(PendingOperationsCompanion.insert(
       clientId: clientId,
       operationType: 'delivery',
@@ -420,6 +311,55 @@ class OrderRepositoryImpl implements IOrderRepository {
         'order_id': orderId,
         'collected_cash': collectedCashCentimes,
         if (notes != null) 'notes': notes,
+        if (signatureBase64 != null) 'signature_base64': signatureBase64,
+        if (photoBase64 != null) 'photo_base64': photoBase64,
+        if (deliveryLat != null) 'delivery_lat': deliveryLat,
+        if (deliveryLng != null) 'delivery_lng': deliveryLng,
+        if (deliveryRecipientName != null)
+          'delivery_recipient_name': deliveryRecipientName,
+      }),
+      createdAt: DateTime.now(),
+    ));
+  }
+
+  @override
+  Future<void> reportDeliveryFailure({
+    required String driverId,
+    required String orderId,
+    required String reason,
+    String? notes,
+    double? deliveryLat,
+    double? deliveryLng,
+    required String clientId,
+  }) async {
+    _requireUserId(driverId);
+
+    if (ConnectivityService.instance.isOnline) {
+      try {
+        await service.recordDeliveryFailure(
+          orderId: orderId,
+          reason: reason,
+          clientId: clientId,
+          notes: notes,
+          deliveryLat: deliveryLat,
+          deliveryLng: deliveryLng,
+        );
+        return;
+      } catch (_) {
+        // Fall through to the offline queue.
+      }
+    }
+
+    await db.enqueuePendingOp(PendingOperationsCompanion.insert(
+      clientId: clientId,
+      operationType: 'delivery_failure',
+      payloadJson: jsonEncode({
+        'driver_id': driverId,
+        'order_id': orderId,
+        'reason': reason,
+        if (notes != null) 'notes': notes,
+        if (deliveryLat != null) 'delivery_lat': deliveryLat,
+        if (deliveryLng != null) 'delivery_lng': deliveryLng,
       }),
       createdAt: DateTime.now(),
     ));
@@ -434,16 +374,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     String? customerId,
     int limit = 200,
   }) async {
-    var query = client
-        .from('orders')
-        .select('''
-          id, order_number, channel, customer_id, status, driver_id,
-          cashier_id, delivery_address, total_amount, paid_amount, notes,
-          created_at, confirmed_at, delivered_at, settled_at, client_id,
-          order_items ( id, product_id, quantity, unit_price, unit_cost,
-            products ( name_ar, name_fr, unit ) ),
-          users!orders_driver_id_fkey ( name, phone )
-        ''');
+    var query = client.from('orders').select(_orderSelect);
 
     // Apply filters BEFORE ordering/limiting (required by PostgrestFilterBuilder)
     if (customerId != null) {
@@ -473,16 +404,7 @@ class OrderRepositoryImpl implements IOrderRepository {
     DateTime? createdFrom,
     DateTime? createdTo,
   }) async {
-    var query = client
-        .from('orders')
-        .select('''
-          id, order_number, channel, customer_id, status, driver_id,
-          cashier_id, delivery_address, total_amount, paid_amount, notes,
-          created_at, confirmed_at, delivered_at, settled_at, client_id,
-          order_items ( id, product_id, quantity, unit_price, unit_cost,
-            products ( name_ar, name_fr, unit ) ),
-          users!orders_driver_id_fkey ( name, phone )
-        ''');
+    var query = client.from('orders').select(_orderSelect);
 
     if (statuses != null && statuses.isNotEmpty) {
       query = query.inFilter(
@@ -516,59 +438,91 @@ class OrderRepositoryImpl implements IOrderRepository {
 
     final from = (page - 1) * pageSize;
     final to = from + pageSize - 1;
-    final rows = await query.order('created_at', ascending: false).range(from, to);
+    final rows =
+        await query.order('created_at', ascending: false).range(from, to);
 
     return _buildOrderEntities(rows as List);
   }
 
   List<OrderEntity> _buildOrderEntities(List rows) {
-    return rows.map((row) {
-      final itemsList = (row['order_items'] as List? ?? []).map((i) {
-        final productMap = i['products'] as Map<String, dynamic>?;
-        final name = productMap != null
-            ? (productMap['name_ar'] ?? productMap['name_fr'] ?? '')
-            : '';
-        return OrderItemEntity(
-          id: i['id'] as String,
-          productId: i['product_id'] as String,
-          productName: name,
-          quantity: (i['quantity'] as num).toInt(),
-          unitPriceCentimes: (i['unit_price'] as num).toInt(),
-          unitCostCentimes: (i['unit_cost'] as num?)?.toInt() ?? 0,
-          unit: productMap?['unit'] as String?,
-        );
-      }).toList();
+    return rows.map(_mapOrderRow).toList();
+  }
 
-      final driverMap = row['users'] as Map<String, dynamic>?;
-      final deliveryAddr = row['delivery_address'] as Map<String, dynamic>?;
-
-      return OrderEntity(
-        id: row['id'] as String,
-        clientId: row['client_id'] as String?,
-        orderNumber: (row['order_number'] as num?)?.toInt(),
-        channel: row['channel'] == 'online'
-            ? OrderChannel.online
-            : OrderChannel.store,
-        customerId: row['customer_id'] as String?,
-        customerName: deliveryAddr?['customer_name']
-            ?? deliveryAddr?['store_name'],
-        customerPhone: deliveryAddr?['customer_phone']
-            ?? deliveryAddr?['phone'],
-        status: OrderStatus.fromString(row['status'] as String),
-        driverId: row['driver_id'] as String?,
-        driverName: driverMap?['name'] as String?,
-        driverPhone: driverMap?['phone'] as String?,
-        totalAmountCentimes: (row['total_amount'] as num).toInt(),
-        paidAmountCentimes: (row['paid_amount'] as num).toInt(),
-        deliveryAddress: deliveryAddr,
-        items: itemsList,
-        createdAt: DateTime.parse(row['created_at'] as String),
-        confirmedAt: _parseOptionalDate(row['confirmed_at']),
-        deliveredAt: _parseOptionalDate(row['delivered_at']),
-        settledAt: _parseOptionalDate(row['settled_at']),
-        notes: row['notes'] as String?,
+  OrderEntity _mapOrderRow(dynamic rawRow) {
+    final row = Map<String, dynamic>.from(rawRow as Map);
+    final itemsList = (row['order_items'] as List? ?? []).map((rawItem) {
+      final i = Map<String, dynamic>.from(rawItem as Map);
+      final rawProduct = i['products'];
+      final productMap =
+          rawProduct is Map ? Map<String, dynamic>.from(rawProduct) : null;
+      final name = productMap != null
+          ? (productMap['name_ar'] ?? productMap['name_fr'] ?? '')
+          : '';
+      return OrderItemEntity(
+        id: i['id'] as String,
+        productId: i['product_id'] as String,
+        productName: name?.toString() ?? '',
+        quantity: (i['quantity'] as num).toInt(),
+        unitPriceCentimes: (i['unit_price'] as num).toInt(),
+        unitCostCentimes: (i['unit_cost'] as num?)?.toInt() ?? 0,
+        unit: productMap?['unit'] as String?,
       );
     }).toList();
+
+    final rawDriver = row['users'];
+    final driverMap =
+        rawDriver is Map ? Map<String, dynamic>.from(rawDriver) : null;
+    final rawAddress = row['delivery_address'];
+    final deliveryAddr =
+        rawAddress is Map ? Map<String, dynamic>.from(rawAddress) : null;
+
+    return OrderEntity(
+      id: row['id'] as String,
+      clientId: _stringOrNull(row['client_id']),
+      orderNumber: (row['order_number'] as num?)?.toInt(),
+      channel:
+          row['channel'] == 'online' ? OrderChannel.online : OrderChannel.store,
+      customerId: _stringOrNull(row['customer_id']),
+      customerName: _stringOrNull(
+        deliveryAddr?['customer_name'] ?? deliveryAddr?['store_name'],
+      ),
+      customerPhone: _stringOrNull(
+        deliveryAddr?['customer_phone'] ?? deliveryAddr?['phone'],
+      ),
+      status: OrderStatus.fromString(row['status'] as String),
+      driverId: _stringOrNull(row['driver_id']),
+      driverName: _stringOrNull(driverMap?['name']),
+      driverPhone: _stringOrNull(driverMap?['phone']),
+      totalAmountCentimes: (row['total_amount'] as num).toInt(),
+      paidAmountCentimes: (row['paid_amount'] as num).toInt(),
+      deliveryAddress: deliveryAddr,
+      items: itemsList,
+      createdAt: DateTime.parse(row['created_at'] as String),
+      signatureBase64: _stringOrNull(row['delivery_signature']),
+      photoBase64: _stringOrNull(row['delivery_photo']),
+      deliveryLat: _asDouble(row['delivery_lat']),
+      deliveryLng: _asDouble(row['delivery_lng']),
+      deliveryRecipientName: _stringOrNull(row['delivery_recipient_name']),
+      deliveryNotes: _stringOrNull(row['delivery_notes']),
+      deliveryFailureReason: _stringOrNull(row['delivery_failure_reason']),
+      deliveryAttemptedAt: _parseOptionalDate(row['delivery_attempted_at']),
+      confirmedAt: _parseOptionalDate(row['confirmed_at']),
+      deliveredAt: _parseOptionalDate(row['delivered_at']),
+      settledAt: _parseOptionalDate(row['settled_at']),
+      notes: _stringOrNull(row['notes']),
+    );
+  }
+
+  static String? _stringOrNull(dynamic value) {
+    if (value is! String) return null;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : value;
+  }
+
+  static double? _asDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
   }
 
   static DateTime? _parseOptionalDate(dynamic value) {

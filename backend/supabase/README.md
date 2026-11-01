@@ -17,7 +17,8 @@ backend/supabase/
 │   ├── 006_auth_management.sql   # Auth lifecycle, recovery codes, staff management
 │   ├── 007_storage_policy_hardening.sql  # product-images writes restricted to staff
 │   ├── 008_fix_audit_log_actor.sql       # Auth identity -> public.users audit mapping
-│   └── 009_staff_pin_auth.sql            # PIN-only staff session bridge
+│   ├── 009_staff_pin_auth.sql            # PIN-only staff session bridge
+│   └── 010_driver_delivery_ops.sql       # Proof-of-delivery + failed attempts
 ├── functions/
 │   ├── auth-admin/index.ts       # Service-role Auth lifecycle Edge Function
 │   └── README.md                 # Deployment and secret notes
@@ -66,7 +67,11 @@ Use a brand-new Supabase project. In the Supabase Dashboard, open **SQL Editor**
 9. **`schema/009_staff_pin_auth.sql`**
    - Grants the internal PIN verification RPC to `service_role` only, enabling PIN-only staff sign-in through `auth-admin`.
    - Must be applied before deploying the updated `auth-admin` function.
-10. **`seeds/001_admin.sql`**
+10. **`schema/010_driver_delivery_ops.sql`**
+    - Adds proof-of-delivery metadata (signature, photo, GPS, recipient, notes) and failed-attempt tracking on `orders`.
+    - Adds `rpc_record_order_delivery_v2` (cash + proof in one transaction) and `rpc_record_delivery_failure` (routes an unsuccessful attempt to manager review without touching cash).
+    - Deploy this migration before releasing a staff app that calls the new driver RPCs.
+11. **`seeds/001_admin.sql`**
     - Creates the single master moderator row.
     - No demo staff, customers, suppliers, products, prices, or stock are created.
     - `app_versions` starts empty; releases are added by `scripts/publish_release.ps1` after the artifact is uploaded.
@@ -87,7 +92,7 @@ itself; see [`functions/README.md`](functions/README.md).
 
 Optional:
 
-11. **`operations/verify_installation.sql`**
+12. **`operations/verify_installation.sql`**
    - Read-only checks for tables, RPCs, RLS coverage, the admin account, RBAC reference data, and storage buckets.
 
 ### Default moderator
@@ -164,7 +169,7 @@ After running the reset, run **`schema/001_fresh_schema.sql`**,
 **`schema/004_migration_00036.sql`**, **`schema/005_phase0_security.sql`**,
 **`schema/006_auth_management.sql`**, **`schema/007_storage_policy_hardening.sql`**,
 **`schema/008_fix_audit_log_actor.sql`**, **`schema/009_staff_pin_auth.sql`**,
-and **`seeds/001_admin.sql`** again.
+**`schema/010_driver_delivery_ops.sql`**, and **`seeds/001_admin.sql`** again.
 Existing Auth users are left untouched; if you want a completely clean identity
 store, delete the old Auth users manually before re-seeding.
 
@@ -312,6 +317,7 @@ All state changes go through atomic, idempotent `SECURITY DEFINER` RPC functions
 
 - `rpc_post_store_sale`, `rpc_submit_customer_order`
 - `rpc_confirm_online_order`, `rpc_record_order_delivery`
+- `rpc_record_order_delivery_v2`, `rpc_record_delivery_failure`
 - `rpc_settle_driver_wallet`, `rpc_collect_customer_debt`
 - `rpc_post_purchase`, `rpc_adjust_stock`, `rpc_create_product`
 - `rpc_open_pos_shift`, `rpc_close_pos_shift`
@@ -337,8 +343,9 @@ The baseline creates a `schema_migrations` table and records every bundled migra
 
 `002`/`003` insert `00035`/`00035b`; `006_auth_management.sql` records `00036`
 and `00037`; `007_storage_policy_hardening.sql` records `00038`;
-`008_fix_audit_log_actor.sql` records `00039`; and `009_staff_pin_auth.sql`
-records `00040`. The `005` hardening script does not insert its own row. The
+`008_fix_audit_log_actor.sql` records `00039`; `009_staff_pin_auth.sql`
+records `00040`; and `010_driver_delivery_ops.sql` records `00041`. The `005`
+hardening script does not insert its own row. The
 table is read-only to clients. Future migrations should insert a row for their
 version after they run.
 

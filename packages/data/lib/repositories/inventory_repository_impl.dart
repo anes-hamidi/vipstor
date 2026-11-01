@@ -476,7 +476,7 @@ class InventoryRepositoryImpl implements IInventoryRepository {
               ? p.suggestedReplenishmentQty
               : (p.packSize * 5);
           final override = quantityOverrides?[p.id];
-          final replenishmentQty = override != null ? override : suggested;
+          final replenishmentQty = override ?? suggested;
 
           return PurchaseOrderItemEntity(
             id: _uuid.v4(),

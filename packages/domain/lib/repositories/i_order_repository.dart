@@ -26,8 +26,10 @@ abstract class IOrderRepository {
     String? clientId,
     String? deviceToken,
   });
-  Future<void> confirmOrder({required String orderId, required String cashierId, String? driverId});
-  Future<void> updateOrderStatus({required String orderId, required OrderStatus status, String? notes});
+  Future<void> confirmOrder(
+      {required String orderId, required String cashierId, String? driverId});
+  Future<void> updateOrderStatus(
+      {required String orderId, required OrderStatus status, String? notes});
   Future<void> assignOrderToDriver({
     required String orderId,
     required String driverId,
@@ -53,7 +55,17 @@ abstract class IOrderRepository {
     String? photoBase64,
     double? deliveryLat,
     double? deliveryLng,
+    String? deliveryRecipientName,
     String? notes,
+    required String clientId,
+  });
+  Future<void> reportDeliveryFailure({
+    required String driverId,
+    required String orderId,
+    required String reason,
+    String? notes,
+    double? deliveryLat,
+    double? deliveryLng,
     required String clientId,
   });
 
